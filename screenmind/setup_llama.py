@@ -269,10 +269,57 @@ def _format_size(size_bytes: int) -> str:
 
 # ── Download & Install ───────────────────────────────────────────────────────
 
+def _has_binary_assets(assets: list) -> bool:
+    """Check if an asset list contains actual binary downloads (not just nightly-tag.txt)."""
+    return any(
+        a["name"].startswith("llama-") and (a["name"].endswith(".zip") or a["name"].endswith(".tar.gz"))
+        for a in assets
+    )
+
+
 def _fetch_latest_release() -> dict:
-    """Fetch latest release info from GitHub API."""
-    req = Request(GITHUB_API_LATEST, headers={"Accept": "application/vnd.github.v3+json"})
+    """Fetch latest release info from GitHub API.
+
+    Handles the nightly-tag.txt indirection introduced in llama.cpp v0.5.0:
+    stable releases now contain only a nightly-tag.txt file pointing to the
+    nightly build tag (e.g. "b11146") where the actual binaries are published.
+
+    If the latest release already has binary assets (old-style), returns it
+    directly for backward compatibility.
+    """
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    req = Request(GITHUB_API_LATEST, headers=headers)
     with urlopen(req, timeout=15) as resp:
+        release = json.loads(resp.read().decode())
+
+    assets = release.get("assets", [])
+
+    # Old-style release with binaries directly attached — return as-is
+    if _has_binary_assets(assets):
+        return release
+
+    # New-style: look for nightly-tag.txt pointer
+    nightly_tag_asset = next((a for a in assets if a["name"] == "nightly-tag.txt"), None)
+    if not nightly_tag_asset:
+        # No binaries and no pointer — return as-is (caller will handle no-match)
+        return release
+
+    # Download the nightly-tag.txt to get the build tag name
+    tag_url = nightly_tag_asset["browser_download_url"]
+    tag_req = Request(tag_url, headers={"Accept": "application/octet-stream"})
+    with urlopen(tag_req, timeout=15) as resp:
+        nightly_tag = resp.read().decode().strip()
+
+    if not nightly_tag:
+        raise RuntimeError(
+            "nightly-tag.txt is empty — cannot determine nightly build tag. "
+            "Manual download: https://github.com/ggml-org/llama.cpp/releases"
+        )
+
+    # Fetch the actual nightly release with binary assets
+    nightly_url = f"https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/{nightly_tag}"
+    nightly_req = Request(nightly_url, headers=headers)
+    with urlopen(nightly_req, timeout=15) as resp:
         return json.loads(resp.read().decode())
 
 
