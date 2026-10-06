@@ -51,6 +51,9 @@ async def get_settings():
         "pause_hotkey": settings.pause_hotkey,
         "voice_hotkey": settings.voice_hotkey,
         "capture_active_monitor": settings.capture_active_monitor,
+        "ui_events_enabled": settings.ui_events_enabled,
+        "ui_events_types": settings.ui_events_types,
+        "event_triggered_capture": settings.event_triggered_capture,
     }
 
 
@@ -62,6 +65,10 @@ async def update_settings(request: Request):
     if "webhook_extra" in body and isinstance(body["webhook_extra"], list):
         body["webhook_extra"] = json.dumps(body["webhook_extra"])
     settings.save_runtime_overrides(body)
+    if "ui_events_enabled" in body:
+        from screenmind.api import dependencies
+        if dependencies.ui_recorder is not None:
+            dependencies.ui_recorder.sync_with_settings()
     return {
         "status": "saved",
         "capture_interval": settings.capture_interval,
@@ -101,6 +108,9 @@ async def update_settings(request: Request):
         "pause_hotkey": settings.pause_hotkey,
         "voice_hotkey": settings.voice_hotkey,
         "capture_active_monitor": settings.capture_active_monitor,
+        "ui_events_enabled": settings.ui_events_enabled,
+        "ui_events_types": settings.ui_events_types,
+        "event_triggered_capture": settings.event_triggered_capture,
     }
 
 

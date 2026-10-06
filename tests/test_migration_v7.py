@@ -304,7 +304,7 @@ class TestV7MigrationBackfill:
         db2.close()
 
     def test_schema_version_bumped_to_7(self, tmp_path):
-        """After migration, schema_version should be 7."""
+        """After migration, schema_version should be at least 7 (later migrations may follow)."""
         db_path = tmp_path / "legacy.db"
         conn = _create_v6_database(db_path)
         conn.close()
@@ -314,7 +314,7 @@ class TestV7MigrationBackfill:
         version = conn.execute(
             "SELECT MAX(version) FROM schema_version"
         ).fetchone()[0]
-        assert version == 7
+        assert version >= 7
         db.close()
 
     def test_status_index_created(self, tmp_path):

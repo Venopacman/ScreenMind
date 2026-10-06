@@ -61,6 +61,7 @@
 - **🧠 Model Hub** — In-app model download with **variant selection** (Q4_0, Q8_0, BF16, etc.). Supports Gemma 4 E2B, E4B, and 12B. Chat and Summary are locked with witty brain animations until the model is ready — then auto-unlock. No terminal needed.
 - **🎙️ Voice Memos** — Hold `Ctrl+Shift+V` → Gemma 4's native audio encoder transcribes. Screenshot captured alongside. Audio always saved, even if transcription fails.
 - **🎤 Meeting Transcription** — Auto-detects Zoom/Teams/Meet, records audio, transcribes, generates structured summaries.
+- **🖱️ UI Events (macOS + Windows, beta, opt-in)** — Records clicks, typed text, app switches and clipboard through OS accessibility APIs. Each screenshot gets an exact "what you did" list for Gemma, and the capture fires right after you switch apps, click or pause typing. Password fields are never recorded. Off by default; turn on in Settings → Privacy & Security.
 - **📊 Analytics Dashboard** — Category breakdown, top apps, hourly heatmap, meeting stats, focus metrics.
 - **⏪ Day Rewind** — Timelapse playback of your entire day with play/pause/scrub/speed controls.
 - **🚀 Desktop Launcher** — Splash screen with auto-open dashboard. Desktop shortcut auto-created on first run.
@@ -492,6 +493,8 @@ Full Swagger docs at `http://127.0.0.1:7777/docs`
 | `POST` | `/api/models/variant` | Set preferred quantization variant |
 | `DELETE`| `/api/models/delete` | Delete a downloaded model variant |
 | `POST` | `/api/capture/pause` | Pause capture |
+| `GET` | `/api/ui-events?start=&end=&type=` | Recorded UI events in a time range |
+| `GET` | `/api/ui-events/status` | UI event recorder state, backend, macOS permissions |
 | `POST` | `/api/incognito/toggle` | Toggle incognito mode |
 | `POST` | `/api/shutdown` | Graceful shutdown (localhost only) |
 
@@ -515,6 +518,9 @@ All settings configurable via `.env`, environment variables, or the **Settings**
 | `ENCRYPTION_ENABLED` | `false` | Encrypt screenshots at rest |
 | `SENSITIVE_FILTER_ENABLED` | `true` | Redact credit cards, SSNs, API keys |
 | `CAPTURE_PAUSED` | `true` | Persisted capture state across restarts |
+| `UI_EVENTS_ENABLED` | `false` | Record clicks, typed text, app switches, clipboard (macOS, Windows) |
+| `UI_EVENTS_TYPES` | `click,app_switch,text,clipboard` | Which UI event types to record (`window_focus` also available) |
+| `EVENT_TRIGGERED_CAPTURE` | `true` | Capture right after app switches, clicks and typing pauses |
 | `SCREENMIND_LOG_LEVEL` | `INFO` | Log verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `SCREENMIND_LOG_FILE` | *(none)* | Path to a log file (rotating, 10MB × 3 backups) |
 
@@ -601,6 +607,7 @@ screenmind/
 │   ├── window.py              # Active window detection
 │   ├── dedup.py               # Perceptual hash deduplication
 │   ├── hotkey.py              # Global hotkeys (bookmark, pause, voice)
+│   ├── ui_events/             # Clicks, typing, app switches via accessibility APIs
 │   └── voice_recorder.py      # Mic recording for voice memos
 │
 │   ├── engine/                    # AI & intelligence layer

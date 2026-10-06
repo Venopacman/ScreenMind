@@ -38,6 +38,7 @@ async def get_activity(activity_id: int):
         raise HTTPException(status_code=404, detail="Activity not found")
     if activity.get("screenshot_path"):
         activity["screenshot_url"] = f"/api/screenshot/{activity['id']}"
+    activity["ui_events"] = db.get_ui_events(activity_id)
     return activity
 
 

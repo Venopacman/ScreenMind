@@ -111,3 +111,14 @@ def test_screen_capture_window_center_uses_adapter(monkeypatch):
 
     fake.get_active_window_bounds = lambda: None
     assert cap._window_center_macos() is None
+
+
+def test_get_front_window_public_shape():
+    from unittest.mock import patch
+    from screenmind.platform_support.macos import MacOSAdapter
+    a = MacOSAdapter.__new__(MacOSAdapter)
+    front = {"owner": "Slack", "pid": 42, "title": "general", "bounds": (0, 0, 800, 600)}
+    with patch.object(MacOSAdapter, "_front_window", return_value=front):
+        assert a.get_front_window() == {"pid": 42, "app_name": "Slack", "title": "general"}
+    with patch.object(MacOSAdapter, "_front_window", return_value=None):
+        assert a.get_front_window() is None

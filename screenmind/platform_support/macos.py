@@ -99,6 +99,13 @@ class MacOSAdapter(PlatformAdapter):
         front = self._front_window()
         return front["bounds"] if front else None
 
+    def get_front_window(self) -> Optional[dict]:
+        """Frontmost window as {"pid", "app_name", "title"}."""
+        front = self._front_window()
+        if not front:
+            return None
+        return {"pid": front["pid"], "app_name": front["owner"], "title": front["title"]}
+
     # ── Accessibility ────────────────────────────────────────────────
 
     def is_a11y_available(self) -> bool:
