@@ -376,15 +376,19 @@ class WindowsAdapter(PlatformAdapter):
             hwnd = user32.GetForegroundWindow()
             if not hwnd:
                 return None
-            title = _window_text(hwnd)
-            app = process_name(_window_pid(hwnd)) or ""
-            if not title or title.strip().lower() == app.lower():
-                page = self._document_title(hwnd, title)
-                if page:
-                    return page
-            return title or None
+            return self._best_title(hwnd, _window_text(hwnd), process_name(_window_pid(hwnd)) or "") or None
         except Exception:
             return None
+
+    def _best_title(self, hwnd, title: str, app: str) -> str:
+        """The window title, or the page title of that window's Document when
+        the title is only the app name (Electron apps). Same rule as macOS,
+        used for the focused window and for per-display labels."""
+        if not title or title.strip().lower() == app.lower():
+            page = self._document_title(hwnd, title)
+            if page:
+                return page
+        return title
 
     def _document_title(self, hwnd, title: str) -> Optional[str]:
         """Name of the window's top on-screen Document, if it says more than the title."""
@@ -469,7 +473,7 @@ class WindowsAdapter(PlatformAdapter):
         app = process_name(_window_pid(hwnd))
         if not app:
             return None
-        return app, title or app
+        return app, self._best_title(hwnd, title, app) or app
 
     def get_browser_url(self) -> Optional[str]:
         """URL of the page in the foreground browser window, read from the page's

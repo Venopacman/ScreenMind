@@ -221,6 +221,12 @@ class TestDocumentTitle:
         monkeypatch.setattr(pw, "_window_documents", lambda hwnd: [doc("https://claude.ai/", name="Claude")])
         assert adapter._document_title(1, "Claude") is None
 
+    def test_best_title_only_replaces_app_name_titles(self, adapter, monkeypatch):
+        monkeypatch.setattr(pw, "_window_documents", lambda hwnd: [doc("https://claude.ai/c/1", name="Session")])
+        assert adapter._best_title(1, "Claude", "claude") == "Session"
+        assert adapter._best_title(1, "", "claude") == "Session"
+        assert adapter._best_title(1, "Inbox - Mail", "outlook") == "Inbox - Mail"
+
     def test_offscreen_and_iframes_ignored(self, adapter, monkeypatch):
         monkeypatch.setattr(pw, "_window_documents", lambda hwnd: [
             doc("https://a/", name="Background tab", onscreen=False),
