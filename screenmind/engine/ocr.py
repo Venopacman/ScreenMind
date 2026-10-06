@@ -12,6 +12,23 @@ from PIL import Image, ImageOps, ImageEnhance
 
 logger = logging.getLogger("screenmind.engine.ocr")
 
+# Longest side of the image fed to the CRAFT text detector (EasyOCR default 2560).
+# Detector memory grows with this; recognition still reads crops from the
+# full-resolution image, so most text survives a smaller value.
+# Measured on 3024x1964 screenshots, CPU: 2560 ~7-8 GB peak, 1280 ~6 GB,
+# 960 ~4 GB (96% of text), 800 ~3.1 GB (90%), 640 ~2.1 GB (71%).
+OCR_CANVAS_SIZE = 800
+
+
+def _use_gpu() -> bool:
+    """Use CUDA when present. Skip Apple MPS: PyTorch's MPS allocator kept
+    ~7.5 GB of unified memory between frames, and CPU is fast enough here."""
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except Exception:
+        return False
+
 
 class OCRExtractor:
     """
@@ -30,7 +47,7 @@ class OCRExtractor:
                 import easyocr
                 self._reader = easyocr.Reader(
                     ["en"],
-                    gpu=True,       # Use GPU if available, falls back to CPU
+                    gpu=_use_gpu(),
                     verbose=False,
                 )
                 logger.info("EasyOCR initialized")
@@ -120,6 +137,7 @@ class OCRExtractor:
             results = self._reader.readtext(
                 img_array, detail=1, paragraph=False,
                 batch_size=4,
+                canvas_size=OCR_CANVAS_SIZE,
             )
 
             texts = []
