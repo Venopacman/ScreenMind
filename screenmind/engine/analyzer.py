@@ -30,6 +30,10 @@ from screenmind.storage.models import ActivityRecord
 
 logger = logging.getLogger("screenmind.engine.analyzer")
 
+# Prefix for the UI-event hint. These lines come from OS accessibility
+# events (clicks, typed text, app switches), so they are exact.
+USER_ACTIONS_HINT = "User actions just before this screenshot (exact, from OS events):"
+
 
 # ── The Prompt ───────────────────────────────────────────────────────────────
 # This is the most critical piece of the entire project.
@@ -331,6 +335,7 @@ class GemmaAnalyzer:
         app_name_hint: Optional[str] = None,
         ocr_text: Optional[str] = None,
         active_urls: Optional[list] = None,
+        user_actions: Optional[str] = None,
     ):
         """
         Analyze a screenshot and detect layout in a single merged call.
@@ -357,6 +362,8 @@ class GemmaAnalyzer:
             words = [w for w in words if len(w) > 2]
             filtered_ocr = ' '.join(sorted(set(words)))
             hints.append(f"Extracted text (accurate):\n{filtered_ocr}")
+        if user_actions:
+            hints.append(f"{USER_ACTIONS_HINT}\n{user_actions}")
         if hints:
             prompt += f"\n\nContext: {chr(10).join(hints)}"
 
@@ -404,6 +411,7 @@ class GemmaAnalyzer:
         app_name_hint: Optional[str] = None,
         ocr_text: Optional[str] = None,
         active_urls: Optional[list] = None,
+        user_actions: Optional[str] = None,
     ):
         """
         Balanced mode: analysis with thinking (no layout), ~40-50s.
@@ -432,6 +440,8 @@ class GemmaAnalyzer:
             words = [w for w in words if len(w) > 2]
             filtered_ocr = ' '.join(sorted(set(words)))
             hints.append(f"Extracted text (accurate):\n{filtered_ocr}")
+        if user_actions:
+            hints.append(f"{USER_ACTIONS_HINT}\n{user_actions}")
         context_str = f"\n\nContext: {chr(10).join(hints)}" if hints else ""
 
         prompt = SPLIT_ANALYSIS_PROMPT + context_str
@@ -471,6 +481,7 @@ class GemmaAnalyzer:
         app_name_hint: Optional[str] = None,
         ocr_text: Optional[str] = None,
         active_urls: Optional[list] = None,
+        user_actions: Optional[str] = None,
     ):
         """
         Fast mode: analysis only (no thinking), ~12s. Layout done via OCR clustering.
@@ -493,6 +504,8 @@ class GemmaAnalyzer:
             words = [w for w in words if len(w) > 2]
             filtered_ocr = ' '.join(sorted(set(words)))
             hints.append(f"Extracted text (accurate):\n{filtered_ocr}")
+        if user_actions:
+            hints.append(f"{USER_ACTIONS_HINT}\n{user_actions}")
         context_str = f"\n\nContext: {chr(10).join(hints)}" if hints else ""
 
         image_bytes = self._image_to_bytes(image)

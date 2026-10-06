@@ -481,6 +481,7 @@ class AnalysisWorker:
                                     app_name_hint=capture.app_name,
                                     ocr_text=ocr_text,
                                     active_urls=found_urls,
+                                    user_actions=capture.user_actions,
                                 ),
                             )
                         except InferenceCancelled:
@@ -673,6 +674,8 @@ class AnalysisWorker:
             ]
             if dev_ctx:
                 parts.append(f"[git] {dev_ctx.repo_name}/{dev_ctx.branch}")
+            if capture.user_actions:
+                parts.append(f"[actions: {capture.user_actions.count(chr(10)) + 1}]")
             if capture.bookmarked:
                 parts.append("[*]")
 
@@ -707,7 +710,8 @@ class AnalysisWorker:
         try:
             conn = self._db._get_conn()
             row = conn.execute(
-                """SELECT id, screenshot_path, window_title, COALESCE(detected_app, app_name), ocr_text, ocr_boxes
+                """SELECT id, screenshot_path, window_title, COALESCE(detected_app, app_name), ocr_text, ocr_boxes,
+                          user_actions
                    FROM activities
                    WHERE status IN ('pending', 'skipped', 'failed')
                      AND DATE(timestamp) = DATE('now', 'localtime')
@@ -717,7 +721,7 @@ class AnalysisWorker:
             if not row:
                 return  # No skipped entries — nothing to backfill
 
-            activity_id, ss_path, window_title, app_name, ocr_text, ocr_boxes_raw = row
+            activity_id, ss_path, window_title, app_name, ocr_text, ocr_boxes_raw, user_actions = row
 
             # Check screenshot still exists on disk
             if not ss_path or not Path(ss_path).exists():
@@ -763,6 +767,7 @@ class AnalysisWorker:
                 activity_id=activity_id,
                 a11y_text=None,
                 phash=phash,
+                user_actions=user_actions,
             )
 
             self._is_backfill = True

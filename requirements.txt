@@ -34,6 +34,11 @@ keyring>=25.0
 sentence-transformers==3.3.1
 easyocr==1.7.2
 
+# ── macOS: window detection, accessibility, UI events ──
+pyobjc-framework-Cocoa>=10.0 ; sys_platform == "darwin"
+pyobjc-framework-Quartz>=10.0 ; sys_platform == "darwin"
+pyobjc-framework-ApplicationServices>=10.0 ; sys_platform == "darwin"
+
 # ── Optional: Windows Accessibility ──
 uiautomation==2.0.18 ; sys_platform == "win32"
 

@@ -127,6 +127,10 @@ function timelineCard(a, i) {
   const methodColor = methodColors[method] || '';
   const methodBadge = method && methodColor ? ` <span style="background:${methodColor}18;color:${methodColor};border:1px solid ${methodColor}33;font-size:0.65rem;padding:1px 6px;border-radius:8px;font-weight:500">${method}</span>` : '';
 
+  // UI events recorded before this frame (clicks, typed text, app switches)
+  const actionLines = (a.user_actions || '').split('\n').filter(Boolean).map(l => l.replace(/^- /, ''));
+  const userActions = actionLines.length ? `<details class="user-actions" onclick="event.stopPropagation()"><summary>Actions (${actionLines.length})</summary><ul>${actionLines.map(l => `<li>${_tlEscape(l)}</li>`).join('')}</ul></details>` : '';
+
   return `
     <div class="timeline-item" style="animation-delay:${i * 0.06}s">
       ${thumb}
@@ -139,6 +143,7 @@ function timelineCard(a, i) {
         <div class="summary">${a.summary || 'No analysis'}</div>
         ${a.active_url ? `<div style="margin-top:2px"><a href="${a.active_url}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:0.7rem;color:#60a5fa;text-decoration:none;opacity:0.8;word-break:break-all" title="${a.active_url}">🔗 ${(() => { try { return new URL(a.active_url).hostname } catch(e) { return a.active_url.substring(0, 40) } })()}</a></div>` : ''}
         ${devCtx}
+        ${userActions}
       </div>
       <div class="card-menu-wrap">
         <button class="card-menu-trigger" onclick="event.stopPropagation(); toggleCardMenu(this)" title="Actions">⋮</button>
@@ -156,6 +161,10 @@ function timelineCard(a, i) {
         </div>
       </div>
     </div>`;
+}
+
+function _tlEscape(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ── Three-dot menu toggle ─────────────────────────────────

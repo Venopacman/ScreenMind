@@ -89,6 +89,7 @@ _ALLOWED_OVERRIDES = {
     "capture_active_monitor",
     "setup_complete",
     "capture_paused",
+    "ui_events_enabled", "ui_events_types", "event_triggered_capture",
 }
 
 # Lock to prevent concurrent read-modify-write races on settings.json
@@ -260,6 +261,22 @@ class Settings(BaseSettings):
     auto_bookmark: bool = Field(default=True, description="Auto-bookmark important moments")
     auto_bookmark_keywords: str = Field(default="git push,deploy,npm run build,docker,merge,pull request", description="Keywords that trigger auto-bookmark")
 
+    # ── UI Events (accessibility) ───────────────────────────────────────
+    ui_events_enabled: bool = Field(
+        default=False,
+        description="Record clicks, typed text, app switches and clipboard via OS accessibility APIs. "
+                    "Records typed text, so it is off by default. macOS only for now.",
+    )
+    ui_events_types: str = Field(
+        default="click,app_switch,text,clipboard",
+        description="Comma-separated UI event types to record: click, app_switch, window_focus, text, clipboard",
+    )
+    event_triggered_capture: bool = Field(
+        default=True,
+        description="Take a screenshot right after app switches, clicks and typing pauses "
+                    "(only when ui_events_enabled is on)",
+    )
+
     # ── OCR ───────────────────────────────────────────────────────────────
     ocr_languages: str = Field(
         default="en",
@@ -345,6 +362,11 @@ class Settings(BaseSettings):
         if not self.blocked_apps:
             return []
         return [a.strip().lower() for a in self.blocked_apps.split(",") if a.strip()]
+
+    @property
+    def ui_events_types_list(self) -> List[str]:
+        """Parsed list of enabled UI event types."""
+        return [t.strip().lower() for t in self.ui_events_types.split(",") if t.strip()]
 
     @property
     def heavy_apps_list(self) -> List[str]:
