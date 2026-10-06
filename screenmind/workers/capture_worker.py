@@ -38,6 +38,7 @@ class CaptureResult:
     activity_id: Optional[int] = None
     a11y_text: Optional[str] = None  # Pre-captured at screenshot time (correct window)
     phash: Optional[object] = None  # imagehash.ImageHash for per-app cache comparison
+    browser_url: Optional[str] = None  # Page URL read from the browser itself (not OCR)
 
 
 class CaptureWorker:
@@ -254,6 +255,7 @@ class CaptureWorker:
         a11y_text = None
         if focused and self._a11y.is_available:
             a11y_text, _ = self._a11y.extract_text()
+        browser_url = _get_browser_url() if focused else None
 
         capture_result = CaptureResult(
             filepath=filepath,
@@ -265,6 +267,7 @@ class CaptureWorker:
             activity_id=activity_id,
             a11y_text=a11y_text,
             phash=dedup.last_computed_hash,
+            browser_url=browser_url,
         )
 
         await self._queue.put(capture_result)
@@ -329,6 +332,7 @@ class CaptureWorker:
         a11y_text = None
         if focused and self._a11y.is_available:
             a11y_text, _ = self._a11y.extract_text()
+        browser_url = _get_browser_url() if focused else None
 
         # Compute pHash for bookmark captures (dedup doesn't run for bookmarks)
         import imagehash
@@ -344,6 +348,7 @@ class CaptureWorker:
             activity_id=activity_id,
             a11y_text=a11y_text,
             phash=bookmark_phash,
+            browser_url=browser_url,
         )
 
         await self._queue.put(capture_result)
@@ -395,6 +400,15 @@ class CaptureWorker:
             "captures": self._capture_count,
             "skipped": self._skip_count,
         }
+
+
+def _get_browser_url() -> Optional[str]:
+    """Current page URL from the frontmost browser, read at capture time."""
+    try:
+        from screenmind.platform_support import adapter
+        return adapter().get_browser_url()
+    except Exception:
+        return None
 
 
 def _truncate(text: Optional[str], max_len: int = 60) -> str:

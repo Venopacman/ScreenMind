@@ -12,6 +12,20 @@ from screenmind.platform_support.base import PlatformAdapter
 
 logger = logging.getLogger("screenmind.platform_support.macos")
 
+# Apps whose AX tree has a web area with the page URL (AXURL).
+BROWSER_APPS = {
+    "google chrome", "google chrome canary", "chromium", "safari", "safari technology preview",
+    "arc", "brave browser", "microsoft edge", "vivaldi", "opera", "orion", "firefox", "zen",
+}
+
+# Subtrees that are app chrome, not window content. Chrome can expose the
+# whole menu bar many times over ("File | Edit | View | ...").
+_A11Y_SKIP_ROLES = {"AXMenuBar", "AXMenuBarItem", "AXMenu", "AXMenuItem"}
+# Text areas (Terminal, editors) hold the whole buffer in AXValue. Above this
+# size we read only the visible part.
+_A11Y_VISIBLE_ONLY_CHARS = 4000
+_A11Y_MAX_TOTAL_CHARS = 20000
+
 
 class MacOSAdapter(PlatformAdapter):
     """macOS implementation using AppKit (pyobjc) and AXUIElement."""
@@ -20,6 +34,8 @@ class MacOSAdapter(PlatformAdapter):
         self._appkit_available = False
         self._ax_available = False
         self._init_frameworks()
+
+        self._manual_a11y_pids: set = set()
 
     def _init_frameworks(self):
         """Try to import macOS frameworks."""
@@ -92,11 +108,19 @@ class MacOSAdapter(PlatformAdapter):
         return front["pid"] if front else None
 
     def get_active_window_title(self) -> Optional[str]:
-        """Get the frontmost window's title, falling back to the app name."""
+        """Get the frontmost window's title, falling back to the app name.
+
+        Electron apps (Claude, Slack...) often title every window with just the
+        app name. Then the page title of the window's web area is the real
+        context (e.g. the conversation name), so we use that instead.
+        """
         front = self._front_window()
-        if front:
-            return front["title"] or front["owner"]
-        return None
+        if not front:
+            return None
+        title = front["title"]
+        if not title or title == front["owner"]:
+            title = self._ax_document_title(front["pid"]) or title
+        return title or front["owner"]
 
     def get_active_app_name(self) -> Optional[str]:
         """Get the app that owns the frontmost window."""
@@ -114,6 +138,94 @@ class MacOSAdapter(PlatformAdapter):
         if not win or not win["owner"]:
             return None
         return win["owner"], win["title"] or win["owner"]
+
+    def get_browser_url(self) -> Optional[str]:
+        """URL of the page in the frontmost browser window, or None if the
+        frontmost app is not a browser or the URL is not exposed."""
+        front = self._front_window()
+        if not front or (front["owner"] or "").lower() not in BROWSER_APPS:
+            return None
+        window = self._ax_focused_window(front["pid"])
+        if window is None:
+            return None
+        web_area = self._ax_find_role(window, "AXWebArea")
+        if web_area is not None:
+            url = self._ax_attr(web_area, "AXURL")
+            if url:
+                url = str(url)
+                if url.startswith(("http://", "https://", "file://")):
+                    return url
+        return None
+
+    # ── AX helpers ───────────────────────────────────────────────────
+
+    def _ax_attr(self, element, attr):
+        try:
+            from ApplicationServices import AXUIElementCopyAttributeValue  # type: ignore
+            err, value = AXUIElementCopyAttributeValue(element, attr, None)
+            return value if err == 0 else None
+        except Exception:
+            return None
+
+    def enable_full_a11y_tree(self, pid: Optional[int]):
+        """Ask Electron/Chromium apps to build their full AX tree. Without it,
+        their web content shows up as empty groups. Done once per process;
+        apps that do not know the attribute just return an error."""
+        if not pid or pid in self._manual_a11y_pids or not self._ax_available:
+            return
+        self._manual_a11y_pids.add(pid)
+        try:
+            from ApplicationServices import (  # type: ignore
+                AXUIElementCreateApplication, AXUIElementSetAttributeValue,
+            )
+            AXUIElementSetAttributeValue(AXUIElementCreateApplication(pid), "AXManualAccessibility", True)
+        except Exception:
+            pass
+
+    def _ax_focused_window(self, pid: Optional[int]):
+        if not pid or not self._ax_available:
+            return None
+        try:
+            from ApplicationServices import AXUIElementCreateApplication  # type: ignore
+            app = AXUIElementCreateApplication(pid)
+        except Exception:
+            return None
+        window = self._ax_attr(app, "AXFocusedWindow")
+        if window is None:
+            windows = self._ax_attr(app, "AXWindows") or []
+            window = windows[0] if len(windows) else None
+        return window
+
+    def _ax_find_role(self, element, role: str, max_nodes: int = 400):
+        """Breadth-first search for the first element with this role."""
+        queue = [element]
+        seen = 0
+        while queue and seen < max_nodes:
+            el = queue.pop(0)
+            seen += 1
+            if self._ax_attr(el, "AXRole") == role:
+                return el
+            children = self._ax_attr(el, "AXChildren") or []
+            queue.extend(children)
+        return None
+
+    def _ax_document_title(self, pid: Optional[int]) -> Optional[str]:
+        """Title of the first web area in the focused window that has one."""
+        self.enable_full_a11y_tree(pid)
+        window = self._ax_focused_window(pid)
+        if window is None:
+            return None
+        queue = [window]
+        seen = 0
+        while queue and seen < 400:
+            el = queue.pop(0)
+            seen += 1
+            if self._ax_attr(el, "AXRole") == "AXWebArea":
+                title = self._ax_attr(el, "AXTitle")
+                if isinstance(title, str) and title.strip():
+                    return title.strip()
+            queue.extend(self._ax_attr(el, "AXChildren") or [])
+        return None
 
     # ── Accessibility ────────────────────────────────────────────────
 
@@ -151,6 +263,7 @@ class MacOSAdapter(PlatformAdapter):
             if not pid:
                 return None, "none"
 
+            self.enable_full_a11y_tree(pid)
             app_ref = AXUIElementCreateApplication(pid)
 
             # Get focused window
@@ -159,7 +272,7 @@ class MacOSAdapter(PlatformAdapter):
                 return None, "none"
 
             texts = []
-            self._walk_ax_tree(window, texts, depth=0, max_depth=8)
+            self._walk_ax_tree(window, texts, depth=0, max_depth=8, seen=set(), budget=[_A11Y_MAX_TOTAL_CHARS])
 
             if texts:
                 result = '\n'.join(texts)
@@ -173,38 +286,60 @@ class MacOSAdapter(PlatformAdapter):
             logger.error(f"macOS extraction failed: {e}")
             return None, "none"
 
-    def _walk_ax_tree(self, element, texts: list, depth: int, max_depth: int = 8):
-        """Walk the AXUIElement tree to extract text."""
-        if depth > max_depth or len(texts) > 500:
+    def _walk_ax_tree(self, element, texts: list, depth: int, max_depth: int = 8,
+                      seen: Optional[set] = None, budget: Optional[list] = None):
+        """Walk the AXUIElement tree to extract text.
+
+        Skips menu subtrees, drops repeated lines, reads only the visible part
+        of large text areas, and stops after _A11Y_MAX_TOTAL_CHARS.
+        """
+        seen = set() if seen is None else seen
+        budget = [_A11Y_MAX_TOTAL_CHARS] if budget is None else budget
+        if depth > max_depth or len(texts) > 500 or budget[0] <= 0:
             return
 
         try:
-            from ApplicationServices import (  # type: ignore
-                AXUIElementCopyAttributeValue,
-                kAXChildrenAttribute,
-                kAXValueAttribute,
-                kAXTitleAttribute,
-            )
+            role = self._ax_attr(element, "AXRole")
+            if role in _A11Y_SKIP_ROLES:
+                return
 
-            # Get title
-            err, title = AXUIElementCopyAttributeValue(element, kAXTitleAttribute, None)
-            if not err and title and str(title).strip():
-                text = str(title).strip()
-                if len(text) > 1 and text not in texts[-5:]:
-                    texts.append(text)
+            def _add(text: str):
+                text = text.strip()
+                if len(text) <= 1 or text in seen:
+                    return
+                seen.add(text)
+                text = text[:budget[0]]
+                budget[0] -= len(text)
+                texts.append(text)
 
-            # Get value (for text fields, etc.)
-            err, value = AXUIElementCopyAttributeValue(element, kAXValueAttribute, None)
-            if not err and value and str(value).strip():
-                val_text = str(value).strip()
-                if len(val_text) > 1 and val_text != str(title or ""):
-                    texts.append(val_text)
+            title = self._ax_attr(element, "AXTitle")
+            if title and str(title).strip():
+                _add(str(title))
 
-            # Recurse into children
-            err, children = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute, None)
-            if not err and children:
+            value = self._ax_attr(element, "AXValue")
+            if isinstance(value, str) and value.strip():
+                if len(value) > _A11Y_VISIBLE_ONLY_CHARS:
+                    value = self._ax_visible_text(element) or value[-_A11Y_VISIBLE_ONLY_CHARS:]
+                if value.strip() != str(title or "").strip():
+                    _add(value)
+
+            children = self._ax_attr(element, "AXChildren")
+            if children:
                 for child in children:
-                    self._walk_ax_tree(child, texts, depth + 1, max_depth)
+                    self._walk_ax_tree(child, texts, depth + 1, max_depth, seen, budget)
 
         except Exception:
             pass
+
+    def _ax_visible_text(self, element) -> Optional[str]:
+        """Only the on-screen part of a text area (e.g. Terminal without its
+        scrollback), via AXVisibleCharacterRange + AXStringForRange."""
+        try:
+            from ApplicationServices import AXUIElementCopyParameterizedAttributeValue  # type: ignore
+            visible = self._ax_attr(element, "AXVisibleCharacterRange")
+            if visible is None:
+                return None
+            err, text = AXUIElementCopyParameterizedAttributeValue(element, "AXStringForRange", visible, None)
+            return str(text) if err == 0 and text else None
+        except Exception:
+            return None

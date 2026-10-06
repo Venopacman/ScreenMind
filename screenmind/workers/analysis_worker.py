@@ -50,6 +50,76 @@ _URL_NOISE = {'http://localhost', 'http://127.0.0.1', 'https://fonts.googleapis.
               'https://cdn.', 'http://schemas.', 'chrome-extension://'}
 
 
+# Window chrome that every windowed app exposes to the accessibility tree.
+_CHROME_MARKERS = [
+    'minimize', 'maximize', 'restore', 'close',
+    'tab bar', 'app bar', 'address and search bar',
+    'has access to this site', 'no access needed',
+    'memory usage', 'sleeping', 'extensions',
+]
+# macOS menu bar items. Lines made only of these are app chrome.
+_MENU_WORDS = {
+    'apple', 'file', 'edit', 'view', 'window', 'help', 'history', 'bookmarks',
+    'profiles', 'tab', 'format', 'go', 'tools', 'shell', 'insert', 'chrome',
+}
+# Below this much real text, a11y is not worth skipping OCR for.
+_A11Y_MIN_CONTENT_CHARS = 200
+# A11y text kept as a header above OCR text only when it is this short.
+_A11Y_MAX_PREFIX_CHARS = 500
+
+_BROWSER_WORDS = {
+    'chrome', 'chromium', 'safari', 'firefox', 'edge', 'msedge', 'brave', 'arc',
+    'opera', 'vivaldi', 'orion', 'zen',
+}
+
+
+def _a11y_is_content(text: Optional[str], window_title: Optional[str] = None,
+                     app_name: Optional[str] = None) -> bool:
+    """Whether a11y text is real window content, good enough to replace OCR.
+
+    False for: window chrome (buttons, tabs), menu bars, the window title on
+    its own, and text that is mostly the same lines repeated.
+    """
+    if not text:
+        return False
+    lower = text.lower()
+    if sum(1 for m in _CHROME_MARKERS if m in lower) >= 3:
+        return False
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+    if not lines:
+        return False
+    if len(lines) >= 10 and len(set(lines)) / len(lines) < 0.5:
+        return False  # mostly repeats
+    skip = {(window_title or '').strip().lower(), (app_name or '').strip().lower()}
+    content = []
+    for line in dict.fromkeys(lines):
+        low = line.lower()
+        if low in skip:
+            continue
+        words = [w for w in re.split(r'[\s|/·•]+', low) if w]
+        if words and all(w in _MENU_WORDS for w in words):
+            continue
+        content.append(line)
+    return sum(len(l) for l in content) >= _A11Y_MIN_CONTENT_CHARS
+
+
+def _is_browser(app_name: Optional[str]) -> bool:
+    words = re.split(r'[\s._-]+', (app_name or '').lower())
+    return any(w in _BROWSER_WORDS for w in words)
+
+
+def _pick_active_url(app_name: Optional[str], browser_url: Optional[str],
+                     found_urls: list) -> Optional[str]:
+    """The page the user is on: what the browser reports, else (browsers
+    only) the first URL in the screen text. None for non-browser apps,
+    where a URL in the text is just content (a link in chat, a log line)."""
+    if browser_url:
+        return browser_url
+    if _is_browser(app_name) and found_urls:
+        return found_urls[0]
+    return None
+
+
 def _extract_url(text: str) -> str | None:
     """Extract the most likely active-page URL from OCR/A11y text.
 
@@ -276,7 +346,7 @@ class AnalysisWorker:
 
             # --- Tier "identical": copy everything from cache, skip OCR entirely ---
             if tier == "identical":
-                active_url = cached.get("active_url")
+                active_url = capture.browser_url or cached.get("active_url")
                 method_label = "backfill:cache:identical" if self._is_backfill else "cache:identical"
                 self._db.update_activity_analysis(
                     activity_id=activity_id,
@@ -305,21 +375,9 @@ class AnalysisWorker:
             # 3a. Use a11y text captured at screenshot time (correct window)
             a11y_text = capture.a11y_text
 
-            # Detect if a11y text is just window chrome (buttons, menus, tabs)
-            # vs actual app content. Window chrome contains these telltale elements
-            # that every windowed app exposes to the accessibility tree.
-            CHROME_MARKERS = [
-                'minimize', 'maximize', 'restore', 'close',
-                'tab bar', 'app bar', 'address and search bar',
-                'has access to this site', 'no access needed',
-                'memory usage', 'sleeping', 'extensions',
-            ]
-            a11y_is_content = False
-            if a11y_text and len(a11y_text.strip()) > 100:
-                a11y_lower = a11y_text.lower()
-                chrome_hits = sum(1 for m in CHROME_MARKERS if m in a11y_lower)
-                # 3+ chrome markers = it's window UI, not app content
-                a11y_is_content = chrome_hits < 3
+            # Detect if a11y text is just window chrome (buttons, menus, tabs,
+            # the window title) vs actual app content.
+            a11y_is_content = _a11y_is_content(a11y_text, capture.window_title, capture.app_name)
 
             if a11y_text and a11y_is_content:
                 # A11y has real content (native apps like Notepad, File Explorer)
@@ -354,8 +412,8 @@ class AnalysisWorker:
                             text_method = "a11y+ocr"
                     else:
                         # A11y is chrome or empty — OCR is the primary source
-                        # Prepend a11y chrome for metadata (window title, URL)
-                        if a11y_text:
+                        # Prepend short a11y chrome for metadata (window title, URL)
+                        if a11y_text and len(a11y_text) <= _A11Y_MAX_PREFIX_CHARS:
                             ocr_text = a11y_text + '\n--- (from image OCR) ---\n' + ocr_raw
                             text_method = "a11y+ocr"
                         else:
@@ -374,7 +432,9 @@ class AnalysisWorker:
 
             # 3d. Extract URLs from text (for Gemma hint + DB storage)
             found_urls = _extract_all_urls(ocr_text)
-            active_url = found_urls[0] if found_urls else None
+            if capture.browser_url and capture.browser_url not in found_urls:
+                found_urls.insert(0, capture.browser_url)
+            active_url = _pick_active_url(capture.app_name, capture.browser_url, found_urls)
 
             # --- Tier "minor": run OCR (already done above), reuse Gemma + layout ---
             if tier == "minor":

@@ -40,6 +40,11 @@ class PlatformAdapter(ABC):
         """
         return None
 
+    def get_browser_url(self) -> Optional[str]:
+        """URL of the page in the frontmost browser window. None when the
+        frontmost app is not a browser or the OS does not expose it."""
+        return None
+
     @abstractmethod
     def extract_a11y_text(self, hwnd: Optional[int] = None) -> Tuple[Optional[str], str]:
         """
