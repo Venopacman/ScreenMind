@@ -1,51 +1,93 @@
 """
 Embedding Engine
-Generates semantic embeddings for activity summaries using
-sentence-transformers. Used for natural language search over activities.
+Generates semantic embeddings for activity summaries. Used for natural
+language search over activities.
+
+Runs the sentence-transformers all-MiniLM-L6-v2 model as ONNX on ONNX Runtime,
+with the same tokenizer, 256-token limit, mean pooling and normalization, so
+vectors match the ones sentence-transformers produced. No PyTorch needed.
 """
 
 import logging
+import threading
 import numpy as np
 from typing import List, Optional
 
 logger = logging.getLogger("screenmind.engine.embedder")
 
+# all-MiniLM-L6-v2 truncates input at 256 word pieces (its max_seq_length).
+_MAX_TOKENS = 256
+_MODEL_FILES = ("onnx/model.onnx", "tokenizer.json")
+
 
 class Embedder:
     """
     Generates 384-dimensional embeddings using all-MiniLM-L6-v2.
-    Tiny (80MB), runs on CPU instantly, doesn't compete for GPU with Gemma.
+    Tiny (~90MB), runs on CPU instantly, doesn't compete for GPU with Gemma.
     """
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         self._model_name = model_name
-        self._model = None
+        self._repo_id = model_name if "/" in model_name else f"sentence-transformers/{model_name}"
+        self._model = None  # onnxruntime.InferenceSession
+        self._tokenizer = None
+        self._input_names: tuple = ()
         self._initialized = False
+        self._lock = threading.Lock()
 
     def _ensure_model(self):
         """Lazy-load the embedding model on first use."""
-        if not self._initialized:
+        if self._initialized:
+            return
+        with self._lock:
+            if self._initialized:
+                return
             try:
-                from sentence_transformers import SentenceTransformer
-
-                logger.info(f"Loading embedding model: {self._model_name} (~90MB, first-time download)...")
-                self._model = SentenceTransformer(self._model_name)
-                self._initialized = True
-                # Dimension accessor was renamed get_sentence_embedding_dimension ->
-                # get_embedding_dimension across sentence-transformers 4.x->5.x.
-                # Feature-detect (prefer new name to avoid the deprecation warning),
-                # and fall back to the known dimension so this log line can never
-                # abort model loading / disable semantic search.
-                _dim_fn = (getattr(self._model, "get_embedding_dimension", None)
-                           or getattr(self._model, "get_sentence_embedding_dimension", None))
-                _dim = _dim_fn() if _dim_fn else self.dimensions
-                logger.info(f"Model loaded. Dimensions: {_dim}")
+                import onnxruntime as ort
+                from huggingface_hub import hf_hub_download
+                from tokenizers import Tokenizer
             except ImportError:
-                logger.warning("sentence-transformers not installed. Semantic search disabled.")
+                logger.warning("onnxruntime/tokenizers not installed. Semantic search disabled.")
                 raise
+
+            try:
+                from screenmind.engine.model_manager import _models_dir
+                local_dir = _models_dir() / "embedder" / self._model_name.split("/")[-1]
+                if not all((local_dir / f).exists() for f in _MODEL_FILES):
+                    logger.info(f"Downloading embedding model: {self._model_name} (~90MB, first time only)...")
+                paths = {f: hf_hub_download(self._repo_id, f, local_dir=str(local_dir)) for f in _MODEL_FILES}
+
+                tokenizer = Tokenizer.from_file(paths["tokenizer.json"])
+                tokenizer.enable_truncation(max_length=_MAX_TOKENS)
+                tokenizer.no_padding()
+
+                opts = ort.SessionOptions()
+                opts.log_severity_level = 3
+                session = ort.InferenceSession(
+                    paths["onnx/model.onnx"], sess_options=opts, providers=["CPUExecutionProvider"],
+                )
+                self._input_names = tuple(i.name for i in session.get_inputs())
+                self._tokenizer = tokenizer
+                self._model = session
+                self._initialized = True
+                logger.info(f"Model loaded. Dimensions: {self.dimensions}")
             except Exception as e:
                 logger.error(f"Failed to load model: {e}")
                 raise
+
+    def _encode(self, text: str) -> np.ndarray:
+        """Mean-pooled, L2-normalized sentence embedding (sentence-transformers' recipe)."""
+        enc = self._tokenizer.encode(text)
+        feeds = {
+            "input_ids": np.array([enc.ids], dtype=np.int64),
+            "attention_mask": np.array([enc.attention_mask], dtype=np.int64),
+            "token_type_ids": np.array([enc.type_ids], dtype=np.int64),
+        }
+        feeds = {k: v for k, v in feeds.items() if k in self._input_names}
+        tokens = self._model.run(None, feeds)[0][0]  # (seq_len, 384)
+        mask = feeds["attention_mask"][0][:, None].astype(np.float32)
+        vec = (tokens * mask).sum(axis=0) / max(float(mask.sum()), 1e-9)
+        return vec / max(float(np.linalg.norm(vec)), 1e-12)
 
     def embed_text(self, text: str) -> List[float]:
         """
@@ -58,8 +100,7 @@ class Embedder:
             List of 384 floats representing the semantic embedding.
         """
         self._ensure_model()
-        embedding = self._model.encode(text, normalize_embeddings=True)
-        return embedding.tolist()
+        return self._encode(text).astype(np.float32).tolist()
 
     def embed_activity(
         self,

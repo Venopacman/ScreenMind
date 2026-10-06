@@ -18,7 +18,7 @@ async def ui_events_status():
     recorder = dependencies.ui_recorder
     if recorder is None:
         return {
-            "supported": False, "enabled": settings.ui_events_enabled, "running": False,
+            "supported": False, "backend": None, "enabled": settings.ui_events_enabled, "running": False,
             "permissions": None, "events_recorded": 0, "last_error": None,
             "types": ALL_EVENT_TYPES,
         }

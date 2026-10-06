@@ -1,4 +1,4 @@
-# Lightweight CI dependencies — skips PyTorch, EasyOCR, and other heavy
+# Lightweight CI dependencies — skips RapidOCR, ONNX Runtime and other
 # ML/OS packages that tests mock or skip.  Cuts CI from ~23 min to ~2-3 min.
 # Full deps: requirements.txt
 

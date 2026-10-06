@@ -53,6 +53,12 @@ dependencies = [
     # Numerical
     "numpy>=1.26,<3.0",
 
+    # OCR and semantic search on ONNX Runtime (CPU, no PyTorch)
+    "rapidocr>=3.9,<4.0",
+    "onnxruntime>=1.18,<2.0",
+    "tokenizers>=0.15,<1.0",
+    "huggingface_hub>=0.20,<2.0",  # model downloads (Gemma, embedder)
+
     # Git Integration
     "gitpython>=3.1,<4.0",
 
@@ -67,21 +73,22 @@ dependencies = [
     "pyobjc-framework-Cocoa>=10.0 ; sys_platform == 'darwin'",
     "pyobjc-framework-Quartz>=10.0 ; sys_platform == 'darwin'",
     "pyobjc-framework-ApplicationServices>=10.0 ; sys_platform == 'darwin'",
+
+    # Windows: accessibility text and UI events (UI Automation)
+    "uiautomation>=2.0,<3.0 ; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
-# AI / ML — large download (~2.5 GB, includes PyTorch)
-# Prompted on first run if missing
-ai = [
-    "sentence-transformers>=3.3,<4.0",
-    "easyocr>=1.7.2,<2.0",
-]
+# OCR and embeddings are core dependencies now (ONNX Runtime, no PyTorch).
+# Kept so `pip install screenmind[ai]` still works.
+ai = []
 
 # MCP server for Claude Desktop / Cursor / VS Code
 mcp = ["mcp[cli]>=1.26.0,<2.0"]
 
-# Windows-only accessibility API
-windows = ["uiautomation>=2.0,<3.0"]
+# Windows accessibility API. Now a core dependency on Windows; kept so
+# `pip install screenmind[windows]` still works.
+windows = ["uiautomation>=2.0,<3.0 ; sys_platform == 'win32'"]
 
 # Development / Testing
 dev = [

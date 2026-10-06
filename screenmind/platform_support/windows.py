@@ -13,6 +13,60 @@ from screenmind.platform_support.base import PlatformAdapter
 
 logger = logging.getLogger("screenmind.platform_support.windows")
 
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_kernel32 = None
+_user32 = None
+
+
+def _dlls():
+    """Private WinDLL handles with argtypes set. Kept apart from ctypes.windll so
+    our argtypes never clash with other packages (keyboard, mss)."""
+    global _kernel32, _user32
+    if _kernel32 is None:
+        import ctypes
+        from ctypes import wintypes
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        k.OpenProcess.restype = wintypes.HANDLE
+        k.QueryFullProcessImageNameW.argtypes = [
+            wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+        k.CloseHandle.argtypes = [wintypes.HANDLE]
+        u = ctypes.WinDLL("user32", use_last_error=True)
+        u.GetForegroundWindow.restype = wintypes.HWND
+        u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        u.GetWindowThreadProcessId.restype = wintypes.DWORD
+        u.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+        u.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        _kernel32, _user32 = k, u
+    return _kernel32, _user32
+
+
+def process_name(pid: int) -> Optional[str]:
+    """Executable name without extension ("chrome", "notepad"), or None.
+
+    Uses PROCESS_QUERY_LIMITED_INFORMATION, which also works for elevated
+    processes. This name is what blocked_apps matches against.
+    """
+    if not pid:
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32, _ = _dlls()
+        handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return None
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            size = wintypes.DWORD(1024)
+            if not kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                return None
+            return os.path.splitext(os.path.basename(buf.value))[0] or None
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        return None
+
 
 class WindowsAdapter(PlatformAdapter):
     """Windows implementation using ctypes + UI Automation."""
@@ -56,33 +110,33 @@ class WindowsAdapter(PlatformAdapter):
             import ctypes
             from ctypes import wintypes
 
-            hwnd = ctypes.windll.user32.GetForegroundWindow()
-
-            # Get process ID from window handle
+            _, user32 = _dlls()
+            hwnd = user32.GetForegroundWindow()
             pid = wintypes.DWORD()
-            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-
-            # Open process and get executable name
-            PROCESS_QUERY_INFORMATION = 0x0400
-            PROCESS_VM_READ = 0x0010
-            handle = ctypes.windll.kernel32.OpenProcess(
-                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid.value
-            )
-
-            if handle:
-                try:
-                    buf = ctypes.create_unicode_buffer(260)
-                    size = wintypes.DWORD(260)
-                    ctypes.windll.kernel32.QueryFullProcessImageNameW(
-                        handle, 0, buf, ctypes.byref(size)
-                    )
-                    if buf.value:
-                        name = os.path.basename(buf.value)
-                        return os.path.splitext(name)[0]
-                finally:
-                    ctypes.windll.kernel32.CloseHandle(handle)
-
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            return process_name(pid.value)
+        except Exception:
             return None
+
+    def get_front_window(self) -> Optional[dict]:
+        """Foreground window as {"pid", "app_name", "title"}, all from one HWND."""
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            _, user32 = _dlls()
+            hwnd = user32.GetForegroundWindow()
+            if not hwnd:
+                return None
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            title = None
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length > 0:
+                buf = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buf, length + 1)
+                title = buf.value or None
+            return {"pid": pid.value or None, "app_name": process_name(pid.value), "title": title}
         except Exception:
             return None
 

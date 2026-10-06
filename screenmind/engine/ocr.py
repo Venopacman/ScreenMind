@@ -1,70 +1,71 @@
 """
 OCR Engine — Text Extraction from Screenshots
 Extracts visible text to enhance Gemma 4's analysis context.
-Uses easyocr with dark-theme preprocessing for robust recognition.
+Uses RapidOCR (PaddleOCR models on ONNX Runtime). CPU only, no PyTorch.
 """
 
 import logging
 import time
 from typing import Optional
 
-from PIL import Image, ImageOps, ImageEnhance
+from PIL import Image
 
 from screenmind.config import settings
 
 logger = logging.getLogger("screenmind.engine.ocr")
 
-# Longest side of the image fed to the CRAFT text detector (EasyOCR default 2560).
-# Detector memory grows with this; recognition still reads crops from the
-# full-resolution image, so most text survives a smaller value.
-# Measured on 3024x1964 screenshots, CPU: 2560 ~7-8 GB peak, 1280 ~6 GB,
-# 960 ~4 GB (96% of text), 800 ~3.1 GB (90%), 640 ~2.1 GB (71%).
-OCR_CANVAS_SIZE = 800
+# Recognition model per language code (EasyOCR-style codes, as in OCR_LANGUAGES).
+# One recognizer runs per frame, chosen by the first non-English code.
+# All of these also read English.
+_REC_MODELS = {
+    # East Slavic: Russian, Ukrainian, Belarusian
+    "ru": "eslav", "uk": "eslav", "be": "eslav",
+    # Other Cyrillic scripts
+    "bg": "cyrillic", "rs_cyrillic": "cyrillic", "mn": "cyrillic", "abq": "cyrillic",
+    "ady": "cyrillic", "kbd": "cyrillic", "ava": "cyrillic", "dar": "cyrillic",
+    "inh": "cyrillic", "che": "cyrillic", "lbe": "cyrillic", "lez": "cyrillic",
+    "tab": "cyrillic", "tjk": "cyrillic",
+    # PP-OCRv5's Chinese model also reads Traditional Chinese and Japanese
+    "ch_sim": "ch", "ch_tra": "ch", "ja": "ch",
+    "ko": "korean",
+    "th": "th",
+    "el": "el",
+    "ar": "arabic", "fa": "arabic", "ur": "arabic", "ug": "arabic",
+    "hi": "devanagari", "mr": "devanagari", "ne": "devanagari", "bh": "devanagari",
+    "mai": "devanagari", "ang": "devanagari", "bho": "devanagari", "mah": "devanagari",
+    "sck": "devanagari", "new": "devanagari", "gom": "devanagari", "sa": "devanagari",
+    "ta": "ta",
+    "te": "te",
+}
+_CYRILLIC_MODELS = {"eslav", "cyrillic"}
 
+# Drop readings below this confidence (RapidOCR's own default).
+_MIN_SCORE = 0.5
 
-def _use_gpu() -> bool:
-    """Use CUDA when present. Skip Apple MPS: PyTorch's MPS allocator kept
-    ~7.5 GB of unified memory between frames, and CPU is fast enough here."""
-    try:
-        import torch
-        return torch.cuda.is_available()
-    except Exception:
-        return False
-
-
-# EasyOCR allows a Cyrillic model only with English, so Cyrillic codes get a
-# second Reader that recognizes the same boxes (detector=False).
-CYRILLIC_LANGS = {"ru", "rs_cyrillic", "be", "bg", "uk", "mn", "abq", "ady",
-                  "kbd", "ava", "dar", "inh", "che", "lbe", "lez", "tab", "tjk"}
-
-# Take the Cyrillic reading when it is at most this much less confident than Latin
-CYRILLIC_CONF_MARGIN = 0.05
-
-# Cyrillic letters that look like Latin ones. The Cyrillic model reads "MCP"
-# as "MCР" (Cyrillic Р) with high confidence; these are not proof of Russian.
+# Cyrillic letters that look like Latin ones. A Cyrillic model can read "MCP"
+# as "MCР" (Cyrillic Р); these are not proof of Russian.
 _CYR_TO_LAT = str.maketrans("АВЕКМНОРСТХаеорсух", "ABEKMHOPCTXaeopcyx")
 _LAT_TO_CYR = str.maketrans("ABEKMHOPCTXaeopcyx", "АВЕКМНОРСТХаеорсух")
-_CYR_LOOKALIKES = set("АВЕКМНОРСТХаеорсух")
 
 
-def _split_languages(langs: list) -> tuple:
-    """Split codes into (primary, cyrillic). Primary always includes 'en'."""
-    primary = [l for l in langs if l not in CYRILLIC_LANGS]
-    cyrillic = [l for l in langs if l in CYRILLIC_LANGS]
-    if "en" not in primary:
-        primary.insert(0, "en")
-    if cyrillic and "en" not in cyrillic:
-        cyrillic.append("en")
-    return primary, cyrillic
+def _rec_model(langs: list) -> str:
+    """Pick the recognition model for the configured languages.
+
+    English-only gets the English model; any other Latin-script code gets the
+    Latin model. If codes need different scripts, the first one wins.
+    """
+    others = [l for l in langs if l != "en"]
+    if not others:
+        return "en"
+    models = [_REC_MODELS.get(l, "latin") for l in others]
+    if len(set(models)) > 1:
+        logger.warning(f"OCR reads one script at a time; using '{models[0]}' for {others[0]} "
+                       f"(also configured: {', '.join(others[1:])})")
+    return models[0]
 
 
 def _is_cyrillic(ch: str) -> bool:
-    return "\u0400" <= ch <= "\u04ff"
-
-
-def _has_cyrillic_only_letters(text: str) -> bool:
-    """True if text has a Cyrillic letter with no Latin twin (б, д, ж, и, л, п, я, ...)."""
-    return any(_is_cyrillic(ch) and ch not in _CYR_LOOKALIKES for ch in text)
+    return "Ѐ" <= ch <= "ӿ"
 
 
 def _fix_lookalikes(text: str) -> str:
@@ -81,109 +82,57 @@ def _fix_lookalikes(text: str) -> str:
     return " ".join(words)
 
 
-def _merge_readings(latin: list, cyrillic: list) -> list:
-    """Pick the Latin or Cyrillic reading per box.
-
-    Both lists come from recognize() over the same boxes, one result per box,
-    in the same order. Cyrillic wins only if it holds a Cyrillic-only letter
-    and is about as confident; this keeps English text away from lookalikes.
-    """
-    if len(latin) != len(cyrillic):
-        logger.debug(f"Latin/Cyrillic result count differs ({len(latin)} vs {len(cyrillic)}), using Latin")
-        cyrillic = [None] * len(latin)
-    merged = []
-    for lat, cyr in zip(latin, cyrillic):
-        bbox, text, conf = lat
-        if cyr and _has_cyrillic_only_letters(cyr[1]) and cyr[2] >= conf - CYRILLIC_CONF_MARGIN:
-            text, conf = cyr[1], cyr[2]
-        merged.append((bbox, _fix_lookalikes(text), conf))
-    return merged
+def _ocr_models_dir():
+    from screenmind.engine.model_manager import _models_dir
+    d = _models_dir() / "ocr"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 class OCRExtractor:
     """
     Lightweight OCR that extracts screen text to feed into Gemma 4
     as additional context, improving analysis accuracy.
+
+    Text detection uses PP-OCRv6 tiny (best on dark UIs and fastest in our
+    tests); recognition uses the PP-OCRv5 model for the configured language.
+    Models (~15 MB) download to ~/.screenmind/models/ocr on first use.
     """
 
     def __init__(self):
-        self._reader = None      # detector + Latin-script recognizer
-        self._reader_cyr = None  # Cyrillic recognizer, only if a Cyrillic code is configured
+        self._engine = None
+        self._rec_model = None
         self._available = True
 
     def _ensure_reader(self):
-        """Lazy-load easyocr (downloads ~100MB model on first use)."""
-        if self._reader is None and self._available:
-            try:
-                import easyocr
-            except Exception as e:
-                logger.warning(f"EasyOCR unavailable, skipping text extraction: {e}")
-                self._available = False
-                return
+        """Lazy-load RapidOCR and its models."""
+        if self._engine is not None or not self._available:
+            return
+        try:
+            from rapidocr import LangRec, ModelType, OCRVersion, RapidOCR
+        except Exception as e:
+            logger.warning(f"RapidOCR unavailable, skipping text extraction: {e}")
+            self._available = False
+            return
 
-            primary, cyrillic = _split_languages(settings.ocr_languages_list)
-            gpu = _use_gpu()
-            try:
-                self._reader = easyocr.Reader(primary, gpu=gpu, verbose=False)
-            except Exception as e:
-                # e.g. an unsupported mix like ch_sim + de; keep OCR working in English
-                logger.warning(f"OCR languages {primary} rejected ({e}); falling back to English")
-                primary = ["en"]
-                try:
-                    self._reader = easyocr.Reader(primary, gpu=gpu, verbose=False)
-                except Exception as e2:
-                    logger.warning(f"EasyOCR unavailable, skipping text extraction: {e2}")
-                    self._available = False
-                    return
-
-            if cyrillic:
-                try:
-                    self._reader_cyr = easyocr.Reader(cyrillic, gpu=gpu, verbose=False, detector=False)
-                except Exception as e:
-                    logger.warning(f"Cyrillic OCR {cyrillic} unavailable ({e}); continuing without it")
-                    cyrillic = []
-
-            logger.info(f"EasyOCR initialized (languages: {', '.join(sorted(set(primary + cyrillic)))})")
-
-    def _preprocess(self, image: Image.Image) -> Image.Image:
-        """
-        Preprocess screenshot for maximum OCR accuracy.
-        
-        Optimized via A/B testing (5 rounds, 7 strategies):
-        - Ensure minimum 1920px width (upscale if needed)
-        - Grayscale + sharpen + contrast 1.5
-        - Only invert for very dark screens (<100 brightness)
-        - Result: eCAS detection 0.04 → 0.54 confidence
-        """
-        import numpy as np
-        from PIL import ImageFilter
-
-        # Ensure minimum 1920px width for reliable text detection
-        min_width = 1920
-        if image.size[0] < min_width:
-            scale = min_width / image.size[0]
-            image = image.resize(
-                (int(image.size[0] * scale), int(image.size[1] * scale)),
-                Image.Resampling.LANCZOS,
-            )
-
-        # Convert to grayscale
-        gray = image.convert("L")
-
-        # Check brightness for dark theme handling
-        avg_brightness = np.mean(np.array(gray))
-
-        if avg_brightness < 100:
-            # Very dark theme — invert first
-            gray = ImageOps.invert(gray)
-
-        # Sharpen text edges
-        gray = gray.filter(ImageFilter.SHARPEN)
-
-        # Mild contrast boost (1.5 is the sweet spot — 2.2 destroyed text)
-        result = ImageEnhance.Contrast(gray).enhance(1.5)
-
-        return result
+        rec = _rec_model(settings.ocr_languages_list)
+        try:
+            self._engine = RapidOCR(params={
+                "Global.log_level": "warning",
+                "Global.model_root_dir": str(_ocr_models_dir()),
+                "Det.ocr_version": OCRVersion.PPOCRV6,
+                "Det.model_type": ModelType.TINY,
+                "Rec.ocr_version": OCRVersion.PPOCRV5,
+                "Rec.model_type": ModelType.MOBILE,
+                "Rec.lang_type": LangRec(rec),
+            })
+        except Exception as e:
+            logger.warning(f"OCR model '{rec}' unavailable ({e}); skipping text extraction")
+            self._available = False
+            return
+        self._rec_model = rec
+        logger.info(f"OCR initialized (RapidOCR, recognizer: {rec}, "
+                    f"languages: {', '.join(settings.ocr_languages_list)})")
 
     def extract_text(self, image: Image.Image) -> Optional[str]:
         """Extract text only (backward compatible)."""
@@ -197,85 +146,45 @@ class OCRExtractor:
         Returns:
             Tuple of (text_string, boxes_list) where boxes_list is a list of
             {"box": [[x1,y1],[x2,y2],[x3,y3],[x4,y4]], "text": str, "conf": float}
-            Coordinates are relative to the ORIGINAL image size.
+            Coordinates are relative to the original image size.
         """
         if not self._available:
             return None, []
 
         self._ensure_reader()
-        if self._reader is None:
+        if self._engine is None:
             return None, []
 
         try:
-            import numpy as np
             start = time.time()
-
-            # Track scale for coordinate mapping back to original
-            orig_w, orig_h = image.size
-
-            # Preprocess: resize, dark-theme inversion, contrast boost
-            processed = self._preprocess(image)
-            proc_w, proc_h = processed.size
-
-            # Scale factors to map preprocessed coords back to original image
-            scale_x = orig_w / proc_w
-            scale_y = orig_h / proc_h
-
-            img_array = np.array(processed)
-
-            # Run OCR with word-level detail (paragraph=False for per-word boxes)
-            if self._reader_cyr is None:
-                results = self._reader.readtext(
-                    img_array, detail=1, paragraph=False,
-                    batch_size=4,
-                    canvas_size=OCR_CANVAS_SIZE,
-                )
-            else:
-                results = self._read_with_cyrillic(img_array)
+            result = self._engine(image.convert("RGB"))
+            txts = result.txts or ()
+            scores = result.scores or ()
+            raw_boxes = result.boxes if result.boxes is not None else ()
 
             texts = []
             boxes = []
-            for result in results:
-                if len(result) == 3:
-                    bbox, text, conf = result
-                elif len(result) == 2:
-                    bbox, text = result
-                    conf = 0.5
-                else:
-                    continue
-
+            for bbox, text, conf in zip(raw_boxes, txts, scores):
                 text = text.strip()
-                if conf > 0.2 and len(text) > 1:
-                    texts.append(text)
-                    # Scale bbox coords back to original image coordinates
-                    scaled_box = [[int(pt[0] * scale_x), int(pt[1] * scale_y)] for pt in bbox]
-                    boxes.append({"box": scaled_box, "text": text, "conf": round(conf, 2)})
-
-            elapsed = time.time() - start
-            full_text = "\n".join(texts)
+                if conf < _MIN_SCORE or len(text) <= 1:
+                    continue
+                if self._rec_model in _CYRILLIC_MODELS:
+                    text = _fix_lookalikes(text)
+                texts.append(text)
+                boxes.append({
+                    "box": [[int(pt[0]), int(pt[1])] for pt in bbox],
+                    "text": text,
+                    "conf": round(float(conf), 2),
+                })
 
             if texts:
-                logger.debug(f"Extracted {len(texts)} text blocks in {elapsed:.1f}s")
-
+                logger.debug(f"Extracted {len(texts)} text blocks in {time.time() - start:.1f}s")
+            full_text = "\n".join(texts)
             return (full_text if full_text else None), boxes
 
         except Exception as e:
             logger.error(f"Extraction failed: {e}")
             return None, []
-
-    def _read_with_cyrillic(self, img_array):
-        """Detect boxes once, recognize with both models, keep the better reading per box."""
-        from easyocr.utils import reformat_input
-
-        img, img_grey = reformat_input(img_array)
-        horizontal, free = self._reader.detect(img, canvas_size=OCR_CANVAS_SIZE, reformat=False)
-        horizontal, free = horizontal[0], free[0]
-        if not horizontal and not free:
-            return []
-        kwargs = dict(detail=1, paragraph=False, batch_size=4, reformat=False)
-        latin = self._reader.recognize(img_grey, horizontal, free, **kwargs)
-        cyrillic = self._reader_cyr.recognize(img_grey, horizontal, free, **kwargs)
-        return _merge_readings(latin, cyrillic)
 
     @property
     def is_available(self) -> bool:

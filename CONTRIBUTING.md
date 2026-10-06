@@ -104,7 +104,7 @@ ScreenMind/
 │   ├── engine/               # Analysis, LLM client, embeddings, agents
 │   ├── storage/              # SQLite database layer
 │   ├── workers/              # Background workers (capture, analysis, audio)
-│   ├── integrations/         # Notion, webhooks, Obsidian, notifications
+│   ├── integrations/         # Notion, webhooks, Obsidian
 │   ├── platform_support/     # OS-specific window detection
 │   └── privacy/              # Encryption, sensitive data redaction
 ├── tests/                    # Test suite — 29 modules (pytest)

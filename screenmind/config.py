@@ -79,7 +79,6 @@ _ALLOWED_OVERRIDES = {
     "notion_enabled", "notion_token", "notion_database_id",
     "webhook_enabled", "webhook_url", "webhook_events", "webhook_secret", "webhook_headers",
     "webhook_extra",
-    "smart_notifications", "distraction_minutes", "break_reminder_minutes",
     "auto_bookmark", "auto_bookmark_keywords",
     "agents_enabled", "agents_auto_run_python",
     "sensitive_filter_enabled", "sensitive_filter_types",
@@ -252,11 +251,6 @@ class Settings(BaseSettings):
     webhook_headers: str = Field(default="", description="Custom headers as Key: Value lines")
     webhook_extra: str = Field(default="[]", description="JSON array of extra named webhook profiles")
 
-    # ── Smart Notifications ──────────────────────────────────────────────
-    smart_notifications: bool = Field(default=True, description="Enable smart usage notifications")
-    distraction_minutes: int = Field(default=45, description="Alert after N minutes on entertainment apps")
-    break_reminder_minutes: int = Field(default=90, description="Remind to take break after N minutes")
-
     # ── Auto-Tagging ─────────────────────────────────────────────────────
     auto_bookmark: bool = Field(default=True, description="Auto-bookmark important moments")
     auto_bookmark_keywords: str = Field(default="git push,deploy,npm run build,docker,merge,pull request", description="Keywords that trigger auto-bookmark")
@@ -265,7 +259,7 @@ class Settings(BaseSettings):
     ui_events_enabled: bool = Field(
         default=False,
         description="Record clicks, typed text, app switches and clipboard via OS accessibility APIs. "
-                    "Records typed text, so it is off by default. macOS only for now.",
+                    "Records typed text, so it is off by default. macOS and Windows.",
     )
     ui_events_types: str = Field(
         default="click,app_switch,text,clipboard",
@@ -280,8 +274,9 @@ class Settings(BaseSettings):
     # ── OCR ───────────────────────────────────────────────────────────────
     ocr_languages: str = Field(
         default="en",
-        description="Comma-separated EasyOCR language codes, e.g. 'en,es,de,fr,ru'. "
-                    "Cyrillic codes (ru, uk, be, bg, ...) run a second recognizer (~+1s/frame on CPU).",
+        description="Comma-separated language codes, e.g. 'en,ru' or 'en,es,de'. OCR reads one "
+                    "script per frame, picked by the first non-English code (ru/uk/be: East Slavic, "
+                    "es/de/fr...: Latin). Every script model also reads English.",
     )
 
     # ── Agents ────────────────────────────────────────────────────────────

@@ -61,7 +61,7 @@
 - **🧠 Model Hub** — In-app model download with **variant selection** (Q4_0, Q8_0, BF16, etc.). Supports Gemma 4 E2B, E4B, and 12B. Chat and Summary are locked with witty brain animations until the model is ready — then auto-unlock. No terminal needed.
 - **🎙️ Voice Memos** — Hold `Ctrl+Shift+V` → Gemma 4's native audio encoder transcribes. Screenshot captured alongside. Audio always saved, even if transcription fails.
 - **🎤 Meeting Transcription** — Auto-detects Zoom/Teams/Meet, records audio, transcribes, generates structured summaries.
-- **🖱️ UI Events (macOS, beta, opt-in)** — Records clicks, typed text, app switches and clipboard through OS accessibility APIs. Each screenshot gets an exact "what you did" list for Gemma, and the capture fires right after you switch apps, click or pause typing. Password fields are never recorded. Off by default; turn on in Settings → Privacy & Security.
+- **🖱️ UI Events (macOS + Windows, beta, opt-in)** — Records clicks, typed text, app switches and clipboard through OS accessibility APIs. Each screenshot gets an exact "what you did" list for Gemma, and the capture fires right after you switch apps, click or pause typing. Password fields are never recorded. Off by default; turn on in Settings → Privacy & Security.
 - **📊 Analytics Dashboard** — Category breakdown, top apps, hourly heatmap, meeting stats, focus metrics.
 - **⏪ Day Rewind** — Timelapse playback of your entire day with play/pause/scrub/speed controls.
 - **🚀 Desktop Launcher** — Splash screen with auto-open dashboard. Desktop shortcut auto-created on first run.
@@ -95,7 +95,6 @@
 | 📓 **Obsidian** | Auto-sync daily summaries to your vault |
 | 📋 **Notion** | Push summaries to a Notion database |
 | 🪝 **Webhooks** | Fire events to Slack, Discord, IFTTT (HMAC signed, auto-retry) |
-| 🔔 **Smart Notifications** | Distraction alerts, break reminders |
 | ⭐ **Auto-Bookmark** | Keyword triggers (`git push`, `deploy`) auto-flag important moments |
 
 </details>
@@ -229,7 +228,6 @@ screenmind --background # Run silently without console window
 #### 3️⃣ Open → **http://127.0.0.1:7777** 
 
 On first run, ScreenMind will:
-- Prompt to install AI packages (~2.5GB one-time download)
 - Auto-detect your GPU and download `llama-server` if not found (CUDA/CPU auto-selected)
 - Open the **Model Hub** — pick your model + quantization variant, download with progress tracking right in the UI
 - Chat and Summary stay locked (🧠💤 *"I need my brain to think!"*) until the model is ready, then auto-unlock
@@ -305,7 +303,7 @@ Or configure everything from the **Settings** tab in the dashboard.
 │  │ • A11y     │                        │           │             │ │
 │  │ • Privacy  │                        │           ▼             │ │
 │  └────────────┘                        │  ┌───────────────────┐  │ │
-│                                        │  │   EasyOCR         │  │ │
+│                                        │  │   RapidOCR        │  │ │
 │  ┌────────────┐                        │  │   (text extract)  │  │ │
 │  │   Audio    │                        │  └───────────────────┘  │ │
 │  │   Worker   │                        │           │             │ │
@@ -353,14 +351,14 @@ Or configure everything from the **Settings** tab in the dashboard.
 ### Multi-Model AI Pipeline
 
 ```
-Screenshot → EasyOCR (text) → Gemma 4 E2B (understanding) → MiniLM (embeddings) → SQLite + FTS5
+Screenshot → RapidOCR (text) → Gemma 4 E2B (understanding) → MiniLM (embeddings) → SQLite + FTS5
                                      ↑
                               OCR text fed as context
                               (Gemma sees image + reads text)
 ```
 
 Four AI models working in concert, with Gemma 4 as the brain:
-1. **EasyOCR** — extracts raw screen text
+1. **RapidOCR** — extracts raw screen text (PaddleOCR models on ONNX Runtime, CPU)
 2. **Gemma 4 E2B** — understands what you're doing (vision + reasoning)
 3. **MiniLM-L6-v2** — generates semantic vectors for natural language search
 4. **FTS5** — indexes text for instant keyword search
@@ -496,7 +494,7 @@ Full Swagger docs at `http://127.0.0.1:7777/docs`
 | `DELETE`| `/api/models/delete` | Delete a downloaded model variant |
 | `POST` | `/api/capture/pause` | Pause capture |
 | `GET` | `/api/ui-events?start=&end=&type=` | Recorded UI events in a time range |
-| `GET` | `/api/ui-events/status` | UI event recorder state + macOS permissions |
+| `GET` | `/api/ui-events/status` | UI event recorder state, backend, macOS permissions |
 | `POST` | `/api/incognito/toggle` | Toggle incognito mode |
 | `POST` | `/api/shutdown` | Graceful shutdown (localhost only) |
 
@@ -520,7 +518,7 @@ All settings configurable via `.env`, environment variables, or the **Settings**
 | `ENCRYPTION_ENABLED` | `false` | Encrypt screenshots at rest |
 | `SENSITIVE_FILTER_ENABLED` | `true` | Redact credit cards, SSNs, API keys |
 | `CAPTURE_PAUSED` | `true` | Persisted capture state across restarts |
-| `UI_EVENTS_ENABLED` | `false` | Record clicks, typed text, app switches, clipboard (macOS) |
+| `UI_EVENTS_ENABLED` | `false` | Record clicks, typed text, app switches, clipboard (macOS, Windows) |
 | `UI_EVENTS_TYPES` | `click,app_switch,text,clipboard` | Which UI event types to record (`window_focus` also available) |
 | `EVENT_TRIGGERED_CAPTURE` | `true` | Capture right after app switches, clicks and typing pauses |
 | `SCREENMIND_LOG_LEVEL` | `INFO` | Log verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
@@ -538,8 +536,8 @@ All settings configurable via `.env`, environment variables, or the **Settings**
 |-------|-----------|-----|
 | **Vision + Audio AI** | Gemma 4 (E2B / E4B / 12B via llama.cpp) | Vision + audio + reasoning, runs locally on 4GB+ VRAM |
 | **Inference Server** | llama-server (llama.cpp) | Direct GGUF inference, OpenAI-compatible API |
-| **OCR** | EasyOCR | Extracts screen text fed to Gemma as context |
-| **Embeddings** | all-MiniLM-L6-v2 | 80MB, runs on CPU, 384-dim vectors for semantic search |
+| **OCR** | RapidOCR (PP-OCR on ONNX Runtime) | Extracts screen text fed to Gemma as context. CPU only, ~15MB of models |
+| **Embeddings** | all-MiniLM-L6-v2 (ONNX Runtime) | 90MB, runs on CPU, 384-dim vectors for semantic search |
 | **Backend** | FastAPI + Uvicorn | Async-first, auto-generated API docs |
 | **Database** | SQLite (WAL) + FTS5 | Zero-config, concurrent reads, full-text search |
 | **Capture** | mss + ctypes/UI Automation | Native screen capture + accessibility text extraction |
@@ -617,7 +615,7 @@ screenmind/
 │   ├── llm_client.py          # llama-server client (chat, vision, audio)
 │   ├── model_manager.py       # Server lifecycle, model download/switch
 │   ├── embedder.py            # MiniLM semantic embeddings
-│   ├── ocr.py                 # EasyOCR text extraction
+│   ├── ocr.py                 # RapidOCR text extraction
 │   ├── layout_analyzer.py     # Spatial OCR organization
 │   ├── dev_context.py         # Git repo/branch/diff detection
 │   ├── a11y_extractor.py      # Accessibility API text extraction
@@ -644,8 +642,7 @@ screenmind/
 │   ├── integrations/              # External connections
 │   ├── obsidian.py            # Vault markdown export
 │   ├── notion.py              # Notion API export
-│   ├── webhooks.py            # HTTP webhooks (HMAC, retry)
-│   └── smart_notify.py        # Distraction/break notifications
+│   └── webhooks.py            # HTTP webhooks (HMAC, retry)
 │
 │   ├── api/                       # REST API + dashboard
 │   ├── server.py              # FastAPI app + auth middleware
@@ -716,7 +713,7 @@ Run the test suite:
 pip install -r requirements-test.txt
 pytest --cov=. --cov-report=term-missing -q
 
-# Full (includes ML models — sentence-transformers, easyocr)
+# Full (includes OCR and embedding models: RapidOCR, ONNX Runtime)
 pip install -r requirements.txt
 pip install pytest pytest-asyncio pytest-cov
 pytest --cov=. --cov-report=term-missing -q
