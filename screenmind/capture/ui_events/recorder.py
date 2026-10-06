@@ -58,6 +58,13 @@ def create_backend() -> Optional[UiEventBackend]:
         except ImportError as e:
             logger.warning(f"UI events need pyobjc (pip install pyobjc-framework-Quartz pyobjc-framework-ApplicationServices pyobjc-framework-Cocoa): {e}")
             return None
+    if sys.platform == "win32":
+        import importlib.util
+        if importlib.util.find_spec("uiautomation") is None:
+            logger.warning("UI events need uiautomation (pip install uiautomation)")
+            return None
+        from screenmind.capture.ui_events.windows import WindowsUiEventBackend
+        return WindowsUiEventBackend()
     return None
 
 
@@ -140,6 +147,7 @@ class UiEventRecorder:
         perms = self._backend.check_permissions().as_dict() if self.supported else None
         return {
             "supported": self.supported,
+            "backend": self._backend.name if self.supported else None,
             "enabled": settings.ui_events_enabled,
             "running": self.running,
             "permissions": perms,

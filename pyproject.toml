@@ -67,6 +67,9 @@ dependencies = [
     "pyobjc-framework-Cocoa>=10.0 ; sys_platform == 'darwin'",
     "pyobjc-framework-Quartz>=10.0 ; sys_platform == 'darwin'",
     "pyobjc-framework-ApplicationServices>=10.0 ; sys_platform == 'darwin'",
+
+    # Windows: accessibility text and UI events (UI Automation)
+    "uiautomation>=2.0,<3.0 ; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
@@ -80,8 +83,9 @@ ai = [
 # MCP server for Claude Desktop / Cursor / VS Code
 mcp = ["mcp[cli]>=1.26.0,<2.0"]
 
-# Windows-only accessibility API
-windows = ["uiautomation>=2.0,<3.0"]
+# Windows accessibility API. Now a core dependency on Windows; kept so
+# `pip install screenmind[windows]` still works.
+windows = ["uiautomation>=2.0,<3.0 ; sys_platform == 'win32'"]
 
 # Development / Testing
 dev = [

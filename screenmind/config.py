@@ -261,7 +261,7 @@ class Settings(BaseSettings):
     ui_events_enabled: bool = Field(
         default=False,
         description="Record clicks, typed text, app switches and clipboard via OS accessibility APIs. "
-                    "Records typed text, so it is off by default. macOS only for now.",
+                    "Records typed text, so it is off by default. macOS and Windows.",
     )
     ui_events_types: str = Field(
         default="click,app_switch,text,clipboard",
