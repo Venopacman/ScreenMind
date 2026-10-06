@@ -229,6 +229,8 @@ class Database:
                 "CREATE INDEX IF NOT EXISTS idx_ui_events_activity ON ui_events(activity_id)",
                 "ALTER TABLE activities ADD COLUMN user_actions TEXT",
             ],
+            # v9: browser page URL per UI event (read from the browser, not OCR)
+            "ALTER TABLE ui_events ADD COLUMN url TEXT",
         ]
 
         for i, migration in enumerate(migrations, start=1):
@@ -931,13 +933,14 @@ class Database:
             """
             INSERT INTO ui_events (
                 timestamp, type, app_name, window_title, element_role,
-                element_name, element_value, text, x, y
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                element_name, element_value, text, x, y, url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
                     e.timestamp.isoformat(), e.type.value, e.app_name, e.window_title,
                     e.element_role, e.element_name, e.element_value, e.text, e.x, e.y,
+                    e.url,
                 )
                 for e in events
             ],

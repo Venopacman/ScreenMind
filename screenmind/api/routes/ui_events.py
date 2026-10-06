@@ -54,6 +54,6 @@ async def list_ui_events(
     for e in events:
         e["description"] = describe_event(
             e["type"], e["app_name"], e["window_title"],
-            e["element_role"], e["element_name"], e["text"],
+            e["element_role"], e["element_name"], e["text"], e.get("url"),
         )
     return {"start": start, "end": end, "events": events}

@@ -153,6 +153,7 @@ class FakeBackend(UiEventBackend):
         self.focus = FIELD
         self.clip_count = 0
         self.clip_text = None
+        self.url = None
 
     def check_permissions(self):
         return PermissionStatus(True, True)
@@ -180,6 +181,9 @@ class FakeBackend(UiEventBackend):
 
     def app_name_for_pid(self, pid):
         return {1: "Slack", 2: "Safari"}.get(pid)
+
+    def browser_url(self):
+        return self.url
 
     def clipboard_change_count(self):
         return self.clip_count
@@ -348,6 +352,73 @@ class TestRecorder:
         assert e.type == EventType.WINDOW_FOCUS
         assert e.window_title == "dev"
 
+    def test_click_in_browser_gets_url(self, rec):
+        r, b, db, cw = rec
+        b.url = "https://linear.app/team/issue/DIS-947"
+        r._tick(RawEvent(kind="mouse_down", ts=101.0, x=1, y=1), 101.0)
+        r.flush_for_capture()
+        [e] = stored(db)
+        assert e.url == "https://linear.app/team/issue/DIS-947"
+        assert e.describe() == 'clicked button "Send" in Slack (linear.app)'
+
+    def test_event_url_is_sanitized(self, rec):
+        r, b, db, cw = rec
+        b.url = "https://accounts.google.com/o/oauth2/auth?state=s&nonce=n"
+        r._tick(RawEvent(kind="mouse_down", ts=101.0, x=1, y=1), 101.0)
+        r.flush_for_capture()
+        assert stored(db)[0].url == "https://accounts.google.com/"
+
+    def test_click_in_other_app_gets_no_url(self, rec):
+        r, b, db, cw = rec
+        b.url = "https://linear.app/x"
+        b.element = ElementInfo(role="AXButton", name="Reload", pid=2)  # Safari, not frontmost
+        r._tick(RawEvent(kind="mouse_down", ts=101.0, x=1, y=1), 101.0)
+        r.flush_for_capture()
+        assert stored(db)[0].url is None
+
+    def test_app_switch_gets_url(self, rec):
+        r, b, db, cw = rec
+        b.url = "https://docs.google.com/document/d/1"
+        b.front = FrontWindow(pid=2, app_name="Safari", title="Plan")
+        r._tick(None, 101.0)
+        r.flush_for_capture()
+        [e] = stored(db)
+        assert e.url == "https://docs.google.com/document/d/1"
+        assert e.describe() == "switched to Safari (docs.google.com): Plan"
+
+    def test_browser_tab_switch_recorded_without_window_focus_type(self, rec):
+        r, b, db, cw = rec
+        b.url = "https://a.com/1"
+        b.front = FrontWindow(pid=1, app_name="Slack", title="Page A")
+        r._tick(None, 101.0)
+        b.url = "https://b.com/2"
+        b.front = FrontWindow(pid=1, app_name="Slack", title="Page B")
+        r._tick(None, 102.0)
+        r.flush_for_capture()
+        events = stored(db)
+        assert [(e.type, e.url) for e in events] == [
+            (EventType.WINDOW_FOCUS, "https://a.com/1"),
+            (EventType.WINDOW_FOCUS, "https://b.com/2"),
+        ]
+        cw.request_capture.assert_called_with("page_change", 1.0)
+
+    def test_browser_title_change_same_url_not_recorded(self, rec):
+        r, b, db, cw = rec
+        b.url = "https://app.slack.com/client"
+        b.front = FrontWindow(pid=1, app_name="Slack", title="Slack")
+        r._tick(None, 101.0)
+        b.front = FrontWindow(pid=1, app_name="Slack", title="(3) Slack")
+        r._tick(None, 102.0)
+        r.flush_for_capture()
+        assert len(stored(db)) == 1
+
+    def test_non_browser_title_change_not_recorded_by_default(self, rec):
+        r, b, db, cw = rec
+        b.front = FrontWindow(pid=1, app_name="Slack", title="random")
+        r._tick(None, 101.0)
+        r.flush_for_capture()
+        assert stored(db) == []
+
     def test_clipboard_change(self, rec):
         r, b, db, cw = rec
         b.clip_count = 1
@@ -390,6 +461,12 @@ class TestDatabase:
         cols = [r[1] for r in conn.execute("PRAGMA table_info(activities)")]
         assert "user_actions" in cols
         conn.execute("SELECT * FROM ui_events LIMIT 0")
+
+    def test_url_column_roundtrip(self, db):
+        t0 = datetime(2026, 10, 6, 10, 0, 0)
+        db.insert_ui_events([_ev(t0, url="https://linear.app/x")])
+        rows = db.get_ui_events_range(t0.isoformat(), t0.isoformat())
+        assert rows[0]["url"] == "https://linear.app/x"
 
     def test_insert_attach_get(self, db):
         t0 = datetime(2026, 10, 6, 10, 0, 0)
@@ -515,3 +592,29 @@ def test_format_skips_unnamed_clicks():
          "element_name": "Send", "text": None},
     ]
     assert format_user_actions(rows) == '- clicked button "Send" in Slack'
+
+
+# ── Summary and chat context ────────────────────────────────────────
+
+
+class TestActionsInContext:
+    def test_summary_actions_line(self):
+        from screenmind.api.routes.summary import _actions_line
+        text = '- switched to Slack\n- typed "ship it" in text area (Slack)'
+        assert _actions_line(text) == 'switched to Slack; typed "ship it" in text area (Slack)'
+        assert _actions_line(None) == ""
+        assert len(_actions_line("- " + "x" * 500)) == 200
+
+    def test_chat_context_includes_actions(self):
+        from screenmind.api.routes.chat import _build_timeline_context
+        primary = {"id": 1, "app_name": "Slack", "_relevance": 3, "ocr_text": "general channel",
+                   "user_actions": '- typed "will push the fix today" in text area (Slack)'}
+        ctx, _, _ = _build_timeline_context(primary, [primary], [], lambda m: m)
+        assert "[User actions before this screenshot]" in ctx
+        assert "will push the fix today" in ctx
+
+    def test_chat_context_without_actions(self):
+        from screenmind.api.routes.chat import _build_timeline_context
+        primary = {"id": 1, "app_name": "Slack", "_relevance": 3, "ocr_text": "general channel"}
+        ctx, _, _ = _build_timeline_context(primary, [primary], [], lambda m: m)
+        assert "User actions" not in ctx

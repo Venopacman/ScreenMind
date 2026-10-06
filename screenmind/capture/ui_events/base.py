@@ -75,6 +75,14 @@ class UiEventBackend(ABC):
     def front_window(self) -> Optional[FrontWindow]:
         ...
 
+    def browser_url(self) -> Optional[str]:
+        """Page URL of the frontmost browser window, or None."""
+        try:
+            from screenmind.platform_support import adapter
+            return adapter().get_browser_url()
+        except Exception:
+            return None
+
     def app_name_for_pid(self, pid: int) -> Optional[str]:
         """Name of the app that owns a process. Optional for backends."""
         return None

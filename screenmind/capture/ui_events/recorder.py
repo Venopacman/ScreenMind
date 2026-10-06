@@ -45,6 +45,7 @@ TRIGGER_DELAYS = {
     "app_switch": 1.0,
     "click": 1.5,
     "typing_pause": 0.5,
+    "page_change": 1.0,
 }
 
 
@@ -85,6 +86,7 @@ class UiEventRecorder:
         self._focus_ts = 0.0
         self._clip_count: Optional[int] = None
         self._clip_check_at = 0.0
+        self._last_browser_url: Optional[str] = None
         self._last_front_poll = 0.0
         self._last_clip_poll = 0.0
         self._last_db_flush = 0.0
@@ -229,12 +231,26 @@ class UiEventRecorder:
         if front.pid != prev.pid or front.app_name != prev.app_name:
             self._emit_chunk(self._buffer.flush(), trigger=False)
             self._focus = None
+            self._last_browser_url = None
             if self._type_enabled(EventType.APP_SWITCH) and self._should_record(front.app_name):
-                self._add(EventType.APP_SWITCH, now, front.app_name, front.title)
+                url = self._page_url()
+                self._last_browser_url = url
+                self._add(EventType.APP_SWITCH, now, front.app_name, front.title, url=url)
                 self._trigger("app_switch")
         elif front.title != prev.title and front.title:
-            if self._type_enabled(EventType.WINDOW_FOCUS) and self._should_record(front.app_name):
-                self._add(EventType.WINDOW_FOCUS, now, front.app_name, front.title)
+            if not self._should_record(front.app_name):
+                return
+            url = self._page_url()
+            page_changed = bool(url) and url != self._last_browser_url
+            if url:
+                self._last_browser_url = url
+            # Browsers: record tab switches and navigation even when
+            # window_focus is off, but only when the URL changed. Page
+            # titles alone change all the time ("(3) Slack").
+            if self._type_enabled(EventType.WINDOW_FOCUS) or page_changed:
+                self._add(EventType.WINDOW_FOCUS, now, front.app_name, front.title, url=url)
+            if page_changed:
+                self._trigger("page_change")
 
     def _on_click(self, raw: RawEvent):
         # A click moves the text cursor, so the current chunk ends here.
@@ -246,17 +262,19 @@ class UiEventRecorder:
         app_name = self._app_for(element)
         if not self._should_record(app_name):
             return
-        window = self._front.title if self._front and self._front.app_name == app_name else None
+        in_front = bool(self._front) and self._front.app_name == app_name
+        window = self._front.title if in_front else None
+        url = self._page_url() if in_front else None
         if element and element.is_password:
             self._add(EventType.CLICK, raw.ts, app_name, window,
                       element_role=element.role, element_name=PASSWORD_PLACEHOLDER,
-                      x=raw.x, y=raw.y)
+                      x=raw.x, y=raw.y, url=url)
         else:
             self._add(EventType.CLICK, raw.ts, app_name, window,
                       element_role=element.role if element else None,
                       element_name=self._clean(element.name) if element else None,
                       element_value=self._clean(element.value) if element else None,
-                      x=raw.x, y=raw.y)
+                      x=raw.x, y=raw.y, url=url)
         if not (element and element.is_text_input):
             self._trigger("click")
 
@@ -309,6 +327,15 @@ class UiEventRecorder:
             self._focus = self._backend.focused_element()
             self._focus_ts = now
         return self._focus
+
+    def _page_url(self) -> Optional[str]:
+        """Browser page URL of the frontmost window (None for other apps).
+        Sanitized like active_url: no query strings, no sign-in/token pages."""
+        try:
+            from screenmind.privacy.url_filter import sanitize_url
+            return self._clean(sanitize_url(self._backend.browser_url()))
+        except Exception:
+            return None
 
     def _app_for(self, element: Optional[ElementInfo]) -> Optional[str]:
         if element and element.pid:

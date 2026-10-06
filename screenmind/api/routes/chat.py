@@ -21,6 +21,13 @@ logger = logging.getLogger("screenmind.api.routes.chat")
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
+def _user_actions_block(activity) -> str:
+    """What the user did right before this frame (clicks, typed text, app
+    switches from UI events), as a context section. Empty if none."""
+    actions = (activity.get("user_actions") or "").strip() if activity else ""
+    return f"[User actions before this screenshot]\n{actions}" if actions else ""
+
+
 def _build_timeline_context(primary, top, sources, send_progress):
     """
     Given a ranked list of candidate activities, build timeline_context,
@@ -50,6 +57,9 @@ def _build_timeline_context(primary, top, sources, send_progress):
         if len(screen_text) > 3000:
             screen_text = screen_text[:3000]
         timeline_context = f"[Screen \u2014 {primary.get('app_name', 'Unknown')}]\n{screen_text}"
+        actions = _user_actions_block(primary)
+        if actions:
+            timeline_context += f"\n\n{actions}"
         screenshot_path = primary.get("screenshot_path")
     else:
         img_path = primary.get("screenshot_path")
@@ -201,7 +211,7 @@ async def chat_with_memory(request: Request):
                 candidate_rows = conn.execute(
                     f"""SELECT id, timestamp, app_name, category, summary, details,
                            ocr_text, organized_text, screenshot_path, window_title,
-                           scene_description, embedding
+                           scene_description, embedding, user_actions
                     FROM activities
                     WHERE id IN ({placeholders}) AND status = 'ok'{_date_filter_sql}
                     ORDER BY timestamp DESC""",
@@ -215,7 +225,7 @@ async def chat_with_memory(request: Request):
                     fill_rows = conn.execute(
                         f"""SELECT id, timestamp, app_name, category, summary, details,
                                ocr_text, organized_text, screenshot_path, window_title,
-                               scene_description, embedding
+                               scene_description, embedding, user_actions
                         FROM activities
                         WHERE status = 'ok' AND embedding IS NOT NULL{_date_filter_sql}
                         ORDER BY timestamp DESC LIMIT 10""",
@@ -301,7 +311,7 @@ async def chat_with_memory(request: Request):
                 fallback_rows = conn.execute(
                     f"""SELECT id, timestamp, app_name, category, summary, details,
                            ocr_text, organized_text, screenshot_path, window_title,
-                           scene_description, embedding
+                           scene_description, embedding, user_actions
                     FROM activities
                     WHERE status = 'ok' AND embedding IS NOT NULL{_date_filter_sql}
                     ORDER BY timestamp DESC LIMIT 500""",
@@ -388,6 +398,8 @@ async def chat_with_memory(request: Request):
                 f"Below is text extracted from a {app_name} screenshot, organized by visual sections. "
                 f"{section_hint} "
                 f"{('Scene: ' + scene + '. ') if scene else ''}"
+                f"A [User actions before this screenshot] section, if present, lists exactly "
+                f"what the user clicked, typed and switched to (from OS events). "
                 f"Answer the user's question based on the text. "
                 f"Be specific — quote actual text from the screen when relevant."
             )
@@ -429,14 +441,18 @@ async def chat_with_memory(request: Request):
             img.save(buf, format="JPEG", quality=85)
 
             ocr = (primary.get("organized_text") or primary.get("ocr_text") or "").strip()
-            user_content = question
+            parts = []
             if ocr and q_keywords:
                 ocr_lines = [l.strip() for l in ocr.split('\n') if len(l.strip()) > 2]
                 relevant = [l for l in ocr_lines
                             if any(k.lower() in l.lower() for k in q_keywords)]
                 if relevant:
                     snippet = '\n'.join(relevant[:10])
-                    user_content = f"Relevant text from screen:\n{snippet}\n\nQuestion: {question}"
+                    parts.append(f"Relevant text from screen:\n{snippet}")
+            actions = _user_actions_block(primary)
+            if actions:
+                parts.append(actions)
+            user_content = "\n\n".join(parts + [f"Question: {question}"]) if parts else question
 
             import base64 as _b64
             img_b64 = _b64.b64encode(buf.getvalue()).decode()

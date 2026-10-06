@@ -491,10 +491,12 @@ class CaptureWorker:
 
 
 def _get_browser_url() -> Optional[str]:
-    """Current page URL from the frontmost browser, read at capture time."""
+    """Current page URL from the frontmost browser, read at capture time.
+    Sanitized before storage: no query strings, no sign-in/token pages."""
     try:
         from screenmind.platform_support import adapter
-        return adapter().get_browser_url()
+        from screenmind.privacy.url_filter import sanitize_url
+        return sanitize_url(adapter().get_browser_url())
     except Exception:
         return None
 

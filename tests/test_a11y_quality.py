@@ -120,6 +120,16 @@ class TestTitlesAndUrls:
              patch.object(MacOSAdapter, "enable_full_a11y_tree"):
             assert mac._ax_document_title(7) == "Chat name - Claude Code"
 
+    def test_document_title_uses_window_with_matching_bounds(self, mac):
+        """Two windows of one app on two displays: use the one at these bounds."""
+        win_b = FakeEl("AXWindow", children=[FakeEl("AXWebArea", title="Chat B")])
+        with patch.object(MacOSAdapter, "_ax_window_at", return_value=win_b) as at, \
+             patch.object(MacOSAdapter, "_ax_focused_window") as focused, \
+             patch.object(MacOSAdapter, "enable_full_a11y_tree"):
+            assert mac._ax_document_title(7, (1512, -275, 2198, 1257)) == "Chat B"
+            at.assert_called_once_with(7, (1512, -275, 2198, 1257))
+            focused.assert_not_called()
+
     def test_browser_url(self, mac):
         win = FakeEl("AXWindow", children=[FakeEl("AXGroup", children=[
             FakeEl("AXWebArea", AXURL="https://truto.one/page")])])
@@ -132,3 +142,11 @@ class TestTitlesAndUrls:
         front = {"owner": "Terminal", "pid": 7, "title": "x", "bounds": (0, 0, 1, 1)}
         with patch.object(MacOSAdapter, "_front_window", return_value=front):
             assert mac.get_browser_url() is None
+
+
+def test_top_window_in_uses_electron_title(mac):
+    """Per-display labels must get the same Electron title fallback."""
+    win = {"owner": "Claude", "pid": 7, "title": "Claude", "bounds": (0, 0, 1, 1)}
+    with patch.object(MacOSAdapter, "_front_window", return_value=win), \
+         patch.object(MacOSAdapter, "_ax_document_title", return_value="My chat - Claude Code"):
+        assert mac.get_top_window_in(0, 0, 100, 100) == ("Claude", "My chat - Claude Code")
