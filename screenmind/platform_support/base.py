@@ -32,6 +32,14 @@ class PlatformAdapter(ABC):
         """Focused window as (x, y, width, height), or None if not supported."""
         return None
 
+    def get_top_window_in(self, x: int, y: int, width: int, height: int) -> Optional[Tuple[str, Optional[str]]]:
+        """(app, title) of the top window on the display at this rect.
+
+        Used when every display is captured, so each screenshot is labeled with
+        the app it shows. None means "not supported" or "no window there".
+        """
+        return None
+
     @abstractmethod
     def extract_a11y_text(self, hwnd: Optional[int] = None) -> Tuple[Optional[str], str]:
         """

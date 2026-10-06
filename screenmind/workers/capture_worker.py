@@ -17,7 +17,7 @@ from PIL import Image
 
 from screenmind.capture.screen import ScreenCapture
 from screenmind.capture.dedup import ScreenDeduplicator
-from screenmind.capture.window import get_active_window_title, get_active_app_name
+from screenmind.capture.window import get_active_window_title, get_active_app_name, get_top_window_in
 from screenmind.config import settings
 from screenmind.engine.a11y_extractor import A11yExtractor
 from screenmind.storage.models import ScreenshotEntry
@@ -55,7 +55,8 @@ class CaptureWorker:
         self._queue = queue
         self._db = database
         self._screen = ScreenCapture()
-        self._dedup = ScreenDeduplicator(threshold=8)
+        self._dedup = ScreenDeduplicator(threshold=8)  # single-display path
+        self._monitor_dedups: dict = {}  # monitor key -> ScreenDeduplicator (all-displays path)
         self._a11y = A11yExtractor()  # Runs at capture time for correct window
         self._paused = True  # Start paused — user must explicitly start capture
         self._running = False
@@ -126,14 +127,9 @@ class CaptureWorker:
                 await asyncio.sleep(0.5)
 
     async def _capture_tick(self, trigger="periodic"):
-        """Capture a screenshot and enqueue if content changed."""
+        """Capture a screenshot of each display and enqueue the ones that changed."""
         try:
-            # Check privacy zones
             app_name = get_active_app_name()
-            if app_name and app_name.lower() in [
-                a.lower() for a in settings.blocked_apps_list
-            ]:
-                return
 
             # Auto-pause for heavy apps (games, video editors)
             if settings.auto_pause_heavy_apps and app_name:
@@ -150,69 +146,29 @@ class CaptureWorker:
 
             window_title = get_active_window_title()
 
-            # Capture screenshot
-            result = self._screen.capture()
-            if result is None:
-                return
-
-            filepath, image = result
-
-            # Check for duplicate (content-change detection)
-            monitor_key = self._screen.last_monitor_key
-            if self._dedup.is_duplicate(image, monitor_key=monitor_key):
-                self._skip_count += 1
-                self._consecutive_skips += 1
-                try:
-                    filepath.unlink()
-                except OSError:
-                    pass
-                return
-
-            # Content has changed! Save it.
-            self._consecutive_skips = 0  # Reset idle detection
-            now = datetime.now()
-
-            # Insert to DB immediately so it shows in timeline right away
-            activity_id = None
-            if self._db:
-                entry = ScreenshotEntry(
-                    timestamp=now,
-                    screenshot_path=str(filepath),
-                    window_title=window_title,
-                    detected_app_name=app_name,
-                    bookmarked=False,
-                    analyzed=False,
+            monitors = self._screen.monitors_to_capture()
+            active = self._screen.active_monitor() if len(monitors) > 1 else None
+            attempted = saved = False
+            for monitor in monitors:
+                mon_app, mon_title, focused = self._label_monitor(
+                    monitor, active, app_name, window_title
                 )
-                activity_id = self._db.insert_activity(entry)
 
-            # A11y extraction — MUST happen now while window is still focused
-            # This fixes the wrong-window bug (analysis worker runs later)
-            a11y_text = None
-            if self._a11y.is_available:
-                a11y_text, _ = self._a11y.extract_text()
+                # Check privacy zones
+                if self._is_blocked(mon_app) or (mon_app is None and self._is_blocked(app_name)):
+                    continue
 
-            capture_result = CaptureResult(
-                filepath=filepath,
-                timestamp=now,
-                window_title=window_title,
-                app_name=app_name,
-                bookmarked=False,
-                image=image,
-                activity_id=activity_id,
-                a11y_text=a11y_text,
-                phash=self._dedup.last_computed_hash,
-            )
+                attempted = True
+                if await self._capture_monitor(monitor, mon_app, mon_title, focused, trigger):
+                    saved = True
 
-            await self._queue.put(capture_result)
-            self._capture_count += 1
+            if not saved:
+                if attempted:
+                    self._consecutive_skips += 1
+                return
+
+            self._consecutive_skips = 0  # Reset idle detection
             self._last_save_time = time.time()
-
-            trigger_label = "[snap]" if trigger == "periodic" else "[change]"
-            logger.info(
-                f"{trigger_label} Captured #{self._capture_count} "
-                f"({app_name or 'unknown'}: {_truncate(window_title, 50)}) "
-                f"[skipped: {self._skip_count}]"
-            )
 
             # Smart notifications check
             try:
@@ -223,6 +179,104 @@ class CaptureWorker:
 
         except Exception as e:
             logger.error(f"Error: {e}")
+
+    def _is_blocked(self, app_name: Optional[str]) -> bool:
+        return bool(app_name) and app_name.lower() in [
+            a.lower() for a in settings.blocked_apps_list
+        ]
+
+    def _label_monitor(self, monitor, active, app_name, window_title):
+        """Return (app, title, focused) for the app shown on this display.
+
+        monitor=None is the single-display path: the focused app labels it.
+        With several displays, each one is labeled with its own top window, so
+        a call on one screen and an editor on the other get separate entries.
+        """
+        if monitor is None:
+            return app_name, window_title, True
+
+        focused = monitor == active
+        top = get_top_window_in(monitor)
+        if top:
+            return top[0], top[1], focused
+        # Adapter can't tell (Windows/Linux): only the focused display is known
+        if focused:
+            return app_name, window_title, True
+        return None, None, False
+
+    def _dedup_for(self, monitor) -> ScreenDeduplicator:
+        if monitor is None:
+            return self._dedup
+        key = f"{monitor['left']},{monitor['top']}"
+        if key not in self._monitor_dedups:
+            self._monitor_dedups[key] = ScreenDeduplicator(threshold=8)
+        return self._monitor_dedups[key]
+
+    async def _capture_monitor(self, monitor, app_name, window_title, focused, trigger) -> bool:
+        """Capture one display. Returns True if a new frame was saved and enqueued."""
+        result = self._screen.capture(monitor)
+        if result is None:
+            return False
+
+        filepath, image = result
+
+        # Check for duplicate (content-change detection)
+        dedup = self._dedup_for(monitor)
+        # Per-display dedups never switch monitors; the single one may (active-monitor mode)
+        monitor_key = self._screen.last_monitor_key if monitor is None else None
+        if dedup.is_duplicate(image, monitor_key=monitor_key):
+            self._skip_count += 1
+            try:
+                filepath.unlink()
+            except OSError:
+                pass
+            return False
+
+        # Content has changed! Save it.
+        now = datetime.now()
+
+        # Insert to DB immediately so it shows in timeline right away
+        activity_id = None
+        if self._db:
+            entry = ScreenshotEntry(
+                timestamp=now,
+                screenshot_path=str(filepath),
+                window_title=window_title,
+                detected_app_name=app_name,
+                bookmarked=False,
+                analyzed=False,
+            )
+            activity_id = self._db.insert_activity(entry)
+
+        # A11y extraction — MUST happen now while window is still focused
+        # This fixes the wrong-window bug (analysis worker runs later).
+        # It reads the focused window, so skip it for the other displays.
+        a11y_text = None
+        if focused and self._a11y.is_available:
+            a11y_text, _ = self._a11y.extract_text()
+
+        capture_result = CaptureResult(
+            filepath=filepath,
+            timestamp=now,
+            window_title=window_title,
+            app_name=app_name,
+            bookmarked=False,
+            image=image,
+            activity_id=activity_id,
+            a11y_text=a11y_text,
+            phash=dedup.last_computed_hash,
+        )
+
+        await self._queue.put(capture_result)
+        self._capture_count += 1
+
+        trigger_label = "[snap]" if trigger == "periodic" else "[change]"
+        logger.info(
+            f"{trigger_label} Captured #{self._capture_count} "
+            f"({app_name or 'unknown'}: {_truncate(window_title, 50)}) "
+            f"[skipped: {self._skip_count}]"
+        )
+        return True
 
     def trigger_bookmark(self):
         """
@@ -236,11 +290,20 @@ class CaptureWorker:
             logger.error(f"Bookmark error: {e}")
 
     async def _do_bookmark_capture(self):
-        """Perform an immediate bookmarked capture."""
+        """Perform an immediate bookmarked capture of each display."""
         window_title = get_active_window_title()
         app_name = get_active_app_name()
 
-        result = self._screen.capture()
+        monitors = self._screen.monitors_to_capture()
+        active = self._screen.active_monitor() if len(monitors) > 1 else None
+        for monitor in monitors:
+            mon_app, mon_title, focused = self._label_monitor(
+                monitor, active, app_name, window_title
+            )
+            await self._bookmark_monitor(monitor, mon_app, mon_title, focused)
+
+    async def _bookmark_monitor(self, monitor, app_name, window_title, focused):
+        result = self._screen.capture(monitor)
         if result is None:
             return
 
@@ -264,7 +327,7 @@ class CaptureWorker:
 
         # A11y extraction at capture time (correct window)
         a11y_text = None
-        if self._a11y.is_available:
+        if focused and self._a11y.is_available:
             a11y_text, _ = self._a11y.extract_text()
 
         # Compute pHash for bookmark captures (dedup doesn't run for bookmarks)
@@ -293,6 +356,7 @@ class CaptureWorker:
             return  # Already paused — skip redundant persist + log
         self._paused = True
         self._dedup.reset()
+        self._monitor_dedups.clear()
         try:
             settings.save_runtime_overrides({"capture_paused": True})
         except Exception:

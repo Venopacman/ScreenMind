@@ -7,7 +7,7 @@ This module now delegates to the platform_support adapter for cross-platform
 compatibility. The API remains identical for backward compatibility.
 """
 
-from typing import Optional
+from typing import Optional, Tuple
 
 from screenmind.platform_support import adapter
 
@@ -34,5 +34,23 @@ def get_active_app_name() -> Optional[str]:
     """
     try:
         return adapter().get_active_app_name()
+    except Exception:
+        return None
+
+
+def get_top_window_in(monitor: dict) -> Optional[Tuple[str, Optional[str]]]:
+    """
+    Get (app name, window title) of the top window on one display.
+
+    Args:
+        monitor: mss monitor dict (left, top, width, height).
+
+    Returns:
+        (app, title) tuple, or None if unsupported or no window found.
+    """
+    try:
+        return adapter().get_top_window_in(
+            monitor["left"], monitor["top"], monitor["width"], monitor["height"]
+        )
     except Exception:
         return None

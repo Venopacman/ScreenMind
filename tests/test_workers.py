@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock
 
 from screenmind.workers.capture_worker import CaptureWorker, CaptureResult
+import screenmind.config as settings_mod
 
 
 class TestCaptureWorker:
@@ -204,3 +205,123 @@ class TestAnalysisWorkerBackfill:
         capture = worker._process.await_args.args[0]
         assert capture.app_name == "Telegram"
         assert capture.window_title == "Chats"
+
+
+class TestCaptureAllMonitors:
+    """Several displays: one entry per display, each labeled with its own app."""
+
+    LAPTOP = {"left": 0, "top": 0, "width": 1512, "height": 982}
+    DELL = {"left": 1512, "top": 0, "width": 2288, "height": 1287}
+
+    def _make_worker(self, tmp_path, tops, active):
+        from PIL import Image
+
+        worker = CaptureWorker(queue=asyncio.Queue(maxsize=100))
+        colors = iter([(255, 0, 0), (0, 0, 255), (0, 255, 0), (255, 255, 0)])
+
+        def capture(monitor=None):
+            path = tmp_path / f"{monitor['left']}.jpg"
+            img = Image.new("RGB", (64, 64), next(colors))
+            # Make the frames visually distinct for pHash
+            for x in range(0, 64, 8 if monitor is self.LAPTOP else 16):
+                for y in range(64):
+                    img.putpixel((x, y), (0, 0, 0))
+            img.save(path)
+            worker._screen._last_monitor_key = f"{monitor['left']},{monitor['top']}"
+            return path, img
+
+        screen = MagicMock()
+        screen.monitors_to_capture.return_value = [self.LAPTOP, self.DELL]
+        screen.active_monitor.return_value = active
+        screen.capture.side_effect = capture
+        type(screen).last_monitor_key = property(lambda s: s._last_monitor_key)
+        worker._screen = screen
+        worker._a11y = MagicMock(is_available=True)
+        worker._a11y.extract_text.return_value = ("focused window text", "a11y")
+
+        patches = [
+            patch("screenmind.workers.capture_worker.get_active_app_name", return_value="Claude"),
+            patch("screenmind.workers.capture_worker.get_active_window_title", return_value="Claude"),
+            patch("screenmind.workers.capture_worker.get_top_window_in",
+                  side_effect=lambda m: tops.get(m["left"])),
+        ]
+        for p in patches:
+            p.start()
+        return worker, patches
+
+    async def _drain(self, worker):
+        items = []
+        while not worker._queue.empty():
+            items.append(await worker._queue.get())
+        return items
+
+    @pytest.mark.asyncio
+    async def test_one_entry_per_display(self, tmp_path):
+        tops = {0: ("Google Chrome", "Meet - Standup"), 1512: ("Claude", "Claude")}
+        worker, patches = self._make_worker(tmp_path, tops, active=self.DELL)
+        try:
+            await worker._capture_tick()
+            items = await self._drain(worker)
+        finally:
+            for p in patches:
+                p.stop()
+
+        by_app = {i.app_name: i for i in items}
+        assert set(by_app) == {"Google Chrome", "Claude"}
+        assert by_app["Google Chrome"].window_title == "Meet - Standup"
+        # a11y reads the focused window, so only the focused display gets it
+        assert by_app["Claude"].a11y_text == "focused window text"
+        assert by_app["Google Chrome"].a11y_text is None
+
+    @pytest.mark.asyncio
+    async def test_blocked_app_display_skipped(self, tmp_path):
+        tops = {0: ("1Password", "Vault"), 1512: ("Claude", "Claude")}
+        worker, patches = self._make_worker(tmp_path, tops, active=self.DELL)
+        try:
+            with patch.object(type(settings_mod.settings), "blocked_apps_list",
+                              new_callable=lambda: property(lambda s: ["1password"])):
+                await worker._capture_tick()
+            items = await self._drain(worker)
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert [i.app_name for i in items] == ["Claude"]
+
+    @pytest.mark.asyncio
+    async def test_unknown_display_app_without_adapter_support(self, tmp_path):
+        """Windows/Linux: no per-display lookup, so only the focused display is labeled."""
+        worker, patches = self._make_worker(tmp_path, {}, active=self.DELL)
+        try:
+            await worker._capture_tick()
+            items = await self._drain(worker)
+        finally:
+            for p in patches:
+                p.stop()
+
+        by_path = {i.filepath.name: i for i in items}
+        assert by_path["1512.jpg"].app_name == "Claude"
+        assert by_path["0.jpg"].app_name is None
+
+    @pytest.mark.asyncio
+    async def test_dedup_is_per_display(self, tmp_path):
+        """Alternating displays must not reset each other's dedup hash."""
+        tops = {0: ("Google Chrome", "Meet"), 1512: ("Claude", "Claude")}
+        worker, patches = self._make_worker(tmp_path, tops, active=self.DELL)
+        try:
+            await worker._capture_tick()
+            first = await self._drain(worker)
+            worker._screen.capture.side_effect = None
+            frames = {i.filepath.name: i.image for i in first}
+            worker._screen.capture.side_effect = lambda monitor=None: (
+                tmp_path / f"{monitor['left']}.jpg", frames[f"{monitor['left']}.jpg"]
+            )
+            await worker._capture_tick()
+            second = await self._drain(worker)
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert len(first) == 2
+        assert second == []
+        assert worker._consecutive_skips == 1

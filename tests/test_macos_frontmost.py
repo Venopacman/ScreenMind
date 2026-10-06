@@ -111,3 +111,37 @@ def test_screen_capture_window_center_uses_adapter(monkeypatch):
 
     fake.get_active_window_bounds = lambda: None
     assert cap._window_center_macos() is None
+
+
+def _at(win, x, y):
+    return {**win, "kCGWindowBounds": {**win["kCGWindowBounds"], "X": x, "Y": y}}
+
+
+def test_top_window_per_display(fake_quartz, adapter):
+    """Call on the laptop, editor on the external display: each display gets its own app."""
+    laptop = (0, 0, 1512, 982)
+    dell = (1512, 0, 2288, 1287)
+    fake_quartz.windows = [
+        _at(_win("Claude", "Claude", 11, w=2000, h=1200), 1600, 40),   # focused, on Dell
+        _at(_win("Google Chrome", "Meet - Standup", 22, w=1400, h=900), 50, 40),
+        _at(_win("Slack", "general", 33, w=1200, h=800), 1700, 100),   # behind Claude
+    ]
+    assert adapter.get_top_window_in(*dell) == ("Claude", "Claude")
+    assert adapter.get_top_window_in(*laptop) == ("Google Chrome", "Meet - Standup")
+    # The global front window is unchanged
+    assert adapter.get_active_app_name() == "Claude"
+
+
+def test_top_window_in_empty_display(fake_quartz, adapter):
+    fake_quartz.windows = [_win("Terminal", "zsh", 7)]
+    assert adapter.get_top_window_in(5000, 0, 1920, 1080) is None
+
+
+def test_top_window_title_falls_back_to_owner(fake_quartz, adapter):
+    fake_quartz.windows = [_win("Finder", None, 5)]
+    assert adapter.get_top_window_in(0, 0, 1920, 1080) == ("Finder", "Finder")
+
+
+def test_base_adapter_top_window_default_none():
+    from screenmind.platform_support.base import PlatformAdapter
+    assert PlatformAdapter.get_top_window_in(object(), 0, 0, 100, 100) is None

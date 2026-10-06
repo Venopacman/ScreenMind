@@ -172,6 +172,23 @@ class ScreenCapture:
         x, y, w, h = bounds
         return x + w // 2, y + h // 2
 
+    def active_monitor(self) -> Optional[dict]:
+        """The mss monitor holding the focused window, or None on Wayland."""
+        if not self._sct:
+            return None
+        return self._get_active_monitor()
+
+    def monitors_to_capture(self) -> list:
+        """Monitors to grab this tick.
+
+        Every display when CAPTURE_ALL_MONITORS is on and there is more than one.
+        Otherwise [None], which means "let capture() pick one" (primary, or the
+        active one with CAPTURE_ACTIVE_MONITOR). Wayland always gets [None].
+        """
+        if self._sct and settings.capture_all_monitors and len(self._sct.monitors) > 2:
+            return list(self._sct.monitors[1:])
+        return [None]
+
     def _select_monitor(self) -> dict:
         """Pick the monitor to capture based on settings."""
         if settings.capture_active_monitor:
@@ -186,9 +203,13 @@ class ScreenCapture:
         """Key identifying the last captured monitor (e.g. '0,0'), or None."""
         return getattr(self, "_last_monitor_key", None)
 
-    def capture(self) -> Optional[Tuple[Path, Image.Image]]:
+    def capture(self, monitor: Optional[dict] = None) -> Optional[Tuple[Path, Image.Image]]:
         """
         Capture a screenshot and save as a compressed JPEG.
+
+        Args:
+            monitor: mss monitor dict from monitors_to_capture(). None picks
+                     one by settings (primary, or active if Beta enabled).
 
         Returns:
             Tuple of (saved file path, PIL Image) or None if capture fails.
@@ -198,8 +219,13 @@ class ScreenCapture:
 
         if self._sct:
             try:
-                # Grab the target monitor (primary by default, active if Beta enabled)
-                monitor = self._select_monitor()
+                suffix = ""
+                if monitor is None:
+                    monitor = self._select_monitor()
+                else:
+                    self._last_monitor_key = f"{monitor['left']},{monitor['top']}"
+                    # Displays grabbed in one tick can share a millisecond
+                    suffix = f"_m{self._sct.monitors.index(monitor)}"
                 raw = self._sct.grab(monitor)
 
                 # Convert to PIL Image (mss returns BGRA, PIL expects RGB)
@@ -210,7 +236,7 @@ class ScreenCapture:
                 date_dir = settings.screenshots_dir / now.strftime("%Y-%m-%d")
                 date_dir.mkdir(parents=True, exist_ok=True)
 
-                filename = f"{now.strftime('%H-%M-%S')}_{int(now.timestamp() * 1000) % 1000:03d}.jpg"
+                filename = f"{now.strftime('%H-%M-%S')}_{int(now.timestamp() * 1000) % 1000:03d}{suffix}.jpg"
                 filepath = date_dir / filename
 
                 img.save(

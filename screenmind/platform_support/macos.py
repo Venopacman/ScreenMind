@@ -44,13 +44,16 @@ class MacOSAdapter(PlatformAdapter):
     def platform_name(self) -> str:
         return "macOS"
 
-    def _front_window(self) -> Optional[dict]:
+    def _front_window(self, within: Optional[Tuple[int, int, int, int]] = None) -> Optional[dict]:
         """Return the frontmost normal window from Quartz (owner, pid, title, bounds).
 
         NSWorkspace.frontmostApplication() goes stale in a process without an
         NSRunLoop, so we read the live on-screen window list instead. It is
         ordered front to back; layer 0 is the normal app window layer.
         kCGWindowName needs Screen Recording permission, else it is empty.
+
+        With `within` (x, y, width, height), only windows whose center lies in
+        that rect count. This finds the top window on one display.
         """
         try:
             import Quartz  # type: ignore
@@ -64,6 +67,12 @@ class MacOSAdapter(PlatformAdapter):
                 bounds = w.get("kCGWindowBounds") or {}
                 if bounds.get("Width", 0) < 50 or bounds.get("Height", 0) < 50:
                     continue
+                if within:
+                    cx = bounds.get("X", 0) + bounds["Width"] / 2
+                    cy = bounds.get("Y", 0) + bounds["Height"] / 2
+                    rx, ry, rw, rh = within
+                    if not (rx <= cx < rx + rw and ry <= cy < ry + rh):
+                        continue
                 return {
                     "owner": w.get("kCGWindowOwnerName"),
                     "pid": w.get("kCGWindowOwnerPID"),
@@ -98,6 +107,13 @@ class MacOSAdapter(PlatformAdapter):
         """Frontmost window as (x, y, width, height) in global screen points."""
         front = self._front_window()
         return front["bounds"] if front else None
+
+    def get_top_window_in(self, x: int, y: int, width: int, height: int) -> Optional[Tuple[str, Optional[str]]]:
+        """(app, title) of the top window on the display at this rect."""
+        win = self._front_window(within=(x, y, width, height))
+        if not win or not win["owner"]:
+            return None
+        return win["owner"], win["title"] or win["owner"]
 
     # ── Accessibility ────────────────────────────────────────────────
 

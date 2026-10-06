@@ -118,6 +118,10 @@ class Settings(BaseSettings):
         default=False,
         description="(Beta) Capture the monitor with the active window instead of primary",
     )
+    capture_all_monitors: bool = Field(
+        default=True,
+        description="With several displays, capture each one every tick (one timeline entry per display). Off = one display only.",
+    )
     capture_paused: bool = Field(
         default=True,
         description="Persisted capture state. True = paused (default for fresh installs), False = capturing.",
