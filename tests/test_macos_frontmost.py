@@ -145,3 +145,14 @@ def test_top_window_title_falls_back_to_owner(fake_quartz, adapter):
 def test_base_adapter_top_window_default_none():
     from screenmind.platform_support.base import PlatformAdapter
     assert PlatformAdapter.get_top_window_in(object(), 0, 0, 100, 100) is None
+
+
+def test_get_front_window_public_shape():
+    from unittest.mock import patch
+    from screenmind.platform_support.macos import MacOSAdapter
+    a = MacOSAdapter.__new__(MacOSAdapter)
+    front = {"owner": "Slack", "pid": 42, "title": "general", "bounds": (0, 0, 800, 600)}
+    with patch.object(MacOSAdapter, "_front_window", return_value=front):
+        assert a.get_front_window() == {"pid": 42, "app_name": "Slack", "title": "general"}
+    with patch.object(MacOSAdapter, "_front_window", return_value=None):
+        assert a.get_front_window() is None

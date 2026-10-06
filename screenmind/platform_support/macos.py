@@ -139,6 +139,13 @@ class MacOSAdapter(PlatformAdapter):
             return None
         return win["owner"], win["title"] or win["owner"]
 
+    def get_front_window(self) -> Optional[dict]:
+        """Frontmost window as {"pid", "app_name", "title"}."""
+        front = self._front_window()
+        if not front:
+            return None
+        return {"pid": front["pid"], "app_name": front["owner"], "title": front["title"]}
+
     def get_browser_url(self) -> Optional[str]:
         """URL of the page in the frontmost browser window, or None if the
         frontmost app is not a browser or the URL is not exposed."""

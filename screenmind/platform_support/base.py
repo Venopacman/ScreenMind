@@ -40,6 +40,11 @@ class PlatformAdapter(ABC):
         """
         return None
 
+    def get_front_window(self) -> Optional[dict]:
+        """Frontmost window as {"pid", "app_name", "title"} from one consistent
+        OS snapshot, or None if not supported. Used by UI event capture."""
+        return None
+
     def get_browser_url(self) -> Optional[str]:
         """URL of the page in the frontmost browser window. None when the
         frontmost app is not a browser or the OS does not expose it."""
