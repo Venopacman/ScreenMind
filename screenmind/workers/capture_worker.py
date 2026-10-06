@@ -18,7 +18,9 @@ from PIL import Image
 
 from screenmind.capture.screen import ScreenCapture
 from screenmind.capture.dedup import ScreenDeduplicator
-from screenmind.capture.window import get_active_window_title, get_active_app_name, get_top_window_in
+from screenmind.capture.window import (
+    get_active_window_title, get_active_app_name, get_top_window_in, can_find_top_window,
+)
 from screenmind.config import settings
 from screenmind.engine.a11y_extractor import A11yExtractor
 from screenmind.storage.models import ScreenshotEntry
@@ -216,6 +218,12 @@ class CaptureWorker:
         top = get_top_window_in(monitor)
         if top:
             return top[0], top[1], focused
+        if can_find_top_window():
+            # Nothing open on this display (wallpaper only). Don't borrow the
+            # focused app's name, or the model describes a page that isn't there.
+            # Accessibility text would come from another display too, so treat
+            # the display as unfocused.
+            return None, None, False
         # Adapter can't tell (Windows/Linux): only the focused display is known
         if focused:
             return app_name, window_title, True

@@ -156,3 +156,10 @@ def test_get_front_window_public_shape():
         assert a.get_front_window() == {"pid": 42, "app_name": "Slack", "title": "general"}
     with patch.object(MacOSAdapter, "_front_window", return_value=None):
         assert a.get_front_window() is None
+
+
+def test_can_find_top_window_flags(adapter):
+    """macOS can tell an empty display from "unknown"; the base adapter can't."""
+    from screenmind.platform_support.base import PlatformAdapter
+    assert adapter.can_find_top_window is True
+    assert PlatformAdapter.can_find_top_window.fget(object()) is False

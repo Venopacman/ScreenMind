@@ -139,6 +139,10 @@ class MacOSAdapter(PlatformAdapter):
             return None
         return win["owner"], win["title"] or win["owner"]
 
+    @property
+    def can_find_top_window(self) -> bool:
+        return True
+
     def get_front_window(self) -> Optional[dict]:
         """Frontmost window as {"pid", "app_name", "title"}."""
         front = self._front_window()

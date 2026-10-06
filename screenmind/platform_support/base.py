@@ -36,9 +36,16 @@ class PlatformAdapter(ABC):
         """(app, title) of the top window on the display at this rect.
 
         Used when every display is captured, so each screenshot is labeled with
-        the app it shows. None means "not supported" or "no window there".
+        the app it shows. None means "not supported" or "no window there";
+        can_find_top_window tells the two apart.
         """
         return None
+
+    @property
+    def can_find_top_window(self) -> bool:
+        """True if get_top_window_in() works here, so None from it means the
+        display is empty (wallpaper only), not "unknown"."""
+        return False
 
     def get_browser_url(self) -> Optional[str]:
         """URL of the page in the frontmost browser window. None when the

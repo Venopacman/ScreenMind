@@ -213,7 +213,7 @@ class TestCaptureAllMonitors:
     LAPTOP = {"left": 0, "top": 0, "width": 1512, "height": 982}
     DELL = {"left": 1512, "top": 0, "width": 2288, "height": 1287}
 
-    def _make_worker(self, tmp_path, tops, active):
+    def _make_worker(self, tmp_path, tops, active, can_find=True):
         from PIL import Image
 
         worker = CaptureWorker(queue=asyncio.Queue(maxsize=100))
@@ -244,6 +244,7 @@ class TestCaptureAllMonitors:
             patch("screenmind.workers.capture_worker.get_active_window_title", return_value="Claude"),
             patch("screenmind.workers.capture_worker.get_top_window_in",
                   side_effect=lambda m: tops.get(m["left"])),
+            patch("screenmind.workers.capture_worker.can_find_top_window", return_value=can_find),
         ]
         for p in patches:
             p.start()
@@ -291,7 +292,7 @@ class TestCaptureAllMonitors:
     @pytest.mark.asyncio
     async def test_unknown_display_app_without_adapter_support(self, tmp_path):
         """Windows/Linux: no per-display lookup, so only the focused display is labeled."""
-        worker, patches = self._make_worker(tmp_path, {}, active=self.DELL)
+        worker, patches = self._make_worker(tmp_path, {}, active=self.DELL, can_find=False)
         try:
             await worker._capture_tick()
             items = await self._drain(worker)
@@ -302,6 +303,27 @@ class TestCaptureAllMonitors:
         by_path = {i.filepath.name: i for i in items}
         assert by_path["1512.jpg"].app_name == "Claude"
         assert by_path["0.jpg"].app_name is None
+
+    @pytest.mark.asyncio
+    async def test_empty_display_not_labeled_with_focused_app(self, tmp_path):
+        """macOS: a wallpaper-only display must not borrow the focused app's
+        name or accessibility text, even when it counts as the focused display
+        (the focus lookup falls back to the primary display)."""
+        tops = {1512: ("Google Chrome", "Device-based workflow capture")}
+        worker, patches = self._make_worker(tmp_path, tops, active=self.LAPTOP)
+        try:
+            await worker._capture_tick()
+            items = await self._drain(worker)
+        finally:
+            for p in patches:
+                p.stop()
+
+        by_path = {i.filepath.name: i for i in items}
+        empty = by_path["0.jpg"]
+        assert empty.app_name is None
+        assert empty.window_title is None
+        assert empty.a11y_text is None
+        assert by_path["1512.jpg"].app_name == "Google Chrome"
 
     @pytest.mark.asyncio
     async def test_dedup_is_per_display(self, tmp_path):

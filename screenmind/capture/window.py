@@ -38,6 +38,14 @@ def get_active_app_name() -> Optional[str]:
         return None
 
 
+def can_find_top_window() -> bool:
+    """Whether get_top_window_in() is supported on this OS."""
+    try:
+        return adapter().can_find_top_window
+    except Exception:
+        return False
+
+
 def get_top_window_in(monitor: dict) -> Optional[Tuple[str, Optional[str]]]:
     """
     Get (app name, window title) of the top window on one display.
