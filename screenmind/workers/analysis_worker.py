@@ -67,6 +67,9 @@ _A11Y_MIN_CONTENT_CHARS = 200
 # A11y text kept as a header above OCR text only when it is this short.
 _A11Y_MAX_PREFIX_CHARS = 500
 
+# Below this much screen text, an unlabeled frame counts as an empty display
+_EMPTY_SCREEN_MAX_TEXT = 20
+
 
 def _a11y_is_content(text: Optional[str], window_title: Optional[str] = None,
                      app_name: Optional[str] = None) -> bool:
@@ -407,6 +410,29 @@ class AnalysisWorker:
                     ocr_text = filter_result["clean_text"]
                 except Exception as e:
                     logger.warning(f"Sensitive filter error: {e}")
+
+            # 3c'. Nothing on screen: no window label and almost no text (e.g. a
+            #      display showing only the wallpaper). Skip Gemma. Without hints
+            #      it guesses a category ("coding"), and an empty display would
+            #      count as work time. Also saves a GPU call per empty display.
+            if (not capture.app_name and not capture.window_title
+                    and len((ocr_text or "").strip()) < _EMPTY_SCREEN_MAX_TEXT):
+                self._db.update_activity_analysis(
+                    activity_id=activity_id,
+                    analysis=ActivityRecord(
+                        activity_category="idle",
+                        activity_summary="No app or text on this display",
+                        mood="neutral",
+                        confidence=1.0,
+                    ),
+                    ocr_text=ocr_text,
+                    ocr_boxes=ocr_boxes_json,
+                    analysis_method="rule:empty_screen",
+                )
+                self._processed += 1
+                logger.info(f"#{self._processed} in {time.time() - start:.1f}s: "
+                            f"empty display (idle) [no Gemma]")
+                return
 
             # 3d. Extract URLs from text (for Gemma hint + DB storage)
             found_urls = _extract_all_urls(ocr_text)

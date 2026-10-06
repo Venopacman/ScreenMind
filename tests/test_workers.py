@@ -207,6 +207,61 @@ class TestAnalysisWorkerBackfill:
         assert capture.window_title == "Chats"
 
 
+class TestEmptyScreenRule:
+    """A frame with no app, no title and no text skips Gemma and is stored as idle."""
+
+    def _setup(self, db, tmp_path, ocr_text, app=None, title=None):
+        from PIL import Image
+        from screenmind.storage.models import ScreenshotEntry
+        from screenmind.workers.analysis_worker import AnalysisWorker
+
+        shot = tmp_path / "shot.jpg"
+        Image.new("RGB", (64, 64), "teal").save(shot)
+        activity_id = db.insert_activity(ScreenshotEntry(
+            timestamp=datetime.now(), screenshot_path=str(shot),
+            window_title=title, detected_app_name=app, bookmarked=False, analyzed=False,
+        ))
+        worker = AnalysisWorker(queue=asyncio.Queue(maxsize=100), database=db)
+        worker._ocr = MagicMock(is_available=True)
+        worker._ocr.extract_text_with_boxes.return_value = (ocr_text, [])
+        worker._analyzer = MagicMock()
+        worker._analyzer.analyze_screenshot_fast.side_effect = RuntimeError("gemma called")
+        worker._analyzer.analyze_screenshot_balanced.side_effect = RuntimeError("gemma called")
+        worker._analyzer.analyze_screenshot.side_effect = RuntimeError("gemma called")
+        capture = CaptureResult(
+            filepath=shot, timestamp=datetime.now(), window_title=title, app_name=app,
+            image=Image.open(shot), activity_id=activity_id,
+        )
+        return worker, capture, activity_id
+
+    def _gemma_called(self, worker):
+        a = worker._analyzer
+        return (a.analyze_screenshot_fast.called or a.analyze_screenshot_balanced.called
+                or a.analyze_screenshot.called)
+
+    async def test_wallpaper_only_is_idle_without_gemma(self, db, tmp_path):
+        worker, capture, activity_id = self._setup(db, tmp_path, ocr_text="")
+        await worker._process(capture)
+
+        row = db.get_activity_by_id(activity_id)
+        assert row["category"] == "idle"
+        assert row["analysis_method"] == "rule:empty_screen"
+        assert not self._gemma_called(worker)
+
+    async def test_unlabeled_display_with_text_still_analyzed(self, db, tmp_path):
+        """A floating call window has no normal window but plenty of text."""
+        worker, capture, _ = self._setup(
+            db, tmp_path, ocr_text="Max Bigin  Daniil Golovin  Pavel Granin  Leave call")
+        await worker._process(capture)
+        assert self._gemma_called(worker)
+
+    async def test_labeled_frame_never_hits_rule(self, db, tmp_path):
+        worker, capture, _ = self._setup(
+            db, tmp_path, ocr_text="", app="Google Chrome", title="New Tab")
+        await worker._process(capture)
+        assert self._gemma_called(worker)
+
+
 class TestCaptureAllMonitors:
     """Several displays: one entry per display, each labeled with its own app."""
 
