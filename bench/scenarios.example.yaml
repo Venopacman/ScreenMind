@@ -1,0 +1,25 @@
+# Copy to ~/.screenmind-bench/scenarios.yaml. Each key is a fixture made with
+#   .venv/bin/python bench/replay.py freeze <activity_id> --name <key>
+# Checks (all optional), on the row analysis writes:
+#   status, app_name_any, category_in, category_not_in,
+#   summary_any (one must appear in summary+details), summary_none, summary_not_generic,
+#   text_any, text_none, text_min_chars, text_max_chars, text_source_in (a11y|ocr|a11y+ocr|none),
+#   active_url, active_url_prefix, max_seconds
+# known_gap: <reason> reports a failing scenario as GAP instead of FAIL.
+
+scenarios:
+  browser_ticket:
+    record: [title, description, inputs]
+    expect:
+      status: ok
+      app_name_any: [Chrome]
+      category_in: [coding, browsing, writing]
+      summary_any: [ABC-123, ticket title words]
+      summary_not_generic: true
+      active_url_prefix: https://linear.app/
+      max_seconds: 120
+
+  idle_wallpaper:
+    expect:
+      category_in: [idle, other]
+    known_gap: desktop with no window gets the frontmost app's label
