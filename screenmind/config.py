@@ -122,6 +122,10 @@ class Settings(BaseSettings):
         default=True,
         description="Persisted capture state. True = paused (default for fresh installs), False = capturing.",
     )
+    capture_on_start: bool = Field(
+        default=False,
+        description="Always start capturing on launch, ignoring the persisted capture_paused state.",
+    )
 
     # ── Model ────────────────────────────────────────────────────────────
     gemma_mode: Literal["local", "api"] = Field(
