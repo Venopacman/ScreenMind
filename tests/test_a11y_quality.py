@@ -132,3 +132,11 @@ class TestTitlesAndUrls:
         front = {"owner": "Terminal", "pid": 7, "title": "x", "bounds": (0, 0, 1, 1)}
         with patch.object(MacOSAdapter, "_front_window", return_value=front):
             assert mac.get_browser_url() is None
+
+
+def test_top_window_in_uses_electron_title(mac):
+    """Per-display labels must get the same Electron title fallback."""
+    win = {"owner": "Claude", "pid": 7, "title": "Claude", "bounds": (0, 0, 1, 1)}
+    with patch.object(MacOSAdapter, "_front_window", return_value=win), \
+         patch.object(MacOSAdapter, "_ax_document_title", return_value="My chat - Claude Code"):
+        assert mac.get_top_window_in(0, 0, 100, 100) == ("Claude", "My chat - Claude Code")

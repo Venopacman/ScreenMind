@@ -117,10 +117,15 @@ class MacOSAdapter(PlatformAdapter):
         front = self._front_window()
         if not front:
             return None
-        title = front["title"]
-        if not title or title == front["owner"]:
-            title = self._ax_document_title(front["pid"]) or title
-        return title or front["owner"]
+        return self._best_title(front)
+
+    def _best_title(self, win: dict) -> Optional[str]:
+        """The Quartz title, or the web area title when Quartz only gives
+        the app name (Electron apps), or the app name as a last resort."""
+        title = win["title"]
+        if not title or title == win["owner"]:
+            title = self._ax_document_title(win["pid"]) or title
+        return title or win["owner"]
 
     def get_active_app_name(self) -> Optional[str]:
         """Get the app that owns the frontmost window."""
@@ -137,7 +142,7 @@ class MacOSAdapter(PlatformAdapter):
         win = self._front_window(within=(x, y, width, height))
         if not win or not win["owner"]:
             return None
-        return win["owner"], win["title"] or win["owner"]
+        return win["owner"], self._best_title(win)
 
     @property
     def can_find_top_window(self) -> bool:
