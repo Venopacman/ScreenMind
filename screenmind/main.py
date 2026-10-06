@@ -230,7 +230,10 @@ async def main():
     analysis_worker = AnalysisWorker(queue=processing_queue, database=db)
 
     # ── Restore persisted capture state ──────────────────────────────
-    if not settings.capture_paused:
+    if settings.capture_on_start:
+        capture_worker.resume(source="capture_on_start")
+        logger.info("Capture started (CAPTURE_ON_START).")
+    elif not settings.capture_paused:
         capture_worker.resume(source="startup_restore")
         logger.info("Capture auto-resumed from previous session.")
 
