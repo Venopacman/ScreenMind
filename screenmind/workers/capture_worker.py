@@ -214,13 +214,6 @@ class CaptureWorker:
                 f"[skipped: {self._skip_count}]"
             )
 
-            # Smart notifications check
-            try:
-                from screenmind.integrations.smart_notify import check as notify_check
-                notify_check(app_name or "")
-            except Exception:
-                pass
-
         except Exception as e:
             logger.error(f"Error: {e}")
 

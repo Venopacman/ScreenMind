@@ -465,8 +465,7 @@ Capabilities per platform:
 │                             └──────────┘  └────────────────┘  │
 │                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │                   Smart Notifications                     │  │
-│  │  • Distraction alert (N min on entertainment)            │  │
+│  │                       Auto-bookmark                       │  │
 │  │  • Auto-bookmark (keyword triggers: git push, deploy)    │  │
 │  └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘

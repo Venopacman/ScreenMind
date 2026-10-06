@@ -169,12 +169,6 @@ async function renderSettings(el) {
   + '<input type="text" id="auto-bookmark-keywords" class="settings-text-input" value="' + (cfg.auto_bookmark_keywords || '') + '" placeholder="git push,deploy,npm run build">'
   + '<div class="settings-note" style="margin-top:6px">Comma-separated. Matched against screen text and AI summaries.</div></div>'
 
-  + '<div class="settings-card"><div class="settings-card-header"><div><div class="settings-title">Smart Notifications</div><div class="settings-desc">Distraction alerts and focus streaks</div></div>'
-  + _sw('smart-notifications', cfg.smart_notifications) + '</div>'
-  + '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">'
-  + '<label style="font-size:0.82rem;color:var(--text-muted);display:flex;align-items:center;gap:6px">Distraction alert <input type="number" id="distraction-minutes" value="' + (cfg.distraction_minutes || 45) + '" min="10" max="180" style="width:55px;padding:4px 8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:var(--text-primary);text-align:center"> min</label>'
-  + '</div></div>'
-
   // ── PRIVACY & SECURITY ──
   + _sec('&#128737;', 'Privacy &amp; Security')
   + '<div class="settings-card"><div class="settings-card-header"><div><div class="settings-title">Sensitive Data Filter</div><div class="settings-desc">Auto-redact PII from captured text before storage</div></div>'
@@ -522,8 +516,6 @@ window.saveSettings = async function() {
     agents_auto_run_python: document.getElementById('agents-auto-run-python').checked,
     auto_bookmark: document.getElementById('auto-bookmark').checked,
     auto_bookmark_keywords: document.getElementById('auto-bookmark-keywords').value,
-    smart_notifications: document.getElementById('smart-notifications').checked,
-    distraction_minutes: parseInt(document.getElementById('distraction-minutes').value) || 45,
     // Privacy
     sensitive_filter_enabled: document.getElementById('sensitive-filter-enabled').checked,
     sensitive_filter_types: (function() {

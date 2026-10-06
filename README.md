@@ -94,7 +94,6 @@
 | 📓 **Obsidian** | Auto-sync daily summaries to your vault |
 | 📋 **Notion** | Push summaries to a Notion database |
 | 🪝 **Webhooks** | Fire events to Slack, Discord, IFTTT (HMAC signed, auto-retry) |
-| 🔔 **Smart Notifications** | Distraction alerts, focus streaks |
 | ⭐ **Auto-Bookmark** | Keyword triggers (`git push`, `deploy`) auto-flag important moments |
 
 </details>
@@ -637,8 +636,7 @@ screenmind/
 │   ├── integrations/              # External connections
 │   ├── obsidian.py            # Vault markdown export
 │   ├── notion.py              # Notion API export
-│   ├── webhooks.py            # HTTP webhooks (HMAC, retry)
-│   └── smart_notify.py        # Distraction/break notifications
+│   └── webhooks.py            # HTTP webhooks (HMAC, retry)
 │
 │   ├── api/                       # REST API + dashboard
 │   ├── server.py              # FastAPI app + auth middleware

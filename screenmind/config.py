@@ -79,7 +79,6 @@ _ALLOWED_OVERRIDES = {
     "notion_enabled", "notion_token", "notion_database_id",
     "webhook_enabled", "webhook_url", "webhook_events", "webhook_secret", "webhook_headers",
     "webhook_extra",
-    "smart_notifications", "distraction_minutes",
     "auto_bookmark", "auto_bookmark_keywords",
     "agents_enabled", "agents_auto_run_python",
     "sensitive_filter_enabled", "sensitive_filter_types",
@@ -246,10 +245,6 @@ class Settings(BaseSettings):
     webhook_secret: str = Field(default="", description="Optional HMAC secret for webhook signing")
     webhook_headers: str = Field(default="", description="Custom headers as Key: Value lines")
     webhook_extra: str = Field(default="[]", description="JSON array of extra named webhook profiles")
-
-    # ── Smart Notifications ──────────────────────────────────────────────
-    smart_notifications: bool = Field(default=True, description="Enable smart usage notifications")
-    distraction_minutes: int = Field(default=45, description="Alert after N minutes on entertainment apps")
 
     # ── Auto-Tagging ─────────────────────────────────────────────────────
     auto_bookmark: bool = Field(default=True, description="Auto-bookmark important moments")
