@@ -252,6 +252,13 @@ class Settings(BaseSettings):
     auto_bookmark: bool = Field(default=True, description="Auto-bookmark important moments")
     auto_bookmark_keywords: str = Field(default="git push,deploy,npm run build,docker,merge,pull request", description="Keywords that trigger auto-bookmark")
 
+    # ── OCR ───────────────────────────────────────────────────────────────
+    ocr_languages: str = Field(
+        default="en",
+        description="Comma-separated EasyOCR language codes, e.g. 'en,es,de,fr,ru'. "
+                    "Cyrillic codes (ru, uk, be, bg, ...) run a second recognizer (~+1s/frame on CPU).",
+    )
+
     # ── Agents ────────────────────────────────────────────────────────────
     agents_enabled: bool = Field(default=False, description="Enable the agent/plugin system")
     agents_auto_run_python: bool = Field(default=False, description="Run Python plugins without confirmation (default: ask)")
@@ -317,6 +324,12 @@ class Settings(BaseSettings):
             for d in self.workspace_dirs.split(",")
             if d.strip()
         ]
+
+    @property
+    def ocr_languages_list(self) -> List[str]:
+        """Parsed list of OCR language codes (always non-empty)."""
+        langs = [l.strip() for l in self.ocr_languages.split(",") if l.strip()]
+        return langs or ["en"]
 
     @property
     def blocked_apps_list(self) -> List[str]:
