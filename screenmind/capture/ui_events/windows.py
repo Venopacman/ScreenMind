@@ -99,8 +99,6 @@ CLIP_NO_CLOUD = "CanUploadToCloudClipboard"
 _HOOK_CHECK_MS = 10_000
 _HOOK_SILENT_S = 30.0
 
-# UIA timeouts (ms). The defaults let a hung app block a call for 20 s.
-_UIA_TIMEOUT_MS = 1000
 
 _MAX_VALUE_LEN = 200
 _MAX_NAME_LEN = 100
@@ -487,13 +485,8 @@ class WindowsUiEventBackend(UiEventBackend):
         return self._auto
 
     def _set_uia_timeouts(self):
-        try:
-            client = self._auto.uiautomation._AutomationClient.instance()
-            ia2 = client.IUIAutomation.QueryInterface(client.UIAutomationCore.IUIAutomation2)
-            ia2.ConnectionTimeout = _UIA_TIMEOUT_MS
-            ia2.TransactionTimeout = _UIA_TIMEOUT_MS
-        except Exception as e:
-            logger.debug(f"Could not set UIA timeouts: {e}")
+        from screenmind.platform_support.windows import set_uia_timeouts
+        set_uia_timeouts(self._auto)
 
     def _value_pattern(self, control):
         try:

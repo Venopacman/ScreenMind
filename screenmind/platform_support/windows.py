@@ -180,14 +180,37 @@ def uia():
         _uia_tls.init = ComInit(auto)
     if not _uia_timeouts_set:
         _uia_timeouts_set = True
-        try:
-            client = auto.uiautomation._AutomationClient.instance()
-            ia2 = client.IUIAutomation.QueryInterface(client.UIAutomationCore.IUIAutomation2)
-            ia2.ConnectionTimeout = _UIA_TIMEOUT_MS
-            ia2.TransactionTimeout = _UIA_TIMEOUT_MS
-        except Exception as e:
-            logger.debug(f"Could not set UIA timeouts: {e}")
+        set_uia_timeouts(auto)
     return auto
+
+
+_CLSID_CUIAutomation8 = "{e22ad333-b25f-460c-83d0-0581107395c9}"
+
+
+def set_uia_timeouts(auto) -> bool:
+    """Cut UIA's per-call timeouts to 1 s for uiautomation's shared client.
+
+    uiautomation creates the original CUIAutomation object, which has no
+    IUIAutomation2 and so no timeouts. Swap in CUIAutomation8 (Windows 8+),
+    which has them; the uiautomation API keeps working on it.
+    """
+    try:
+        client = auto.uiautomation._AutomationClient.instance()
+        core = client.UIAutomationCore
+        try:
+            ia2 = client.IUIAutomation.QueryInterface(core.IUIAutomation2)
+        except Exception:
+            import comtypes.client
+            ia8 = comtypes.client.CreateObject(_CLSID_CUIAutomation8, interface=core.IUIAutomation)
+            client.IUIAutomation = ia8
+            client.ViewWalker = ia8.RawViewWalker
+            ia2 = ia8.QueryInterface(core.IUIAutomation2)
+        ia2.ConnectionTimeout = _UIA_TIMEOUT_MS
+        ia2.TransactionTimeout = _UIA_TIMEOUT_MS
+        return True
+    except Exception as e:
+        logger.debug(f"Could not set UIA timeouts: {e!r}")
+        return False
 
 
 # Browsers whose foreground window's page Document carries the page URL.
@@ -198,6 +221,9 @@ _BROWSER_EXES = {
 # Only these count as the page URL. Others are browser pages (chrome://,
 # about:), extension pages (moz-extension://) or helper frames.
 _PAGE_URL_SCHEMES = ("http://", "https://", "file:///")
+# Documents that sit next to the page, not instead of it.
+_HELPER_DOC_SCHEMES = ("devtools://", "chrome-extension://", "moz-extension://",
+                       "extension://", "edge-extension://")
 
 
 def pick_page_document(docs: list) -> Optional[Tuple[str, str]]:
@@ -206,10 +232,14 @@ def pick_page_document(docs: list) -> Optional[Tuple[str, str]]:
     docs: dicts with name, url, nested (inside another Document: an iframe),
     onscreen (not IsOffscreen and a non-empty rect). Firefox also lists the
     Documents of background tabs, with their iframes, so only top-level,
-    on-screen Documents count. Exactly one must remain, and it must have a
-    web or file URL; otherwise None. A wrong URL is worse than none.
+    on-screen Documents count. Docked DevTools and extension side panels are
+    Documents of their own and are dropped first. Exactly one must remain,
+    and it must have a web or file URL; otherwise None. A browser page
+    (about:, chrome://) still counts as the page, so it gives None rather
+    than letting a side panel's URL stand in. A wrong URL is worse than none.
     """
-    shown = [d for d in docs if not d["nested"] and d["onscreen"] and d["url"]]
+    shown = [d for d in docs if not d["nested"] and d["onscreen"] and d["url"]
+             and not d["url"].lower().startswith(_HELPER_DOC_SCHEMES)]
     if len(shown) != 1:
         return None
     page = shown[0]
@@ -250,7 +280,8 @@ def _window_documents(hwnd: int) -> list:
                 parent = walker.GetParentElement(parent)
             out.append({"name": doc.CurrentName, "url": value if isinstance(value, str) else "",
                         "nested": nested, "onscreen": onscreen})
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Skipped a Document: {e!r}")
             continue
     return out
 
@@ -451,9 +482,14 @@ class WindowsAdapter(PlatformAdapter):
                 return None
             if (process_name(_window_pid(hwnd)) or "").lower() not in _BROWSER_EXES:
                 return None
-            page = pick_page_document(_window_documents(hwnd))
+            docs = _window_documents(hwnd)
+            page = pick_page_document(docs)
+            if page is None:
+                logger.debug("No single on-screen page Document: " + ", ".join(
+                    f"{d['url'][:40]}(nested={d['nested']}, onscreen={d['onscreen']})" for d in docs))
             return page[1] if page else None
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Browser URL lookup failed: {e!r}")
             return None
 
     # ── Accessibility ────────────────────────────────────────────────

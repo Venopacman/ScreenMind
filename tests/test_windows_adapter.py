@@ -41,6 +41,18 @@ class TestPickPageDocument:
         docs = [doc("chrome://newtab/"), doc("https://iframe.example/", nested=True)]
         assert pw.pick_page_document(docs) is None
 
+    def test_docked_devtools_is_ignored(self):
+        docs = [doc("https://app.example/login"), doc("devtools://devtools/bundled/devtools_app.html")]
+        assert pw.pick_page_document(docs)[1] == "https://app.example/login"
+
+    def test_extension_side_panel_is_ignored(self):
+        docs = [doc("https://mail.example/"), doc("chrome-extension://abc/panel.html")]
+        assert pw.pick_page_document(docs)[1] == "https://mail.example/"
+
+    def test_side_panel_never_stands_in_for_a_browser_page(self):
+        docs = [doc("chrome://settings/"), doc("https://panel.example/")]
+        assert pw.pick_page_document(docs) is None
+
     def test_two_visible_pages_is_ambiguous(self):
         assert pw.pick_page_document([doc("https://a.example/"), doc("https://b.example/")]) is None
 
