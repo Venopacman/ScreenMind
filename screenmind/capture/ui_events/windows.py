@@ -479,7 +479,8 @@ class WindowsUiEventBackend(UiEventBackend):
             self._auto = auto
         if getattr(self._uia_tls, "init", None) is None:
             # Released when the thread ends (thread-local cleanup runs there).
-            self._uia_tls.init = self._auto.UIAutomationInitializerInThread()
+            from screenmind.platform_support.windows import ComInit
+            self._uia_tls.init = ComInit(self._auto)
         if not self._uia_timeouts_set:
             self._uia_timeouts_set = True
             self._set_uia_timeouts()
