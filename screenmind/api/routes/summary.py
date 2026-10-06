@@ -21,6 +21,20 @@ router = APIRouter(prefix="/api", tags=["summary"])
 _PRODUCTIVE_CATEGORIES = {"coding", "writing", "terminal", "design", "meeting"}
 
 
+# Per-entry cap for the user actions line, so a busy frame cannot eat the budget.
+_MAX_ACTIONS_CHARS = 200
+
+
+def _actions_line(user_actions) -> str:
+    """activities.user_actions bullet lines as one short line for the prompt."""
+    if not user_actions:
+        return ""
+    line = "; ".join(l.lstrip("- ").strip() for l in user_actions.splitlines() if l.strip())
+    if len(line) > _MAX_ACTIONS_CHARS:
+        line = line[:_MAX_ACTIONS_CHARS - 3].rstrip() + "..."
+    return line
+
+
 def _compute_day_metrics(activities: list) -> dict:
     """Compute productive_hours, category_breakdown, and top_repos from activities.
 
@@ -135,6 +149,9 @@ async def generate_summary(
                     org_text = org_text[:300] + "..."
                 entry += f"\n  Screen content: {org_text}"
                 rich_count += 1
+        actions = _actions_line(a.get("user_actions"))
+        if actions:
+            entry += f"\n  User actions: {actions}"
         act_entries.append(entry)
 
     # Trim oldest entries (end of list, since ordered DESC) until prompt fits budget
@@ -152,6 +169,7 @@ Rules:
 - Scale your response to the data: {act_count} activities = {1 if act_count <= 5 else 2 if act_count <= 15 else 3}-{2 if act_count <= 5 else 3 if act_count <= 15 else 5} short paragraphs
 - Don't pad with filler. If there's little data, write a short summary
 - Use the "Screen content" fields for specific details (who messaged, what emails, etc.)
+- "User actions" are exact: what the user clicked, typed and switched to. Prefer them for what the user did
 
 Activities:
 {acts_text}

@@ -105,13 +105,14 @@ class UiEvent:
     text: Optional[str] = None
     x: Optional[int] = None
     y: Optional[int] = None
+    url: Optional[str] = None  # browser page URL, read from the browser itself
     extra: dict = field(default_factory=dict)
 
     def describe(self) -> str:
         """One short human-readable line, used in the Gemma prompt and the UI."""
         return describe_event(
             self.type.value, self.app_name, self.window_title,
-            self.element_role, self.element_name, self.text,
+            self.element_role, self.element_name, self.text, self.url,
         )
 
 
@@ -148,12 +149,16 @@ def describe_event(
     element_role: Optional[str],
     element_name: Optional[str],
     text: Optional[str],
+    url: Optional[str] = None,
 ) -> str:
     app = app_name or "unknown app"
+    site = _url_host(url)
+    if site:
+        app = f"{app} ({site})"
     if type_ == EventType.APP_SWITCH.value:
-        return f"switched to {app}" + (f" ({window_title})" if window_title and window_title != app else "")
+        return f"switched to {app}" + (f": {window_title}" if window_title and window_title != app_name else "")
     if type_ == EventType.WINDOW_FOCUS.value:
-        return f"opened window \"{window_title}\" in {app}"
+        return f"opened \"{window_title}\" in {app}"
     if type_ == EventType.CLICK.value:
         label = role_label(element_role)
         target = f'{label} "{element_name}"' if element_name else label
@@ -166,6 +171,14 @@ def describe_event(
     if type_ == EventType.CLIPBOARD.value:
         return f'copied "{text}" in {app}'
     return f"{type_} in {app}"
+
+
+def _url_host(url: Optional[str]) -> Optional[str]:
+    if not url:
+        return None
+    from urllib.parse import urlparse
+    host = urlparse(url).netloc
+    return host[4:] if host.startswith("www.") else host or None
 
 
 def format_user_actions(rows, max_lines: int = 10, max_chars: int = 1200) -> Optional[str]:
@@ -184,7 +197,7 @@ def format_user_actions(rows, max_lines: int = 10, max_chars: int = 1200) -> Opt
             text = text[:157] + "..."
         line = describe_event(
             r.get("type"), r.get("app_name"), r.get("window_title"),
-            r.get("element_role"), r.get("element_name"), text,
+            r.get("element_role"), r.get("element_name"), text, r.get("url"),
         )
         if lines and lines[-1] == line:
             continue
