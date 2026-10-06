@@ -10,7 +10,6 @@ class TestCheck:
         sn._last_notification.clear()
         sn._app_start_time.clear()
         sn._last_app = None
-        sn._continuous_work_start = None
 
     @patch("screenmind.integrations.smart_notify.settings")
     def test_disabled_does_nothing(self, mock_settings):
@@ -23,7 +22,6 @@ class TestCheck:
     def test_entertainment_distraction_alert(self, mock_notify, mock_settings):
         mock_settings.smart_notifications = True
         mock_settings.distraction_minutes = 0  # trigger immediately
-        mock_settings.break_reminder_minutes = 999
 
         sn.check("YouTube", "browsing")
         # First call sets up tracking, distraction check needs elapsed time
@@ -36,29 +34,15 @@ class TestCheck:
     def test_non_entertainment_no_distraction(self, mock_notify, mock_settings):
         mock_settings.smart_notifications = True
         mock_settings.distraction_minutes = 5
-        mock_settings.break_reminder_minutes = 999
 
         sn.check("VS Code", "coding")
         mock_notify.assert_not_called()
 
     @patch("screenmind.integrations.smart_notify.settings")
     @patch("screenmind.integrations.smart_notify._notify")
-    def test_break_reminder(self, mock_notify, mock_settings):
-        mock_settings.smart_notifications = True
-        mock_settings.distraction_minutes = 999
-        mock_settings.break_reminder_minutes = 1  # 1 minute
-
-        sn._continuous_work_start = time.time() - 120  # 2 min ago
-        sn._last_app = "code"
-        sn.check("Code", "coding")
-        mock_notify.assert_called()
-
-    @patch("screenmind.integrations.smart_notify.settings")
-    @patch("screenmind.integrations.smart_notify._notify")
     def test_focus_streak(self, mock_notify, mock_settings):
         mock_settings.smart_notifications = True
         mock_settings.distraction_minutes = 999
-        mock_settings.break_reminder_minutes = 999
 
         sn._last_app = "code"
         sn._app_start_time["code"] = time.time() - 7500  # 125 min ago
@@ -69,7 +53,6 @@ class TestCheck:
     def test_app_switch_tracking(self, mock_settings):
         mock_settings.smart_notifications = True
         mock_settings.distraction_minutes = 999
-        mock_settings.break_reminder_minutes = 999
 
         sn.check("Chrome", "browsing")
         assert sn._last_app == "chrome"
@@ -91,9 +74,9 @@ class TestNotify:
             # because we just set the last notification to now
 
     def test_notify_after_cooldown(self):
-        sn._last_notification["break"] = time.time() - 9999  # long ago
+        sn._last_notification["focus"] = time.time() - 9999  # long ago
         with patch("screenmind.integrations.smart_notify.show_overlay_notification", create=True) as mock_overlay:
             try:
-                sn._notify("break", "Break", "Take a break")
+                sn._notify("focus", "Focus", "Nice streak")
             except Exception:
                 pass  # overlay import may fail, that's fine

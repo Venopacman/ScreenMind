@@ -2,7 +2,6 @@
 Smart Notifications
 Detects usage patterns and shows overlay notifications.
 - Distraction alerts (too long on entertainment apps)
-- Break reminders (continuous work without switching)
 - Focus streak celebrations
 """
 
@@ -24,7 +23,6 @@ COOLDOWN_SECONDS = 30 * 60  # 30 minutes between same notification type
 # Tracking state
 _app_start_time = {}  # app_name -> first_seen_timestamp
 _last_app = None
-_continuous_work_start = None
 
 
 def check(app_name: str, category: str = ""):
@@ -36,7 +34,7 @@ def check(app_name: str, category: str = ""):
         app_name: Current foreground app name.
         category: Activity category (coding, browsing, etc.)
     """
-    global _last_app, _continuous_work_start
+    global _last_app
 
     if not settings.smart_notifications:
         return
@@ -49,13 +47,6 @@ def check(app_name: str, category: str = ""):
         _app_start_time[app_lower] = now
         _last_app = app_lower
 
-        # Reset continuous work timer on app switch
-        if _continuous_work_start and (now - _continuous_work_start) > settings.break_reminder_minutes * 60:
-            # They switched after a long session — that's good!
-            _continuous_work_start = now
-        elif not _continuous_work_start:
-            _continuous_work_start = now
-    
     # 1. Distraction alert
     if any(ent in app_lower for ent in ENTERTAINMENT_APPS):
         duration = now - _app_start_time.get(app_lower, now)
@@ -68,19 +59,7 @@ def check(app_name: str, category: str = ""):
                 color="#f59e0b",
             )
 
-    # 2. Break reminder
-    if _continuous_work_start:
-        continuous_minutes = (now - _continuous_work_start) / 60
-        if continuous_minutes >= settings.break_reminder_minutes:
-            _notify(
-                "break",
-                "☕ Break Time",
-                f"You've been working for {int(continuous_minutes)} minutes. Consider a short break.",
-                color="#10b981",
-            )
-            _continuous_work_start = now  # Reset after showing
-
-    # 3. Focus streak (2+ hours of coding)
+    # 2. Focus streak (2+ hours of coding)
     if category == "coding":
         coding_start = _app_start_time.get(app_lower, now)
         coding_minutes = (now - coding_start) / 60

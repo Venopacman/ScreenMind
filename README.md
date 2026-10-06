@@ -94,7 +94,7 @@
 | 📓 **Obsidian** | Auto-sync daily summaries to your vault |
 | 📋 **Notion** | Push summaries to a Notion database |
 | 🪝 **Webhooks** | Fire events to Slack, Discord, IFTTT (HMAC signed, auto-retry) |
-| 🔔 **Smart Notifications** | Distraction alerts, break reminders |
+| 🔔 **Smart Notifications** | Distraction alerts, focus streaks |
 | ⭐ **Auto-Bookmark** | Keyword triggers (`git push`, `deploy`) auto-flag important moments |
 
 </details>

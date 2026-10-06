@@ -79,7 +79,7 @@ _ALLOWED_OVERRIDES = {
     "notion_enabled", "notion_token", "notion_database_id",
     "webhook_enabled", "webhook_url", "webhook_events", "webhook_secret", "webhook_headers",
     "webhook_extra",
-    "smart_notifications", "distraction_minutes", "break_reminder_minutes",
+    "smart_notifications", "distraction_minutes",
     "auto_bookmark", "auto_bookmark_keywords",
     "agents_enabled", "agents_auto_run_python",
     "sensitive_filter_enabled", "sensitive_filter_types",
@@ -250,7 +250,6 @@ class Settings(BaseSettings):
     # ── Smart Notifications ──────────────────────────────────────────────
     smart_notifications: bool = Field(default=True, description="Enable smart usage notifications")
     distraction_minutes: int = Field(default=45, description="Alert after N minutes on entertainment apps")
-    break_reminder_minutes: int = Field(default=90, description="Remind to take break after N minutes")
 
     # ── Auto-Tagging ─────────────────────────────────────────────────────
     auto_bookmark: bool = Field(default=True, description="Auto-bookmark important moments")
