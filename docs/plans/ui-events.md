@@ -1,6 +1,6 @@
 # Plan: UI event capture with accessibility APIs (macOS + Windows)
 
-Status: phases 1 to 3 built for macOS (see "Implementation notes" at the end). Windows (phase 4) and phase 5 are not started. Branch: `claude/accessibility-api-user-events-f6a57d`, based on `origin/custom`.
+Status: phases 1 to 3 built for macOS, phase 4 built for Windows (see the two "Implementation notes" sections at the end). Phase 5 is not started. Branch: `claude/accessibility-api-user-events-f6a57d`, based on `origin/custom`.
 
 ## Goal
 
@@ -263,3 +263,55 @@ Checked end to end on macOS with a separate instance (port 7778, separate data d
 - The timeline shows the Actions list.
 - The Settings toggle starts and stops the recorder.
 - Shutdown removes the tap and does not stop a llama-server it did not start.
+
+## Windows implementation notes (phase 4)
+
+Built in `screenmind/capture/ui_events/windows.py` (`WindowsUiEventBackend`). Tested on Windows 11 (build 26200), Python 3.12, uiautomation 2.0.29. What differs from the plan, or is worth knowing:
+
+**Input hooks**
+
+- `WH_KEYBOARD_LL` and `WH_MOUSE_LL` run on one thread with a `GetMessageW` loop. `stop()` posts `WM_QUIT` to that thread. The thread creates its message queue (`PeekMessageW`) before it reports ready, so `WM_QUIT` is never lost.
+- The callbacks only build a `RawEvent`, put it on the queue and return `CallNextHookEx`. Measured cost: about 13 µs per key press (including `ToUnicodeEx`) and under 1 µs per mouse move, far below `LowLevelHooksTimeout`.
+- Watchdog: Windows removes a hook that times out, without telling us. A 10 s timer on the hook thread compares each hook's last callback with `GetLastInputInfo`. If a hook saw nothing for 30 s while input arrived, it is installed again. The new hook goes in before the old one comes out. The keyboard hook also gets re-installed while you only use the mouse; that false alarm costs nothing. Tested by removing the mouse hook behind the backend's back.
+- Injected input (`LLKHF_INJECTED`, `LLMHF_INJECTED`) is skipped, so input from remote tools, macro tools and our own tests is not recorded.
+- ctypes uses a private `WinDLL("user32")` with its own argtypes. The `keyboard` package sets argtypes on the shared `ctypes.windll.user32`, and sharing would break one of the two.
+
+**Keys**
+
+- Characters come from `ToUnicodeEx` with flag `0x4` (keyboard state unchanged), in the keyboard layout of the foreground window's thread. Shift comes from `GetAsyncKeyState`, Caps Lock from `GetKeyState`. Caps Lock's toggle bit is correct even on a thread that reads no input (tested).
+- Dead keys: flag `0x4` keeps them working in the user's app, but Windows then does not combine them for us. `DeadKeyState` keeps the pending accent and composes it with the next letter (`´` + `e` = `é`; accent + space = the accent; no precomposed form = both characters).
+- Shortcuts: Ctrl or Win held means `shortcut=True`. Two choices beyond the plan: Ctrl+Alt is AltGr on European layouts and types text (`@`, `€`), so it is **not** a shortcut. Alt alone drives menus (Alt+F), so it **is** a shortcut. `shortcut_char` comes from the virtual key, so Ctrl+C is `c` on any layout, Russian included.
+- Modifier, Caps Lock and Num Lock presses on their own are not queued.
+- Not covered: IME input (Chinese, Japanese, Korean) arrives as `VK_PROCESSKEY` and is not recorded as text.
+
+**Elements (UI Automation)**
+
+- `element_at` uses `uiautomation.ControlFromPoint`; `focused_element` uses `GetFocusedControl`. Both run on the enricher thread. COM is set up lazily, once per thread, with a `UIAutomationInitializerInThread` kept in a thread-local, so it is released on that thread when it ends.
+- UIA's own timeouts are cut from 20 s to 1 s (`IUIAutomation2.ConnectionTimeout` / `TransactionTimeout`), so a hung app cannot freeze the enricher. The setting is global to the process; the a11y text extractor shares it.
+- DPI: low-level hooks report per-monitor physical coordinates. `start()` makes the process per-monitor DPI aware (`SetProcessDpiAwareness(2)`, the same mode `mss` sets), so click points match UIA. `ui_events.x/y` are physical pixels on Windows and points on macOS.
+- Roles: uiautomation reports `EditControl`, `DocumentControl` and so on. `normalize_uia_role()` in `models.py` drops the suffix, so roles are `Edit`, `Document`, `Button` and match `TEXT_INPUT_ROLES`. `role_label()` has Windows labels (`Edit` -> "text field", `Hyperlink` -> "link") and splits other CamelCase names ("list item").
+- **Read-only documents are not text inputs.** A browser page is a UIA `Document`. Without a check, shortcut keys on a page (j/k, space) would be stored as typed text. `ElementInfo` has a new `editable` field, set from the value pattern's `IsReadOnly`, and `is_text_input` needs `editable is not False`. A `Document` without a value pattern counts as read-only. macOS leaves `editable` as `None`, so nothing changes there.
+- Checked on a test page in Edge: text input, password input and `contenteditable` (all `Edit`; the password one with `is_password`), read-only textarea (not a text input), text button, icon-only button (name from `aria-label`), link, plain text, and the page itself (read-only `Document`). Windows 11 Notepad's editor is an editable `Document`.
+- Names and values follow the macOS rules: text-input values are never read, container names over 60 chars are dropped, names are cut to 100 chars and values to 200. Unnamed buttons take a child's name or `HelpText`. A click on a label or icon walks up to 3 parents to find the control.
+
+**App switches and app names**
+
+- Polled every 0.5 s through the new `WindowsAdapter.get_front_window()` (pid, name and title from one `HWND`), the same way as macOS. `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` was not needed, because the trigger waits 1 s anyway.
+- App names are executable names without `.exe` (`chrome`, `notepad`). That is what the capture worker's blocked-app check uses, so `blocked_apps` works the same for frames and for UI events.
+- The adapter now opens processes with `PROCESS_QUERY_LIMITED_INFORMATION`. The old `PROCESS_QUERY_INFORMATION | PROCESS_VM_READ` failed for elevated (admin) apps, which then had no name and could not be blocked.
+- UWP apps (Calculator, Settings) run inside `ApplicationFrameHost`. The front window then reports `ApplicationFrameHost`, while a click inside reports the app's own process.
+
+**Clipboard**
+
+- `GetClipboardSequenceNumber()` is the change count. `read_clipboard` opens the clipboard (3 tries, 20 ms apart) and returns `None` when the owner marked the content: `ExcludeClipboardContentFromMonitorProcessing` is present, or `CanIncludeInClipboardHistory` / `CanUploadToCloudClipboard` has the value 0. KeePass, 1Password and Bitwarden set these. Only `CF_UNICODETEXT` is read.
+
+**Permissions and wiring**
+
+- No permissions are needed: `check_permissions()` returns granted. `/api/ui-events/status` now includes `backend` ("macos" / "windows"), and Settings shows "No permissions needed" instead of the macOS lines when it is not macOS.
+- `create_backend()` returns the Windows backend on `win32`. The constructor is cheap (no `uiautomation` import, no DPI change), because it runs at every startup, even with UI events off.
+- `uiautomation` is now a core dependency on `win32`, like pyobjc on darwin. The `windows` extra stays, so existing install commands work.
+- Hotkeys: the `keyboard` package and our hooks were tested together in both install orders. Hotkeys fire, and our hook still sees every key. Note for tests: `keyboard` matches keys by scan code and ignores injected keys while Alt is down, so synthetic tests must send real scan codes and avoid Alt.
+
+**Tests**
+
+- `tests/test_ui_events_windows.py` needs no OS: key mapping, shortcut rules, dead-key composition, role normalization and labels, clipboard secret formats with fakes, element parsing with fake UIA controls (password, read-only document, child labels, label-to-button walk), and the recorder with Windows-style elements (typing in `Edit` kept, typing on a read-only page dropped, password placeholder, blocked app by exe name). The module imports on any OS.
