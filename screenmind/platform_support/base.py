@@ -32,6 +32,11 @@ class PlatformAdapter(ABC):
         """Focused window as (x, y, width, height), or None if not supported."""
         return None
 
+    def get_front_window(self) -> Optional[dict]:
+        """Frontmost window as {"pid", "app_name", "title"} from one consistent
+        OS snapshot, or None if not supported. Used by UI event capture."""
+        return None
+
     @abstractmethod
     def extract_a11y_text(self, hwnd: Optional[int] = None) -> Tuple[Optional[str], str]:
         """

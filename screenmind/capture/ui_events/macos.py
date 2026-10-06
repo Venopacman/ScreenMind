@@ -335,10 +335,10 @@ class MacOSUiEventBackend(UiEventBackend):
 
     def front_window(self) -> Optional[FrontWindow]:
         from screenmind.platform_support import adapter
-        front = adapter()._front_window()
+        front = adapter().get_front_window()
         if not front:
             return None
-        return FrontWindow(pid=front.get("pid"), app_name=front.get("owner"), title=front.get("title"))
+        return FrontWindow(pid=front["pid"], app_name=front["app_name"], title=front["title"])
 
     def app_name_for_pid(self, pid: int) -> Optional[str]:
         try:
