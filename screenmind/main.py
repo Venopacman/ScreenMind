@@ -347,6 +347,11 @@ async def main():
     signal.signal(signal.SIGINT, handle_signal)
     if sys.platform != "win32":
         signal.signal(signal.SIGTERM, handle_signal)
+    # /api/shutdown runs in this event loop and uses the same path. A Ctrl+C
+    # event to ourselves fails on Windows when there is no console (launcher,
+    # pythonw): WinError 233, and the app keeps running.
+    _loop = asyncio.get_running_loop()
+    _api_deps.request_shutdown = lambda: _loop.call_soon_threadsafe(handle_signal)
 
     # ── Safety check: warn/block 0.0.0.0 binding without PIN ──────────
     if settings.api_host in ("0.0.0.0", "::"):

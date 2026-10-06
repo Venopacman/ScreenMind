@@ -189,6 +189,10 @@ async def shutdown_server(request: Request):
 
     async def _delayed_shutdown():
         await asyncio.sleep(0.5)  # let the response reach the client
+        from screenmind.api import dependencies
+        if dependencies.request_shutdown is not None:
+            dependencies.request_shutdown()
+            return
         # Use SIGINT for clean shutdown — allows uvicorn to run cleanup,
         # close DB connections, stop llama-server, flush logs, run atexit.
         if sys.platform == "win32":

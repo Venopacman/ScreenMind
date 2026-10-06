@@ -46,6 +46,7 @@ capture_worker = None
 analysis_worker = None
 audio_worker = None
 ui_recorder = None  # UiEventRecorder, set by main after create_app
+request_shutdown = None  # callable set by main: starts the same clean shutdown as Ctrl+C
 
 
 
