@@ -240,6 +240,16 @@ Each phase can ship on its own.
 2. Should we store scroll events? They help to say "the user read this page" but add many rows. Proposal: off in phase 1, and record one `scroll` event per 2s burst if we add it later.
 3. Browser URL per event. Screenpipe reads it from AX for some browsers. We already have `active_url` on activities. Is that enough for now?
 
+## Decisions on the open questions (2026-10-06)
+
+1. **Encrypt typed text:** not now. The same text is also stored in plain `user_actions` and `ocr_text`. If we do it, encrypt the whole DB (SQLCipher) as its own change.
+2. **Scroll events:** not recorded.
+3. **URL per event:** done. Migration v9 adds `ui_events.url`. Browser tab switches are recorded as `window_focus` when the URL changes.
+4. **Actions when the screenshot cache hits:** keep the cache. `user_actions` now goes into the daily summary and the chat context instead.
+5. **`AXManualAccessibility` on Electron apps:** keep it, and watch those apps for slowdowns.
+6. **Phase 5 (hotkeys on the UI-events hook):** agreed in principle, explained before starting.
+7. **Windows browser URL:** to do. Add a UI Automation address-bar reader in `WindowsAdapter.get_browser_url()`.
+
 ## Implementation notes (macOS, phases 1 to 3)
 
 What changed compared to the plan above:
