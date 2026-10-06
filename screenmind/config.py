@@ -259,8 +259,9 @@ class Settings(BaseSettings):
     # ── OCR ───────────────────────────────────────────────────────────────
     ocr_languages: str = Field(
         default="en",
-        description="Comma-separated EasyOCR language codes, e.g. 'en,es,de,fr,ru'. "
-                    "Cyrillic codes (ru, uk, be, bg, ...) run a second recognizer (~+1s/frame on CPU).",
+        description="Comma-separated language codes, e.g. 'en,ru' or 'en,es,de'. OCR reads one "
+                    "script per frame, picked by the first non-English code (ru/uk/be: East Slavic, "
+                    "es/de/fr...: Latin). Every script model also reads English.",
     )
 
     # ── Agents ────────────────────────────────────────────────────────────

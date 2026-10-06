@@ -29,10 +29,11 @@ sounddevice==0.5.5
 cryptography==46.0.7
 keyring>=25.0
 
-# ── Optional: AI (install with `pip install screenmind[ai]`) ──
-# These pull PyTorch (~2.5 GB). Prompted on first run if missing.
-sentence-transformers==3.3.1
-easyocr==1.7.2
+# OCR and semantic search (ONNX Runtime, no PyTorch)
+rapidocr==3.9.2
+onnxruntime==1.30.0
+tokenizers==0.23.2
+huggingface_hub==1.33.0
 
 # ── Optional: Windows Accessibility ──
 uiautomation==2.0.18 ; sys_platform == "win32"
