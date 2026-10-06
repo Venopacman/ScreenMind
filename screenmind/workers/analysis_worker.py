@@ -67,11 +67,6 @@ _A11Y_MIN_CONTENT_CHARS = 200
 # A11y text kept as a header above OCR text only when it is this short.
 _A11Y_MAX_PREFIX_CHARS = 500
 
-_BROWSER_WORDS = {
-    'chrome', 'chromium', 'safari', 'firefox', 'edge', 'msedge', 'brave', 'arc',
-    'opera', 'vivaldi', 'orion', 'zen',
-}
-
 
 def _a11y_is_content(text: Optional[str], window_title: Optional[str] = None,
                      app_name: Optional[str] = None) -> bool:
@@ -101,23 +96,6 @@ def _a11y_is_content(text: Optional[str], window_title: Optional[str] = None,
             continue
         content.append(line)
     return sum(len(l) for l in content) >= _A11Y_MIN_CONTENT_CHARS
-
-
-def _is_browser(app_name: Optional[str]) -> bool:
-    words = re.split(r'[\s._-]+', (app_name or '').lower())
-    return any(w in _BROWSER_WORDS for w in words)
-
-
-def _pick_active_url(app_name: Optional[str], browser_url: Optional[str],
-                     found_urls: list) -> Optional[str]:
-    """The page the user is on: what the browser reports, else (browsers
-    only) the first URL in the screen text. None for non-browser apps,
-    where a URL in the text is just content (a link in chat, a log line)."""
-    if browser_url:
-        return browser_url
-    if _is_browser(app_name) and found_urls:
-        return found_urls[0]
-    return None
 
 
 def _extract_url(text: str) -> str | None:
@@ -434,7 +412,10 @@ class AnalysisWorker:
             found_urls = _extract_all_urls(ocr_text)
             if capture.browser_url and capture.browser_url not in found_urls:
                 found_urls.insert(0, capture.browser_url)
-            active_url = _pick_active_url(capture.app_name, capture.browser_url, found_urls)
+            # Only the URL the browser itself reports. A URL found in the screen
+            # text is usually a link in the page or a chat, not the page (Chrome
+            # hides https:// in the address bar), and a wrong URL is worse than none.
+            active_url = capture.browser_url
 
             # --- Tier "minor": run OCR (already done above), reuse Gemma + layout ---
             if tier == "minor":

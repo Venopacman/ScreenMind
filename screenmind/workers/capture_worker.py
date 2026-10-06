@@ -189,13 +189,6 @@ class CaptureWorker:
             self._consecutive_skips = 0  # Reset idle detection
             self._last_save_time = time.time()
 
-            # Smart notifications check
-            try:
-                from screenmind.integrations.smart_notify import check as notify_check
-                notify_check(app_name or "")
-            except Exception:
-                pass
-
         except Exception as e:
             logger.error(f"Error: {e}")
 

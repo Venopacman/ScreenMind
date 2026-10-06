@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from screenmind.platform_support.macos import MacOSAdapter
-from screenmind.workers.analysis_worker import _a11y_is_content, _is_browser, _pick_active_url
+from screenmind.workers.analysis_worker import _a11y_is_content
 
 
 # ── Content detection ───────────────────────────────────────────────
@@ -39,29 +39,6 @@ class TestA11yIsContent:
     def test_empty(self):
         assert not _a11y_is_content(None)
         assert not _a11y_is_content("")
-
-
-# ── Active URL ──────────────────────────────────────────────────────
-
-
-class TestActiveUrl:
-    def test_browser_url_wins(self):
-        assert _pick_active_url("Google Chrome", "https://a.com/x", ["https://b.com"]) == "https://a.com/x"
-
-    def test_non_browser_gets_none(self):
-        assert _pick_active_url("Terminal", None, ["https://github.com/pytorch/pytorch/issues/1"]) is None
-        assert _pick_active_url("Telegram", None, ["https://gith"]) is None
-
-    def test_browser_without_ax_url_falls_back_to_text(self):
-        assert _pick_active_url("Firefox", None, ["https://b.com"]) == "https://b.com"
-
-    @pytest.mark.parametrize("name", ["Google Chrome", "Safari", "Arc", "Microsoft Edge", "chrome.exe", "Brave Browser"])
-    def test_is_browser(self, name):
-        assert _is_browser(name)
-
-    @pytest.mark.parametrize("name", ["Terminal", "Telegram", "Slack", "Claude", "Arcade Game", None])
-    def test_is_not_browser(self, name):
-        assert not _is_browser(name)
 
 
 # ── macOS adapter (AX faked) ────────────────────────────────────────

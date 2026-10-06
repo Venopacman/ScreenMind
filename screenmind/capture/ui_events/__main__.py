@@ -48,8 +48,11 @@ def main():
         return 1
 
     perms = backend.request_permissions() if args.ask else backend.check_permissions()
-    print(f"Input Monitoring: {'yes' if perms.input_monitoring else 'NO'}   "  # noqa: T201
-          f"Accessibility: {'yes' if perms.accessibility else 'NO'}")
+    if backend.name != "macos":
+        print(f"Backend: {backend.name} (no permissions needed)")  # noqa: T201
+    else:
+        print(f"Input Monitoring: {'yes' if perms.input_monitoring else 'NO'}   "  # noqa: T201
+              f"Accessibility: {'yes' if perms.accessibility else 'NO'}")
     if not perms.all_granted:
         print("Grant both to the app that runs this command (e.g. Terminal) in "  # noqa: T201
               "System Settings > Privacy & Security, then run it again.")

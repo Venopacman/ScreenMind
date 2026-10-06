@@ -116,45 +116,6 @@ async def main():
     _safe_print("=" * 60)
     _safe_print()
 
-    # ── AI dependency check (first-run only) ──────────────────────────
-    _missing_ai = []
-    try:
-        import sentence_transformers  # noqa: F401
-    except ImportError:
-        _missing_ai.append("sentence-transformers>=3.3,<4.0")
-    try:
-        import easyocr  # noqa: F401
-    except ImportError:
-        _missing_ai.append("easyocr>=1.7.2,<2.0")
-
-    if _missing_ai:
-        if _is_interactive():
-            _safe_print("=" * 60)
-            _safe_print("  ScreenMind requires AI packages for screen analysis.")
-            _safe_print("  This is a one-time download of ~2.5 GB (PyTorch + AI models).")
-            _safe_print("=" * 60)
-            _safe_print()
-            answer = input("  Install now? [Y/n]: ").strip().lower()
-            if answer in ("", "y", "yes"):
-                _safe_print()
-                _safe_print("  Installing AI packages (this may take a few minutes)...")
-                subprocess.check_call(
-                    [sys.executable, "-m", "pip", "install"] + _missing_ai,
-                    stdout=sys.stderr,
-                )
-                _safe_print()
-                _safe_print("  AI packages installed successfully!")
-                _safe_print()
-            else:
-                _safe_print()
-                _safe_print("  ScreenMind requires these packages for screen analysis. Cannot start.")
-                _safe_print(f"  Install manually:  pip install {' '.join(_missing_ai)}")
-                sys.exit(1)
-        else:
-            # Non-interactive (background mode, pythonw) — skip, start degraded
-            logger.warning("AI packages missing (non-interactive mode). Install with: pip install screenmind[ai]")
-            logger.warning("Starting without AI features (capture-only).")
-
     # ── First-run experience ─────────────────────────────────────────
     settings.ensure_dirs()
     print_first_run_help()

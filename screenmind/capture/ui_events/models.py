@@ -2,6 +2,7 @@
 Data types shared by the UI event backends, the text buffer and the recorder.
 """
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -57,10 +58,13 @@ class ElementInfo:
     value: Optional[str] = None
     pid: Optional[int] = None
     is_password: bool = False
+    # False when the element says it is read-only (e.g. a web page's UIA
+    # Document). None means unknown and does not block text capture.
+    editable: Optional[bool] = None
 
     @property
     def is_text_input(self) -> bool:
-        return (self.role or "") in TEXT_INPUT_ROLES
+        return (self.role or "") in TEXT_INPUT_ROLES and self.editable is not False
 
     def identity(self) -> tuple:
         """Stable identity for "is this still the same field?" checks.
@@ -70,8 +74,21 @@ class ElementInfo:
 
 TEXT_INPUT_ROLES = {
     "AXTextField", "AXTextArea", "AXComboBox", "AXSearchField",
-    "Edit", "Document",  # UIA control types
+    "Edit", "Document",  # UIA control types, see normalize_uia_role()
 }
+
+
+def normalize_uia_role(control_type_name: Optional[str]) -> Optional[str]:
+    """UIA control type name as a role: "EditControl" -> "Edit".
+
+    uiautomation reports ControlTypeName with a "Control" suffix; roles drop
+    it so they match TEXT_INPUT_ROLES and the role labels.
+    """
+    if not control_type_name:
+        return None
+    if control_type_name.endswith("Control") and len(control_type_name) > len("Control"):
+        return control_type_name[:-len("Control")]
+    return control_type_name
 
 
 @dataclass
@@ -106,13 +123,22 @@ _ROLE_LABELS = {
     "AXSearchField": "search field", "AXComboBox": "combo box",
     "AXStaticText": "text", "AXImage": "image", "AXCell": "cell", "AXRow": "row",
     "AXDisclosureTriangle": "toggle", "AXWebArea": "page",
+    # UIA control types (normalized)
+    "Edit": "text field", "Hyperlink": "link", "SplitButton": "button",
+    "RadioButton": "option", "TabItem": "tab", "DataItem": "cell",
+    "CheckBox": "checkbox", "ComboBox": "combo box", "MenuBar": "menu",
 }
 
 
 def role_label(role: Optional[str]) -> str:
     if not role:
         return "element"
-    return _ROLE_LABELS.get(role, role[2:].lower() if role.startswith("AX") else role.lower())
+    if role in _ROLE_LABELS:
+        return _ROLE_LABELS[role]
+    if role.startswith("AX"):
+        return role[2:].lower()
+    # UIA names are CamelCase: "ListItem" -> "list item"
+    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", role).lower()
 
 
 def describe_event(

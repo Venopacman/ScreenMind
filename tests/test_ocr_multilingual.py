@@ -1,87 +1,76 @@
-"""Tests for multi-language OCR (Latin + Cyrillic recognizers over shared boxes)."""
+"""Tests for OCR language handling and result parsing (RapidOCR is faked)."""
 import sys
 import types
-from unittest.mock import MagicMock
+from enum import Enum
 
+import numpy as np
 import pytest
 from PIL import Image
 
 from screenmind.engine import ocr
-from screenmind.engine.ocr import (
-    OCRExtractor,
-    _fix_lookalikes,
-    _has_cyrillic_only_letters,
-    _merge_readings,
-    _split_languages,
-)
+from screenmind.engine.ocr import OCRExtractor, _fix_lookalikes, _rec_model
 
-BOX = [[0, 0], [10, 0], [10, 10], [0, 10]]
+BOX = [[0.0, 0.0], [10.5, 0.0], [10.5, 10.0], [0.0, 10.0]]
 
 
-class TestSplitLanguages:
-    def test_english_only(self):
-        assert _split_languages(["en"]) == (["en"], [])
+class TestRecModel:
+    @pytest.mark.parametrize("langs, model", [
+        (["en"], "en"),
+        ([], "en"),
+        (["en", "ru"], "eslav"),
+        (["uk"], "eslav"),
+        (["en", "bg"], "cyrillic"),
+        (["en", "es", "de", "fr"], "latin"),
+        (["ja"], "ch"),
+        (["en", "ko"], "korean"),
+        (["en", "hi"], "devanagari"),
+    ])
+    def test_maps_languages_to_one_recognizer(self, langs, model):
+        assert _rec_model(langs) == model
 
-    def test_latin_and_cyrillic(self):
-        assert _split_languages(["en", "es", "de", "fr", "ru"]) == (["en", "es", "de", "fr"], ["ru", "en"])
-
-    def test_english_added_when_missing(self):
-        assert _split_languages(["ru"]) == (["en"], ["ru", "en"])
-        assert _split_languages(["de"]) == (["en", "de"], [])
+    def test_mixed_scripts_prefer_cyrillic(self):
+        assert _rec_model(["en", "ru", "es"]) == "eslav"
+        # Cyrillic models also read Latin, so they win over the Latin model
+        assert _rec_model(["en", "es", "ru"]) == "eslav"
+        assert _rec_model(["en", "es", "de", "fr", "ru"]) == "eslav"
+        assert _rec_model(["en", "es", "bg"]) == "cyrillic"
+        # Without a Cyrillic model the first code still wins
+        assert _rec_model(["en", "ja", "ko"]) == "ch"
 
 
 class TestLookalikes:
-    @pytest.mark.parametrize("raw,fixed", [
-        ("MCР", "MCP"),                  # Cyrillic Р in an English word
-        ("Typе KВ", "Type KB"),
-        ("Пpивет мир", "Привет мир"),    # Latin p in a Russian word
-        ("Telegram @ Pavel", "Telegram @ Pavel"),
-        ("Спасибо", "Спасибо"),
+    @pytest.mark.parametrize("raw, fixed", [
+        ("MCР", "MCP"),            # Cyrillic Р in an English word
+        ("Пpивет", "Привет"),      # Latin p in a Russian word
+        ("hello мир", "hello мир"),
     ])
     def test_fix_lookalikes(self, raw, fixed):
         assert _fix_lookalikes(raw) == fixed
 
-    def test_cyrillic_only_letters(self):
-        assert _has_cyrillic_only_letters("Спасибо")
-        assert _has_cyrillic_only_letters("мама")      # lowercase м has no Latin twin
-        assert not _has_cyrillic_only_letters("MCР")   # only a lookalike
-        assert not _has_cyrillic_only_letters("hello")
-
-
-class TestMergeReadings:
-    def test_russian_box_takes_cyrillic(self):
-        merged = _merge_readings([(BOX, "Cnacn6o", 0.40)], [(BOX, "Спасибо", 0.90)])
-        assert merged == [(BOX, "Спасибо", 0.90)]
-
-    def test_english_box_keeps_latin_even_if_cyrillic_is_confident(self):
-        merged = _merge_readings([(BOX, "MCP server", 0.80)], [(BOX, "MCР sеrvеr", 0.95)])
-        assert merged[0][1] == "MCP server"
-
-    def test_low_confidence_cyrillic_loses(self):
-        merged = _merge_readings([(BOX, "Größe", 0.90)], [(BOX, "Гробе", 0.50)])
-        assert merged[0][1] == "Größe"
-
-    def test_length_mismatch_falls_back_to_latin(self):
-        merged = _merge_readings([(BOX, "hello", 0.9)], [])
-        assert merged == [(BOX, "hello", 0.9)]
-
 
 @pytest.fixture
-def fake_easyocr(monkeypatch):
-    """Fake easyocr module recording each Reader built."""
-    mod = types.ModuleType("easyocr")
+def fake_rapidocr(monkeypatch):
+    """Fake rapidocr module: records the params of each engine built."""
+    mod = types.ModuleType("rapidocr")
     mod.built = []
+    mod.LangRec = Enum("LangRec", {v.upper(): v for v in
+                                   ["en", "latin", "eslav", "cyrillic", "ch", "korean"]})
+    mod.ModelType = Enum("ModelType", {"TINY": "tiny", "MOBILE": "mobile"})
+    mod.OCRVersion = Enum("OCRVersion", {"PPOCRV5": "PP-OCRv5", "PPOCRV6": "PP-OCRv6"})
+    mod.result = types.SimpleNamespace(boxes=None, txts=None, scores=None)
 
-    def reader(langs, gpu=False, verbose=False, detector=True):
-        if "ch_sim" in langs and "de" in langs:
-            raise ValueError("Chinese_sim is only compatible with English")
-        r = MagicMock(name=f"Reader{langs}")
-        r.langs, r.detector = langs, detector
-        mod.built.append(r)
-        return r
+    class RapidOCR:
+        def __init__(self, params):
+            self.params = params
+            mod.built.append(self)
 
-    mod.Reader = reader
-    monkeypatch.setitem(sys.modules, "easyocr", mod)
+        def __call__(self, image):
+            self.image = image
+            return mod.result
+
+    mod.RapidOCR = RapidOCR
+    monkeypatch.setitem(sys.modules, "rapidocr", mod)
+    monkeypatch.setattr(ocr, "_ocr_models_dir", lambda: "/tmp/ocr-models")
     return mod
 
 
@@ -89,44 +78,59 @@ def _with_langs(monkeypatch, value):
     monkeypatch.setattr(ocr.settings, "ocr_languages", value)
 
 
-def test_default_builds_one_english_reader(fake_easyocr, monkeypatch):
+def test_engine_uses_v6_detector_and_language_recognizer(fake_rapidocr, monkeypatch):
+    _with_langs(monkeypatch, "en,ru")
+    o = OCRExtractor()
+    o._ensure_reader()
+    p = fake_rapidocr.built[0].params
+    assert p["Det.ocr_version"].value == "PP-OCRv6"
+    assert p["Det.model_type"].value == "tiny"
+    assert p["Rec.ocr_version"].value == "PP-OCRv5"
+    assert p["Rec.lang_type"].value == "eslav"
+    assert p["Global.model_root_dir"] == "/tmp/ocr-models"
+
+
+def test_engine_failure_disables_ocr(fake_rapidocr, monkeypatch):
     _with_langs(monkeypatch, "en")
+
+    def boom(params):
+        raise RuntimeError("model download failed")
+
+    monkeypatch.setattr(fake_rapidocr, "RapidOCR", boom)
     o = OCRExtractor()
-    o._ensure_reader()
-    assert [r.langs for r in fake_easyocr.built] == [["en"]]
-    assert o._reader_cyr is None
+    assert o.extract_text_with_boxes(Image.new("RGB", (20, 20))) == (None, [])
+    assert not o.is_available
 
 
-def test_cyrillic_builds_second_reader_without_detector(fake_easyocr, monkeypatch):
-    _with_langs(monkeypatch, "en,es,de,fr,ru")
+def test_missing_rapidocr_disables_ocr(monkeypatch):
+    monkeypatch.setitem(sys.modules, "rapidocr", None)  # import raises ImportError
     o = OCRExtractor()
-    o._ensure_reader()
-    assert [r.langs for r in fake_easyocr.built] == [["en", "es", "de", "fr"], ["ru", "en"]]
-    assert fake_easyocr.built[1].detector is False
+    assert o.extract_text(Image.new("RGB", (20, 20))) is None
+    assert not o.is_available
 
 
-def test_rejected_mix_falls_back_to_english(fake_easyocr, monkeypatch):
-    _with_langs(monkeypatch, "en,de,ch_sim")
+def test_extract_filters_and_formats(fake_rapidocr, monkeypatch):
+    _with_langs(monkeypatch, "en")
+    fake_rapidocr.result = types.SimpleNamespace(
+        boxes=np.array([BOX, BOX, BOX]),
+        txts=("hello world", "x", "noise"),
+        scores=(0.95, 0.99, 0.3),
+    )
     o = OCRExtractor()
-    o._ensure_reader()
-    assert o.is_available
-    assert fake_easyocr.built[-1].langs == ["en"]
+    text, boxes = o.extract_text_with_boxes(Image.new("RGBA", (200, 100), "white"))
+    assert text == "hello world"
+    assert boxes == [{"box": [[0, 0], [10, 0], [10, 10], [0, 10]], "text": "hello world", "conf": 0.95}]
+    assert fake_rapidocr.built[0].image.mode == "RGB"
 
 
-def test_extract_uses_both_readers_on_shared_boxes(monkeypatch):
-    utils = types.ModuleType("easyocr.utils")
-    utils.reformat_input = lambda arr: (arr, arr)
-    monkeypatch.setitem(sys.modules, "easyocr.utils", utils)
-    monkeypatch.setitem(sys.modules, "easyocr", types.ModuleType("easyocr"))
+def test_lookalikes_fixed_only_for_cyrillic_models(fake_rapidocr, monkeypatch):
+    fake_rapidocr.result = types.SimpleNamespace(boxes=np.array([BOX]), txts=("MCР",), scores=(0.9,))
+    _with_langs(monkeypatch, "en,ru")
+    assert OCRExtractor().extract_text(Image.new("RGB", (20, 20))) == "MCP"
+    _with_langs(monkeypatch, "en")
+    assert OCRExtractor().extract_text(Image.new("RGB", (20, 20))) == "MCР"
 
-    o = OCRExtractor()
-    o._reader, o._reader_cyr = MagicMock(), MagicMock()
-    o._reader.detect.return_value = ([[[0, 10, 0, 10]]], [[]])
-    o._reader.recognize.return_value = [(BOX, "Cnacn6o", 0.4)]
-    o._reader_cyr.recognize.return_value = [(BOX, "Спасибо", 0.9)]
 
-    text, boxes = o.extract_text_with_boxes(Image.new("RGB", (200, 100), "white"))
-    assert text == "Спасибо"
-    assert o._reader.detect.call_args.kwargs["canvas_size"] == ocr.OCR_CANVAS_SIZE
-    o._reader_cyr.detect.assert_not_called()
-    o._reader.readtext.assert_not_called()
+def test_no_text_returns_none(fake_rapidocr, monkeypatch):
+    _with_langs(monkeypatch, "en")
+    assert OCRExtractor().extract_text_with_boxes(Image.new("RGB", (20, 20))) == (None, [])

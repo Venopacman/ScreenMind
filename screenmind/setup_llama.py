@@ -151,6 +151,7 @@ def _pick_asset(assets: list) -> tuple[dict | None, list[dict]]:
     extra_assets = []
 
     if system == "windows":
+        arch = "arm64" if is_arm else "x64"
         nvidia = has_nvidia_gpu()
         if nvidia:
             cuda_ver = _get_cuda_version()
@@ -170,7 +171,7 @@ def _pick_asset(assets: list) -> tuple[dict | None, list[dict]]:
                     cuda_candidates = []
                     for a in assets:
                         name = a["name"]
-                        if "bin-win-cuda" not in name or not name.endswith(".zip"):
+                        if "bin-win-cuda" not in name or not name.endswith(f"-{arch}.zip"):
                             continue
                         if name.startswith("cudart"):
                             continue
@@ -194,7 +195,7 @@ def _pick_asset(assets: list) -> tuple[dict | None, list[dict]]:
             # Fallback: pick any CUDA Windows build (prefer highest version ≤ driver)
             if not main_asset:
                 cuda_assets = [a for a in assets
-                               if "bin-win-cuda" in a["name"] and a["name"].endswith(".zip")
+                               if "bin-win-cuda" in a["name"] and a["name"].endswith(f"-{arch}.zip")
                                and not a["name"].startswith("cudart")]
                 if cuda_assets:
                     cuda_assets.sort(key=lambda a: a["name"], reverse=True)
@@ -213,7 +214,8 @@ def _pick_asset(assets: list) -> tuple[dict | None, list[dict]]:
                         break
                 if cuda_tag:
                     for a in assets:
-                        if f"cudart-llama-bin-win-cuda-{cuda_tag}" in a["name"]:
+                        # Releases ship cudart for both x64 and arm64; match the CPU too.
+                        if a["name"] == f"cudart-llama-bin-win-cuda-{cuda_tag}-{arch}.zip":
                             extra_assets.append(a)
                             break
 
@@ -225,9 +227,8 @@ def _pick_asset(assets: list) -> tuple[dict | None, list[dict]]:
 
         if not nvidia:
             # CPU build
-            suffix = "arm64" if is_arm else "x64"
             for a in assets:
-                if f"bin-win-cpu-{suffix}" in a["name"] and a["name"].endswith(".zip"):
+                if f"bin-win-cpu-{arch}" in a["name"] and a["name"].endswith(".zip"):
                     main_asset = a
                     break
             gpu_note = "No NVIDIA GPU detected → " if not has_nvidia_gpu() else ""

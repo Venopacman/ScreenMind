@@ -63,9 +63,14 @@ case "${1:-run}" in
         echo "ScreenMind dev instance: $NAME"
         echo "  dashboard: http://127.0.0.1:$PORT"
         echo "  data dir:  $DATA"
+        # Main venv's Python (bin/ on macOS/Linux, Scripts/ on Windows Git Bash).
+        # SCREENMIND_PYTHON overrides it, e.g. for a branch with its own venv.
+        PY="$MAIN_ROOT/.venv/bin/python"
+        [ -x "$PY" ] || PY="$MAIN_ROOT/.venv/Scripts/python.exe"
+        PY="${SCREENMIND_PYTHON:-$PY}"
         cd "$CODE_DIR"
         # -m with cwd = worktree imports the worktree's code, not the main checkout's
-        exec "$MAIN_ROOT/.venv/bin/python" -m screenmind
+        exec "$PY" -m screenmind
         ;;
     *)
         echo "Unknown command: $1 (use run, info or reset)" >&2
