@@ -15,7 +15,7 @@ from screenmind.config import settings
 logger = logging.getLogger("screenmind.engine.ocr")
 
 # Recognition model per language code (EasyOCR-style codes, as in OCR_LANGUAGES).
-# One recognizer runs per frame, chosen by the first non-English code.
+# One recognizer runs per frame, chosen from the non-English codes (see _rec_model).
 # All of these also read English.
 _REC_MODELS = {
     # East Slavic: Russian, Ukrainian, Belarusian
@@ -52,16 +52,20 @@ def _rec_model(langs: list) -> str:
     """Pick the recognition model for the configured languages.
 
     English-only gets the English model; any other Latin-script code gets the
-    Latin model. If codes need different scripts, the first one wins.
+    Latin model. If codes need different scripts, a Cyrillic model wins, since
+    it also reads Latin text (measured on real frames: English results stay
+    the same, while the Latin model reads no Cyrillic at all). Otherwise the
+    first code wins.
     """
     others = [l for l in langs if l != "en"]
     if not others:
         return "en"
     models = [_REC_MODELS.get(l, "latin") for l in others]
+    chosen = next((m for m in models if m in _CYRILLIC_MODELS), models[0])
     if len(set(models)) > 1:
-        logger.warning(f"OCR reads one script at a time; using '{models[0]}' for {others[0]} "
-                       f"(also configured: {', '.join(others[1:])})")
-    return models[0]
+        logger.warning(f"OCR reads one script at a time; using '{chosen}' "
+                       f"(configured: {', '.join(others)})")
+    return chosen
 
 
 def _is_cyrillic(ch: str) -> bool:

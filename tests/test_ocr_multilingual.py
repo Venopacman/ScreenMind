@@ -28,9 +28,14 @@ class TestRecModel:
     def test_maps_languages_to_one_recognizer(self, langs, model):
         assert _rec_model(langs) == model
 
-    def test_mixed_scripts_use_the_first(self):
+    def test_mixed_scripts_prefer_cyrillic(self):
         assert _rec_model(["en", "ru", "es"]) == "eslav"
-        assert _rec_model(["en", "es", "ru"]) == "latin"
+        # Cyrillic models also read Latin, so they win over the Latin model
+        assert _rec_model(["en", "es", "ru"]) == "eslav"
+        assert _rec_model(["en", "es", "de", "fr", "ru"]) == "eslav"
+        assert _rec_model(["en", "es", "bg"]) == "cyrillic"
+        # Without a Cyrillic model the first code still wins
+        assert _rec_model(["en", "ja", "ko"]) == "ch"
 
 
 class TestLookalikes:
