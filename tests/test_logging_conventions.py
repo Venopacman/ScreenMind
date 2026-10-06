@@ -9,9 +9,12 @@ def _source_files():
     """Yield all .py source files in the project."""
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     for root, dirs, files in os.walk(base):
+        # Skip virtualenvs (venv, .venv, env) and tool dirs like .claude, which can
+        # hold full repo copies (git worktrees); only the project's own code counts.
         dirs[:] = [d for d in dirs if d not in (
-            '__pycache__', '.git', 'node_modules', 'venv', 'tests', '.agents',
-        )]
+            '__pycache__', '.git', 'node_modules', 'venv', '.venv', 'env', '.env',
+            'tests', '.agents', '.claude', 'build', 'dist',
+        ) and not os.path.exists(os.path.join(root, d, 'pyvenv.cfg'))]
         for fn in files:
             if not fn.endswith('.py'):
                 continue
