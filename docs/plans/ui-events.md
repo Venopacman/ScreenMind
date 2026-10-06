@@ -247,7 +247,8 @@ Each phase can ship on its own.
 3. **URL per event:** done. Migration v9 adds `ui_events.url`. Browser tab switches are recorded as `window_focus` when the URL changes.
 4. **Actions when the screenshot cache hits:** keep the cache. `user_actions` now goes into the daily summary and the chat context instead.
 5. **`AXManualAccessibility` on Electron apps:** keep it, and watch those apps for slowdowns.
-6. **Phase 5 (hotkeys on the UI-events hook):** agreed in principle, explained before starting.
+6. **Phase 5 (hotkeys on the UI-events hook):** dropped. Hotkeys are not important enough to justify the work.
+8. **Secrets in stored URLs:** fixed. `privacy/url_filter.sanitize_url()` runs on both `active_url` and `ui_events.url`. It stores scheme + host + path, drops query and fragment (except `tab`, `view`, `page`, `sort`, `lang`, `hl`), keeps only the host for sign-in hosts and auth/token paths, and replaces token-like path segments with `<token>`.
 7. **Windows browser URL:** to do. Add a UI Automation address-bar reader in `WindowsAdapter.get_browser_url()`.
 
 ## Implementation notes (macOS, phases 1 to 3)

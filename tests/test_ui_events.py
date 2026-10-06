@@ -361,6 +361,13 @@ class TestRecorder:
         assert e.url == "https://linear.app/team/issue/DIS-947"
         assert e.describe() == 'clicked button "Send" in Slack (linear.app)'
 
+    def test_event_url_is_sanitized(self, rec):
+        r, b, db, cw = rec
+        b.url = "https://accounts.google.com/o/oauth2/auth?state=s&nonce=n"
+        r._tick(RawEvent(kind="mouse_down", ts=101.0, x=1, y=1), 101.0)
+        r.flush_for_capture()
+        assert stored(db)[0].url == "https://accounts.google.com/"
+
     def test_click_in_other_app_gets_no_url(self, rec):
         r, b, db, cw = rec
         b.url = "https://linear.app/x"

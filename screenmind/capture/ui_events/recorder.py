@@ -329,10 +329,11 @@ class UiEventRecorder:
         return self._focus
 
     def _page_url(self) -> Optional[str]:
-        """Browser page URL of the frontmost window (None for other apps),
-        through the sensitive data filter since URLs can carry tokens."""
+        """Browser page URL of the frontmost window (None for other apps).
+        Sanitized like active_url: no query strings, no sign-in/token pages."""
         try:
-            return self._clean(self._backend.browser_url())
+            from screenmind.privacy.url_filter import sanitize_url
+            return self._clean(sanitize_url(self._backend.browser_url()))
         except Exception:
             return None
 
