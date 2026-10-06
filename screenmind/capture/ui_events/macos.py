@@ -92,7 +92,6 @@ class MacOSUiEventBackend(UiEventBackend):
         self._run_loop = None
         self._tap = None
         self._out: Optional[queue.SimpleQueue] = None
-        self._manual_a11y_pids: set = set()
 
     # ── Permissions ──────────────────────────────────────────────────
 
@@ -289,16 +288,11 @@ class MacOSUiEventBackend(UiEventBackend):
         return None
 
     def _enable_manual_a11y(self, pid: Optional[int]):
-        """Ask Electron/Chromium apps to expose their full AX tree.
-        Apps that do not know the attribute just return an error."""
-        if not pid or pid in self._manual_a11y_pids:
-            return
-        self._manual_a11y_pids.add(pid)
-        try:
-            app = self._AS.AXUIElementCreateApplication(pid)
-            self._AS.AXUIElementSetAttributeValue(app, "AXManualAccessibility", True)
-        except Exception:
-            pass
+        """Ask Electron/Chromium apps to expose their full AX tree."""
+        from screenmind.platform_support import adapter
+        enable = getattr(adapter(), "enable_full_a11y_tree", None)
+        if enable:
+            enable(pid)
 
     def element_at(self, x: float, y: float) -> Optional[ElementInfo]:
         try:
