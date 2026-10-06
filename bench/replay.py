@@ -121,7 +121,7 @@ async def _replay_one(worker, db, name: str):
     image = Image.open(fx / "screenshot.jpg").convert("RGB")
     path = Path(db._db_path).parent / f"{name}.jpg"
     image.save(path, quality=92)
-    capture = CaptureResult(
+    fields = dict(
         filepath=path,
         timestamp=datetime.now(),  # fresh, so the staleness skip never fires
         window_title=cap.get("window_title"),
@@ -131,6 +131,9 @@ async def _replay_one(worker, db, name: str):
         user_actions=cap.get("user_actions"),
         browser_url=cap.get("browser_url"),
     )
+    # Older code has fewer CaptureResult fields; drop the ones it does not know.
+    known = set(CaptureResult.__dataclass_fields__)
+    capture = CaptureResult(**{k: v for k, v in fields.items() if k in known})
     start = time.time()
     await worker._process(capture)
     elapsed = time.time() - start
@@ -138,6 +141,23 @@ async def _replay_one(worker, db, name: str):
         "SELECT * FROM activities WHERE screenshot_path = ? ORDER BY id DESC LIMIT 1", (str(path),)
     ).fetchone()
     return dict(row) if row else None, elapsed
+
+
+_WORDS = None
+
+
+def _word_ratio(text):
+    """Share of 3+ letter tokens that are dictionary words: a rough OCR quality score."""
+    global _WORDS
+    if _WORDS is None:
+        try:
+            _WORDS = {w.strip().lower() for w in open("/usr/share/dict/words") if len(w.strip()) >= 3}
+        except OSError:
+            _WORDS = set()
+    toks = re.findall(r"[A-Za-z]{3,}", text or "")
+    if not toks or not _WORDS:
+        return None
+    return round(sum(t.lower() in _WORDS for t in toks) / len(toks), 3)
 
 
 def _text_source(row) -> str:
@@ -229,6 +249,7 @@ async def _run(scenarios: dict, only: list, repeat: int):
                 "row": {k: (row or {}).get(k) for k in
                         ("app_name", "category", "summary", "active_url", "analysis_method")}
                        | {"text_chars": len((row or {}).get("ocr_text") or ""),
+                          "text_word_ratio": _word_ratio((row or {}).get("ocr_text")),
                           "text_source": _text_source(row or {})},
             })
             _print_result(results[-1])
