@@ -120,6 +120,23 @@ class TestPickAsset:
         assert "cuda-12.4" in main["name"]
 
     @patch("screenmind.setup_llama.platform")
+    @patch("screenmind.setup_llama._get_cuda_version", return_value="13.4")
+    @patch("screenmind.setup_llama.has_nvidia_gpu", return_value=True)
+    def test_windows_cuda_runtime_matches_cpu_arch(self, mock_gpu, mock_cuda, mock_platform):
+        """Release b11429 lists the arm64 cudart zip before the x64 one."""
+        mock_platform.system.return_value = "Windows"
+        mock_platform.machine.return_value = "AMD64"
+        assets = [
+            _make_asset("llama-b11429-bin-win-cuda-13.4-arm64.zip"),
+            _make_asset("llama-b11429-bin-win-cuda-13.4-x64.zip"),
+            _make_asset("cudart-llama-bin-win-cuda-13.4-arm64.zip", size=5_000_000),
+            _make_asset("cudart-llama-bin-win-cuda-13.4-x64.zip", size=5_000_000),
+        ]
+        main, extras = _pick_asset(assets)
+        assert main["name"] == "llama-b11429-bin-win-cuda-13.4-x64.zip"
+        assert [a["name"] for a in extras] == ["cudart-llama-bin-win-cuda-13.4-x64.zip"]
+
+    @patch("screenmind.setup_llama.platform")
     def test_macos_arm64(self, mock_platform):
         mock_platform.system.return_value = "Darwin"
         mock_platform.machine.return_value = "arm64"
