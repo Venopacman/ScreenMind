@@ -485,8 +485,10 @@ class WindowsAdapter(PlatformAdapter):
             docs = _window_documents(hwnd)
             page = pick_page_document(docs)
             if page is None:
+                # Schemes only: background tabs' URLs don't belong in logs.
                 logger.debug("No single on-screen page Document: " + ", ".join(
-                    f"{d['url'][:40]}(nested={d['nested']}, onscreen={d['onscreen']})" for d in docs))
+                    f"{d['url'].split(':', 1)[0] or '-'}(nested={d['nested']}, onscreen={d['onscreen']})"
+                    for d in docs))
             return page[1] if page else None
         except Exception as e:
             logger.debug(f"Browser URL lookup failed: {e!r}")

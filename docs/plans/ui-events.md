@@ -287,7 +287,7 @@ Built in `screenmind/capture/ui_events/windows.py` (`WindowsUiEventBackend`). Te
 **Elements (UI Automation)**
 
 - `element_at` uses `uiautomation.ControlFromPoint`; `focused_element` uses `GetFocusedControl`. Both run on the enricher thread. COM is set up lazily, once per thread, with a `UIAutomationInitializerInThread` kept in a thread-local, so it is released on that thread when it ends.
-- UIA's own timeouts are cut from 20 s to 1 s (`IUIAutomation2.ConnectionTimeout` / `TransactionTimeout`), so a hung app cannot freeze the enricher. The setting is global to the process; the a11y text extractor shares it.
+- UIA's own timeouts are cut from 20 s to 1 s (`IUIAutomation2.ConnectionTimeout` / `TransactionTimeout`), so a hung app cannot freeze the enricher. uiautomation creates the original `CUIAutomation` object, which has no `IUIAutomation2`, so `set_uia_timeouts()` (in `platform_support/windows.py`) swaps in `CUIAutomation8` first. Until that fix the timeouts silently stayed at 20 s. The setting is global to the process; the a11y text extractor shares it.
 - DPI: low-level hooks report per-monitor physical coordinates. `start()` makes the process per-monitor DPI aware (`SetProcessDpiAwareness(2)`, the same mode `mss` sets), so click points match UIA. `ui_events.x/y` are physical pixels on Windows and points on macOS.
 - Roles: uiautomation reports `EditControl`, `DocumentControl` and so on. `normalize_uia_role()` in `models.py` drops the suffix, so roles are `Edit`, `Document`, `Button` and match `TEXT_INPUT_ROLES`. `role_label()` has Windows labels (`Edit` -> "text field", `Hyperlink` -> "link") and splits other CamelCase names ("list item").
 - **Read-only documents are not text inputs.** A browser page is a UIA `Document`. Without a check, shortcut keys on a page (j/k, space) would be stored as typed text. `ElementInfo` has a new `editable` field, set from the value pattern's `IsReadOnly`, and `is_text_input` needs `editable is not False`. A `Document` without a value pattern counts as read-only. macOS leaves `editable` as `None`, so nothing changes there.
@@ -315,3 +315,21 @@ Built in `screenmind/capture/ui_events/windows.py` (`WindowsUiEventBackend`). Te
 **Tests**
 
 - `tests/test_ui_events_windows.py` needs no OS: key mapping, shortcut rules, dead-key composition, role normalization and labels, clipboard secret formats with fakes, element parsing with fake UIA controls (password, read-only document, child labels, label-to-button walk), and the recorder with Windows-style elements (typing in `Edit` kept, typing on a read-only page dropped, password placeholder, blocked app by exe name). The module imports on any OS.
+
+### Parity with the macOS capture fixes (branch `feat/windows-parity`)
+
+The macOS side added multi-display capture, cleaner a11y text, the browser's own URL and Electron titles (`cd7d618`, `8198161`, `117e37e`, `6e01292`). The Windows adapter now does the same:
+
+- **Top window per display.** `get_top_window_in()` walks `EnumWindows` (top of the z-order first) and takes the first app window whose center is on the display, the same center rule as macOS. It skips hidden, minimized and DWM-cloaked windows (other virtual desktops), tool, click-through, no-activate and always-on-top windows (picture-in-picture, game overlays), the taskbar, the desktop, untitled and tiny windows. `can_find_top_window` is True. Before this, the display without focus had no app name, so its blocked-app check could never match: a blocked app on a second screen was captured. Window rects and mss monitors are both physical pixels (mss makes the process per-monitor DPI aware). Tested with unit tests and on one display; this laptop has no second screen.
+- **UWP apps** are named by their own process (`CalculatorApp`), not `ApplicationFrameHost`, for the front window, the active app and the per-display label.
+- **Browser URL.** `get_browser_url()` reads the page's UIA `Document` value in the foreground window of a known browser (Chrome, Edge, Firefox, Brave, Vivaldi, Opera, Arc...). Unlike the address bar, it has the scheme, and it does not depend on the browser's UI language (Chrome's UI on the test laptop is Russian). Choice of Document, in `pick_page_document()`:
+  - only top-level Documents (an ancestor walk drops iframes) that are on screen (`IsOffscreen` false, non-empty rect); Firefox also lists the Documents of background tabs with their iframes, all off screen;
+  - `devtools://` and extension Documents (docked DevTools, side panels) are dropped first;
+  - exactly one must remain, with an `http`, `https` or `file` URL, else `None`. Browser pages (`about:newtab`, `chrome://`) give `None`, so a background tab or side panel never stands in. A wrong URL is worse than none.
+  - Chrome and Firefox build this tree lazily; the first query after a window opens can come back empty.
+  - Checked live in Edge, Chrome and Firefox (test page, Firefox `about:newtab` with a background tab, Chrome with DevTools docked in a throwaway profile), and in the app: a Firefox bookmark capture stores `active_url`. Reviewed by a second Claude session that had started on the same regression.
+- **Electron titles.** When the window title is just the app name, `get_active_window_title()` uses the name of the window's top on-screen `Document`. In the app, the Claude window is stored as the open session's name instead of "Claude".
+- **A11y walk** follows the macOS rules: menu, title bar and scroll bar subtrees are skipped; repeated lines are dropped; editable text areas give only their visible lines (`TextPattern.GetVisibleRanges`), others at most their last 4,000 chars; the total is capped at 20,000 chars. New: password fields and link URLs are never read (the old walker read every element's value). About 160 to 200 ms per browser window.
+- Not needed on Windows: `enable_full_a11y_tree`. Chromium, Electron and Firefox turn on their tree when a UIA client asks.
+- Tests: `tests/test_windows_adapter.py` (page choice incl. background tabs, iframes, DevTools, side panels; window filters; walk rules with fake controls; Electron title).
+
