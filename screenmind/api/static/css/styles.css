@@ -216,6 +216,10 @@ input:focus, select:focus { border-color: var(--border-active); box-shadow: 0 0 
 .timeline-item .time { font-size: 0.8rem; color: var(--text-muted); font-weight: 500; font-variant-numeric: tabular-nums; }
 .timeline-item .app-name { font-weight: 600; font-size: 0.9rem; }
 .timeline-item .summary { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5; }
+.timeline-item .user-actions { margin-top: 6px; font-size: 0.75rem; color: var(--text-muted); }
+.timeline-item .user-actions summary { cursor: pointer; user-select: none; width: fit-content; }
+.timeline-item .user-actions ul { margin: 4px 0 0; padding-left: 16px; line-height: 1.5; color: var(--text-secondary); }
+.timeline-item .user-actions li { word-break: break-word; }
 .timeline-item .dev-ctx { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.8rem; color: var(--cat-coding); }
 
 /* ── Three-dot Menu (⋮) ───────────────────────────────── */

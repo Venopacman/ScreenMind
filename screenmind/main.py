@@ -242,6 +242,11 @@ async def main():
     # Inject audio_worker into capture_worker so it can signal meeting detection
     capture_worker._audio_worker = audio_worker
 
+    # ── UI Events (clicks, typing, app switches via accessibility APIs) ──
+    from screenmind.capture.ui_events import UiEventRecorder, create_backend
+    ui_recorder = UiEventRecorder(database=db, capture_worker=capture_worker, backend=create_backend())
+    capture_worker._ui_recorder = ui_recorder
+
     # ── Hotkey Listener ──────────────────────────────────────────────
     from screenmind.ui.overlay import show_overlay_notification
     from screenmind.capture.voice_recorder import VoiceRecorder
@@ -367,6 +372,8 @@ async def main():
         analysis_worker=analysis_worker,
         audio_worker=audio_worker,
     )
+    from screenmind.api import dependencies as _api_deps
+    _api_deps.ui_recorder = ui_recorder
 
     # ── Graceful Shutdown ────────────────────────────────────────────
     shutdown_event = asyncio.Event()
@@ -409,6 +416,7 @@ async def main():
 
     # ── Start Workers ────────────────────────────────────────────────
     hotkey_listener.start()
+    ui_recorder.sync_with_settings()
 
     capture_task = asyncio.create_task(capture_worker.run())
     analysis_task = asyncio.create_task(analysis_worker.run())
@@ -452,6 +460,7 @@ async def main():
     analysis_worker.stop()
     audio_worker.force_stop()
     hotkey_listener.stop()
+    ui_recorder.stop()
     if agent_scheduler:
         agent_scheduler.stop()
     server.should_exit = True

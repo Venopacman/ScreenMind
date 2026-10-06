@@ -209,6 +209,18 @@ async function renderSettings(el) {
   + _sw('encryption-enabled', cfg.encryption_enabled) + '</div>'
   + '<div class="settings-note">Key stored in OS keyring. Requires <code>pip install cryptography keyring</code>.</div></div>'
 
+  + '<div class="settings-card" id="ui-events-card"><div class="settings-card-header"><div><div class="settings-title">UI Events <span style="background:var(--accent-primary);color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px;vertical-align:middle">Beta</span></div><div class="settings-desc">Record clicks, typed text, app switches and clipboard through OS accessibility APIs. Gives the AI exact context for each screenshot.</div></div>'
+  + _sw('ui-events-enabled', cfg.ui_events_enabled) + '</div>'
+  + '<div class="settings-note">This records what you type. Password fields are never recorded, and the Sensitive Data Filter runs on all text. Paused capture and blocked apps stop recording too. macOS only for now.</div>'
+  + '<div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px">'
+  + [['click','Clicks'],['app_switch','App switches'],['window_focus','Window changes'],['text','Typed text'],['clipboard','Clipboard']].map(function(t) {
+      var checked = (cfg.ui_events_types || '').split(',').indexOf(t[0]) >= 0 ? 'checked' : '';
+      return '<label style="display:flex;align-items:center;gap:8px;font-size:0.82rem;color:var(--text-secondary);cursor:pointer"><input type="checkbox" class="ui-event-type-cb" value="' + t[0] + '" ' + checked + ' style="accent-color:var(--accent)"> ' + t[1] + '</label>';
+    }).join('') + '</div>'
+  + '<div class="settings-toggle-row" style="margin-top:8px"><div><div class="settings-toggle-label">Capture on events</div><div class="settings-toggle-desc">Take a screenshot right after app switches, clicks and typing pauses (at most one every 3s)</div></div>'
+  + _sw('event-triggered-capture', cfg.event_triggered_capture) + '</div>'
+  + '<div id="ui-events-status" class="settings-note" style="margin-top:8px"></div></div>'
+
   + '</div>';
 
   // Inject Save button into header bar
@@ -265,7 +277,42 @@ async function renderSettings(el) {
 
   updateStorageEstimate();
   loadModels();
+  loadUiEventsStatus();
 }
+
+async function loadUiEventsStatus() {
+  var el = document.getElementById('ui-events-status');
+  if (!el) return;
+  var st;
+  try { st = await api('/api/ui-events/status'); } catch { el.textContent = ''; return; }
+  if (!st.supported) {
+    el.innerHTML = 'Not supported on this platform yet.';
+    return;
+  }
+  var p = st.permissions || {};
+  function _perm(ok, label) {
+    return '<span style="color:' + (ok ? '#10b981' : '#f59e0b') + '">' + (ok ? '&#10004; ' : '&#9888; ') + label + '</span>';
+  }
+  var html = _perm(p.input_monitoring, 'Input Monitoring') + ' &nbsp; ' + _perm(p.accessibility, 'Accessibility')
+    + ' &nbsp; <span style="color:var(--text-muted)">' + (st.running ? 'Recording' : 'Stopped')
+    + (st.running ? ' &middot; ' + st.events_recorded + ' events this session' : '') + '</span>';
+  if (!p.all_granted) {
+    html += '<div style="margin-top:6px">macOS asks for these for the app that started ScreenMind (Terminal, or Python for a login item), not for "ScreenMind". '
+      + 'Grant both in System Settings &rarr; Privacy &amp; Security, then restart ScreenMind. '
+      + '<button class="btn btn-sm" style="margin-left:4px" onclick="requestUiEventPermissions()">Ask macOS</button></div>';
+  }
+  if (st.last_error) {
+    html += '<div style="margin-top:4px;color:#ef4444">Last error: ' + st.last_error.replace(/</g, '&lt;') + '</div>';
+  }
+  el.innerHTML = html;
+}
+
+window.requestUiEventPermissions = async function() {
+  try {
+    await api('/api/ui-events/permissions', { method: 'POST' });
+  } catch {}
+  setTimeout(loadUiEventsStatus, 1000);
+};
 
 
 
@@ -535,6 +582,14 @@ window.saveSettings = async function() {
     })(),
     dashboard_lock_timeout: parseInt(document.getElementById('dashboard-lock-timeout').value) || 30,
     encryption_enabled: document.getElementById('encryption-enabled').checked,
+    // UI events
+    ui_events_enabled: document.getElementById('ui-events-enabled').checked,
+    ui_events_types: (function() {
+      var types = [];
+      document.querySelectorAll('.ui-event-type-cb:checked').forEach(function(cb) { types.push(cb.value); });
+      return types.join(',');
+    })(),
+    event_triggered_capture: document.getElementById('event-triggered-capture').checked,
     // Hotkeys
     bookmark_hotkey: document.getElementById('bookmark-hotkey-input').value,
     pause_hotkey: document.getElementById('pause-hotkey-input').value,
@@ -548,6 +603,7 @@ window.saveSettings = async function() {
     });
     showToast('Settings saved', 'success');
     _markSettingsSaved();
+    setTimeout(loadUiEventsStatus, 500);
   } catch {
     showToast('Failed to save settings', 'warning');
   }

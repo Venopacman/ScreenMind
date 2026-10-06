@@ -45,6 +45,7 @@ embedder: Optional[Embedder] = None
 capture_worker = None
 analysis_worker = None
 audio_worker = None
+ui_recorder = None  # UiEventRecorder, set by main after create_app
 
 
 

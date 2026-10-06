@@ -43,7 +43,7 @@ class Database:
 
     # ── FTS5 schema (single source of truth) ─────────────────────────────
 
-    _FTS5_COLUMNS = "summary, details, ocr_text, app_name, scene_description, organized_text"
+    _FTS5_COLUMNS = "summary, details, ocr_text, app_name, scene_description, organized_text, user_actions"
 
     def _recreate_fts(self, conn: sqlite3.Connection):
         """Drop and recreate the FTS5 virtual table + sync triggers.
@@ -67,17 +67,17 @@ class Database:
             # Canonical FTS5 sync triggers — always use old.* for deletes
             conn.execute(f"""CREATE TRIGGER activities_fts_ai AFTER INSERT ON activities BEGIN
                 INSERT INTO activities_fts(rowid, {cols})
-                VALUES (new.id, new.summary, new.details, new.ocr_text, new.app_name, new.scene_description, new.organized_text);
+                VALUES (new.id, new.summary, new.details, new.ocr_text, new.app_name, new.scene_description, new.organized_text, new.user_actions);
             END""")
             conn.execute(f"""CREATE TRIGGER activities_fts_ad AFTER DELETE ON activities BEGIN
                 INSERT INTO activities_fts(activities_fts, rowid, {cols})
-                VALUES ('delete', old.id, old.summary, old.details, old.ocr_text, old.app_name, old.scene_description, old.organized_text);
+                VALUES ('delete', old.id, old.summary, old.details, old.ocr_text, old.app_name, old.scene_description, old.organized_text, old.user_actions);
             END""")
             conn.execute(f"""CREATE TRIGGER activities_fts_au AFTER UPDATE ON activities BEGIN
                 INSERT INTO activities_fts(activities_fts, rowid, {cols})
-                VALUES ('delete', old.id, old.summary, old.details, old.ocr_text, old.app_name, old.scene_description, old.organized_text);
+                VALUES ('delete', old.id, old.summary, old.details, old.ocr_text, old.app_name, old.scene_description, old.organized_text, old.user_actions);
                 INSERT INTO activities_fts(rowid, {cols})
-                VALUES (new.id, new.summary, new.details, new.ocr_text, new.app_name, new.scene_description, new.organized_text);
+                VALUES (new.id, new.summary, new.details, new.ocr_text, new.app_name, new.scene_description, new.organized_text, new.user_actions);
             END""")
             conn.execute("INSERT INTO activities_fts(activities_fts) VALUES('rebuild')")
             conn.commit()
@@ -207,6 +207,27 @@ class Database:
                     ELSE 'pending'
                 END WHERE status = 'pending'""",
                 "CREATE INDEX IF NOT EXISTS idx_activities_status ON activities(status)",
+            ],
+            # v8: UI events (clicks, typed text, app switches, clipboard) captured
+            # via accessibility APIs, plus a per-frame text summary for FTS.
+            [
+                """CREATE TABLE IF NOT EXISTS ui_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    app_name TEXT,
+                    window_title TEXT,
+                    element_role TEXT,
+                    element_name TEXT,
+                    element_value TEXT,
+                    text TEXT,
+                    x INTEGER,
+                    y INTEGER,
+                    activity_id INTEGER REFERENCES activities(id) ON DELETE SET NULL
+                )""",
+                "CREATE INDEX IF NOT EXISTS idx_ui_events_ts ON ui_events(timestamp)",
+                "CREATE INDEX IF NOT EXISTS idx_ui_events_activity ON ui_events(activity_id)",
+                "ALTER TABLE activities ADD COLUMN user_actions TEXT",
             ],
         ]
 
@@ -709,6 +730,9 @@ class Database:
             "DELETE FROM daily_summaries WHERE date < ?", (cutoff,)
         )
 
+        # Delete old UI events
+        conn.execute("DELETE FROM ui_events WHERE DATE(timestamp) < ?", (cutoff,))
+
         # Delete old meetings
         mtg_cursor = conn.execute(
             "DELETE FROM meetings WHERE DATE(start_time) < ?", (cutoff,)
@@ -894,6 +918,71 @@ class Database:
         """Update only the summary field of a meeting (for re-analysis)."""
         conn = self._get_conn()
         conn.execute("UPDATE meetings SET summary = ? WHERE id = ?", (summary, meeting_id))
+        conn.commit()
+
+    # ── UI Events ────────────────────────────────────────────────────────
+
+    def insert_ui_events(self, events) -> int:
+        """Batch insert UiEvent objects. Returns the number inserted."""
+        if not events:
+            return 0
+        conn = self._get_conn()
+        conn.executemany(
+            """
+            INSERT INTO ui_events (
+                timestamp, type, app_name, window_title, element_role,
+                element_name, element_value, text, x, y
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    e.timestamp.isoformat(), e.type.value, e.app_name, e.window_title,
+                    e.element_role, e.element_name, e.element_value, e.text, e.x, e.y,
+                )
+                for e in events
+            ],
+        )
+        conn.commit()
+        return len(events)
+
+    def attach_ui_events(self, activity_id: int, until: datetime) -> int:
+        """Link all not-yet-linked events up to `until` to this activity."""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "UPDATE ui_events SET activity_id = ? "
+            "WHERE activity_id IS NULL AND timestamp <= ?",
+            (activity_id, until.isoformat()),
+        )
+        conn.commit()
+        return cursor.rowcount
+
+    def get_ui_events(self, activity_id: int) -> List[Dict[str, Any]]:
+        """Events linked to one activity, oldest first."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM ui_events WHERE activity_id = ? ORDER BY timestamp, id",
+            (activity_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_ui_events_range(
+        self, start: str, end: str, event_type: Optional[str] = None, limit: int = 500,
+    ) -> List[Dict[str, Any]]:
+        """Events between two ISO timestamps (inclusive), oldest first."""
+        conn = self._get_conn()
+        sql = "SELECT * FROM ui_events WHERE timestamp >= ? AND timestamp <= ?"
+        params: list = [start, end]
+        if event_type:
+            sql += " AND type = ?"
+            params.append(event_type)
+        sql += " ORDER BY timestamp, id LIMIT ?"
+        params.append(limit)
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+    def set_user_actions(self, activity_id: int, text: Optional[str]):
+        """Store the human-readable action summary for a frame (indexed by FTS)."""
+        conn = self._get_conn()
+        conn.execute("UPDATE activities SET user_actions = ? WHERE id = ?", (text, activity_id))
         conn.commit()
 
     def close(self):
