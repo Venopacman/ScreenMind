@@ -203,6 +203,10 @@ class TestA11yWalk:
         link = FakeControl("HyperlinkControl", "Open docs", value=FakePattern("https://x.example/"))
         assert walk(adapter, link) == ["Open docs"]
 
+    def test_document_text_in_a_name_is_capped(self, adapter):
+        editor = FakeControl("PaneControl", "x" * 50_000)  # Scintilla: name = document
+        assert len(walk(adapter, editor)[0]) == pw._A11Y_VISIBLE_ONLY_CHARS
+
     def test_total_budget(self, adapter):
         kids = [FakeControl("TextControl", f"{i}" + "z" * 999) for i in range(40)]
         out = walk(adapter, FakeControl("PaneControl", "", kids))

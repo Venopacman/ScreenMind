@@ -110,6 +110,9 @@ _ACTIONABLE_ROLES = {
     "TabItem", "ListItem", "TreeItem", "ComboBox", "Edit", "DataItem", "HeaderItem",
 }
 _LABEL_ROLES = {"Text", "Image", "Custom", "Group", "Pane"}
+# Text editor window classes that UI Automation shows only as a Pane, with
+# no value or text pattern. Scintilla: Notepad++, SciTE, many code editors.
+_EDITOR_CLASSES = {"Scintilla"}
 # Layout containers; web views put long text in their names.
 _CONTAINER_ROLES = {
     "Pane", "Group", "Window", "Custom", "List", "Tree", "Table", "DataGrid",
@@ -496,6 +499,11 @@ class WindowsUiEventBackend(UiEventBackend):
 
     def _element_info(self, control) -> ElementInfo:
         role = normalize_uia_role(_safe(lambda: control.ControlTypeName))
+        if _safe(lambda: control.ClassName) in _EDITOR_CLASSES:
+            # Editor controls without UIA support (Notepad++). Their name is
+            # the document text, not a label, so it is not kept.
+            return ElementInfo(role="Edit", pid=_safe(lambda: int(control.ProcessId)) or None,
+                               editable=True)
         is_password = bool(_safe(lambda: control.IsPassword))
         name = _clean_str(_safe(lambda: control.Name))
 

@@ -601,7 +601,8 @@ class WindowsAdapter(PlatformAdapter):
 
             name = control.Name
             if name and name.strip():
-                _add(name)
+                # Some editors (Scintilla) put the whole document in the name.
+                _add(name[:_A11Y_VISIBLE_ONLY_CHARS])
 
             if not control.IsPassword and control_type != "HyperlinkControl":
                 value = self._control_text(control, control_type)

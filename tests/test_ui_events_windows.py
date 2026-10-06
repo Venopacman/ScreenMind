@@ -284,6 +284,18 @@ class TestElementInfo:
         backend._auto.ControlFromPoint = boom
         assert backend.element_at(1, 1) is None
 
+    def test_scintilla_editor_is_a_text_input(self, backend):
+        editor = FakeControl("PaneControl", "Hi, my whole document text is the name")
+        editor.ClassName = "Scintilla"
+        info = backend._element_info(editor)
+        assert (info.role, info.editable, info.is_text_input) == ("Edit", True, True)
+        assert info.name is None and info.value is None  # the name is the document
+
+    def test_other_panes_are_not_text_inputs(self, backend):
+        pane = FakeControl("PaneControl", "Toolbar")
+        pane.ClassName = "ReBarWindow32"
+        assert not backend._element_info(pane).is_text_input
+
     def test_no_permissions_needed(self, backend):
         assert backend.check_permissions().all_granted
         assert backend.request_permissions().all_granted
