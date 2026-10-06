@@ -124,7 +124,7 @@ class MacOSAdapter(PlatformAdapter):
         the app name (Electron apps), or the app name as a last resort."""
         title = win["title"]
         if not title or title == win["owner"]:
-            title = self._ax_document_title(win["pid"]) or title
+            title = self._ax_document_title(win["pid"], win.get("bounds")) or title
         return title or win["owner"]
 
     def get_active_app_name(self) -> Optional[str]:
@@ -225,10 +225,40 @@ class MacOSAdapter(PlatformAdapter):
             queue.extend(children)
         return None
 
-    def _ax_document_title(self, pid: Optional[int]) -> Optional[str]:
-        """Title of the first web area in the focused window that has one."""
+    def _ax_window_at(self, pid: Optional[int], bounds: Tuple[int, int, int, int]):
+        """The app's AX window with these Quartz bounds (x, y, w, h).
+
+        An app can have windows on several displays; its focused window may
+        not be the one we are labeling. Falls back to the focused window only
+        when the app has a single window.
+        """
+        if not pid or not self._ax_available:
+            return None
+        try:
+            from ApplicationServices import (  # type: ignore
+                AXUIElementCreateApplication, AXValueGetValue,
+                kAXValueCGPointType, kAXValueCGSizeType,
+            )
+            windows = self._ax_attr(AXUIElementCreateApplication(pid), "AXWindows") or []
+            x, y, w, h = bounds
+            for win in windows:
+                ok_p, pos = AXValueGetValue(self._ax_attr(win, "AXPosition"), kAXValueCGPointType, None)
+                ok_s, size = AXValueGetValue(self._ax_attr(win, "AXSize"), kAXValueCGSizeType, None)
+                if ok_p and ok_s and abs(pos.x - x) <= 4 and abs(pos.y - y) <= 4 \
+                        and abs(size.width - w) <= 4 and abs(size.height - h) <= 4:
+                    return win
+            if len(windows) == 1:
+                return windows[0]
+        except Exception:
+            pass
+        return None
+
+    def _ax_document_title(self, pid: Optional[int],
+                           bounds: Optional[Tuple[int, int, int, int]] = None) -> Optional[str]:
+        """Title of the first web area that has one, in the window with these
+        bounds (or the focused window when no bounds are given)."""
         self.enable_full_a11y_tree(pid)
-        window = self._ax_focused_window(pid)
+        window = self._ax_window_at(pid, bounds) if bounds else self._ax_focused_window(pid)
         if window is None:
             return None
         queue = [window]
