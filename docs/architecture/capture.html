@@ -425,6 +425,7 @@ flowchart TB
     <li><code>OCR_LANGUAGES</code> (default <code>en</code>) picks the recognizer in <code>_rec_model()</code>. Mixed scripts: a Cyrillic model wins. So one script per frame (G14).</li>
     <li>Readings under 0.5 confidence are dropped. <code>_fix_lookalikes()</code> makes mixed Cyrillic/Latin words one script.</li>
     <li>Models (~15 MB) in <code>~/.screenmind/models/ocr</code>.</li>
+    <li>onnxruntime: memory pattern and arena off, <code>OCR_THREADS</code> threads (default 2). Less memory, about 40% less CPU per frame.</li>
     <li>Runs in the analysis worker. Skipped when a11y text is real content, and on "identical" cache hits.</li>
     <li>Output: text and boxes (<code>ocr_boxes</code> JSON). <code>organize_ocr_text()</code> groups boxes into regions (<code>organized_text</code>).</li>
   </ul>

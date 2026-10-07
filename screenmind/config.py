@@ -222,6 +222,12 @@ class Settings(BaseSettings):
                     "script per frame, picked by the first non-English code (ru/uk/be: East Slavic, "
                     "es/de/fr...: Latin). Every script model also reads English.",
     )
+    ocr_threads: int = Field(
+        default=2,
+        ge=0,
+        description="CPU threads per OCR model run. 2 uses about 40% less CPU per frame than "
+                    "all cores, but each frame takes longer. 0 = onnxruntime's default (all cores).",
+    )
 
     # ── Privacy & Security ────────────────────────────────────────────────
     sensitive_filter_enabled: bool = Field(default=True, description="Filter sensitive data (credit cards, SSNs, API keys) from captured text")

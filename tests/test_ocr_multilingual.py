@@ -134,3 +134,72 @@ def test_lookalikes_fixed_only_for_cyrillic_models(fake_rapidocr, monkeypatch):
 def test_no_text_returns_none(fake_rapidocr, monkeypatch):
     _with_langs(monkeypatch, "en")
     assert OCRExtractor().extract_text_with_boxes(Image.new("RGB", (20, 20))) == (None, [])
+
+
+class TestOnnxOptions:
+    def test_engine_gets_threads_and_no_arena(self, fake_rapidocr, monkeypatch):
+        _with_langs(monkeypatch, "en")
+        monkeypatch.setattr(ocr.settings, "ocr_threads", 2)
+        OCRExtractor()._ensure_reader()
+        p = fake_rapidocr.built[0].params
+        assert p["EngineConfig.onnxruntime.intra_op_num_threads"] == 2
+        assert p["EngineConfig.onnxruntime.enable_cpu_mem_arena"] is False
+
+    def test_zero_threads_means_onnxruntime_default(self, fake_rapidocr, monkeypatch):
+        _with_langs(monkeypatch, "en")
+        monkeypatch.setattr(ocr.settings, "ocr_threads", 0)
+        OCRExtractor()._ensure_reader()
+        assert fake_rapidocr.built[0].params["EngineConfig.onnxruntime.intra_op_num_threads"] == -1
+
+    def test_session_options(self):
+        so = ocr._session_options(2)
+        assert so.enable_mem_pattern is False
+        assert so.enable_cpu_mem_arena is False
+        assert so.intra_op_num_threads == 2
+        assert ocr._session_options(0).intra_op_num_threads == 0  # onnxruntime picks
+
+    def test_sessions_rebuilt_with_our_options(self, fake_rapidocr, monkeypatch):
+        import onnxruntime as ort
+
+        built = []
+
+        class FakeSession:
+            def __init__(self, path, sess_options=None, providers=None):
+                self._model_path = path
+                self.options = sess_options
+                self.providers = providers
+                built.append(self)
+
+            def get_providers(self):
+                return ["CPUExecutionProvider"]
+
+        def part(name):
+            return types.SimpleNamespace(session=types.SimpleNamespace(
+                session=FakeSession(f"/models/{name}.onnx")))
+
+        class Engine(fake_rapidocr.RapidOCR):
+            def __init__(self, params):
+                super().__init__(params)
+                self.text_det, self.text_cls, self.text_rec = part("det"), part("cls"), part("rec")
+
+        monkeypatch.setattr(fake_rapidocr, "RapidOCR", Engine)
+        monkeypatch.setattr(ort, "InferenceSession", FakeSession)
+        _with_langs(monkeypatch, "en")
+        monkeypatch.setattr(ocr.settings, "ocr_threads", 3)
+        o = OCRExtractor()
+        o._ensure_reader()
+
+        sessions = [o._engine.text_det, o._engine.text_cls, o._engine.text_rec]
+        rebuilt = [s.session.session for s in sessions]
+        assert [s._model_path for s in rebuilt] == ["/models/det.onnx", "/models/cls.onnx", "/models/rec.onnx"]
+        for s in rebuilt:
+            assert s.options.enable_mem_pattern is False
+            assert s.options.intra_op_num_threads == 3
+            assert s.providers == ["CPUExecutionProvider"]
+
+    def test_tuning_failure_keeps_ocr_working(self, fake_rapidocr, monkeypatch):
+        # The fake engine has no text_det etc., so tuning fails.
+        _with_langs(monkeypatch, "en")
+        o = OCRExtractor()
+        o._ensure_reader()
+        assert o.is_available and o._engine is not None

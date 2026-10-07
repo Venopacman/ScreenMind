@@ -278,6 +278,7 @@ Known holes: Chrome ignores `AXManualAccessibility`. After a reboot, with no oth
 - `OCR_LANGUAGES` (default `en`) picks the recognizer with `_rec_model()`. English only: `en`. Any other code: its script model. Mixed scripts: a Cyrillic model wins, because it also reads Latin. So one script per frame (G14).
 - Readings under 0.5 confidence are dropped. With a Cyrillic model, `_fix_lookalikes()` makes each mixed word one script.
 - Models (~15 MB) download to `~/.screenmind/models/ocr` on first use.
+- onnxruntime options (`_session_options()`): memory pattern and memory arena off, `OCR_THREADS` threads (default 2). RapidOCR has no setting for the memory pattern, so `_tune_sessions()` loads its models again with these options. Same text as the defaults, with less memory and about 40% less CPU per frame. Each frame takes about 45% longer.
 - Runs in the analysis worker, not at grab time. Skipped when a11y text is real content, and on "identical" cache hits.
 - Output: text, plus boxes as JSON (`ocr_boxes`). `layout_analyzer.organize_ocr_text()` groups boxes into regions (`organized_text`), from Gemma's layout in `merged` mode or from OCR clustering otherwise.
 

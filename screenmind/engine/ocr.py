@@ -86,6 +86,47 @@ def _fix_lookalikes(text: str) -> str:
     return " ".join(words)
 
 
+def _session_options(threads: int):
+    """onnxruntime options for the OCR models, tuned for memory and CPU.
+
+    The memory pattern plans one big buffer per input shape and keeps it.
+    Screen frames give many shapes, so that memory piles up. The memory arena
+    is off too (RapidOCR's default). See docs/plans/packaging.md, "Resource
+    budget", for the measured saving.
+    """
+    import onnxruntime as ort
+
+    so = ort.SessionOptions()
+    so.log_severity_level = 4  # as RapidOCR
+    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    so.enable_cpu_mem_arena = False
+    so.enable_mem_pattern = False
+    if threads > 0:
+        so.intra_op_num_threads = threads
+    return so
+
+
+def _tune_sessions(engine, threads: int) -> None:
+    """Rebuild RapidOCR's onnxruntime sessions with _session_options().
+
+    RapidOCR 3.x takes threads and the arena from its config, but has no
+    setting for enable_mem_pattern. Its custom-session hook ("Det.session")
+    cannot go through params either: the config is OmegaConf, which only holds
+    plain values. So we let RapidOCR find and download the models, then load
+    each one again with our options.
+    """
+    import onnxruntime as ort
+
+    for part in (engine.text_det, engine.text_cls, engine.text_rec):
+        wrapper = part.session  # RapidOCR's OrtInferSession
+        old = wrapper.session
+        wrapper.session = ort.InferenceSession(
+            old._model_path,
+            sess_options=_session_options(threads),
+            providers=old.get_providers(),
+        )
+
+
 def _ocr_models_dir():
     from screenmind.engine.model_manager import _models_dir
     d = _models_dir() / "ocr"
@@ -120,10 +161,13 @@ class OCRExtractor:
             return
 
         rec = _rec_model(settings.ocr_languages_list)
+        threads = settings.ocr_threads
         try:
             self._engine = RapidOCR(params={
                 "Global.log_level": "warning",
                 "Global.model_root_dir": str(_ocr_models_dir()),
+                "EngineConfig.onnxruntime.intra_op_num_threads": threads or -1,
+                "EngineConfig.onnxruntime.enable_cpu_mem_arena": False,
                 "Det.ocr_version": OCRVersion.PPOCRV6,
                 "Det.model_type": ModelType.TINY,
                 "Rec.ocr_version": OCRVersion.PPOCRV5,
@@ -134,8 +178,13 @@ class OCRExtractor:
             logger.warning(f"OCR model '{rec}' unavailable ({e}); skipping text extraction")
             self._available = False
             return
+        try:
+            _tune_sessions(self._engine, threads)
+        except Exception as e:
+            # RapidOCR's own sessions still work, with more memory.
+            logger.warning(f"Could not apply OCR memory options, using RapidOCR's: {e}")
         self._rec_model = rec
-        logger.info(f"OCR initialized (RapidOCR, recognizer: {rec}, "
+        logger.info(f"OCR initialized (RapidOCR, recognizer: {rec}, threads: {threads or 'all'}, "
                     f"languages: {', '.join(settings.ocr_languages_list)})")
 
     def extract_text(self, image: Image.Image) -> Optional[str]:
