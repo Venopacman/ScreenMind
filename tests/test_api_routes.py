@@ -1,7 +1,7 @@
 """Tests for API endpoints — uses httpx AsyncClient with the FastAPI app."""
 
 import pytest
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 
 from screenmind.storage.models import ScreenshotEntry, ActivityRecord
 import screenmind.api.dependencies as deps
@@ -58,6 +58,33 @@ async def test_stats_endpoint(client, db):
     assert resp.status_code == 200
     data = resp.json()
     assert "total_activities" in data
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("range_, expected", [("day", 1), ("week", 2), ("month", 3)])
+async def test_stats_range(client, db, range_, expected):
+    # One analyzed activity today, 3 days ago, 20 days ago and 60 days ago.
+    for days_ago in (0, 3, 20, 60):
+        aid = db.insert_activity(ScreenshotEntry(
+            timestamp=datetime.combine(date.today() - timedelta(days=days_ago), time(12)),
+            screenshot_path=f"/tmp/range-{days_ago}.jpg",
+            analyzed=False,
+        ))
+        db.update_activity_analysis(aid, ActivityRecord(
+            app_name="Code", activity_category="coding", activity_summary="test"
+        ))
+
+    resp = await client.get(f"/api/stats?range={range_}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_activities"] == expected
+    assert data["top_apps"] == {"Code": expected}
+
+
+@pytest.mark.asyncio
+async def test_stats_range_rejects_unknown(client):
+    resp = await client.get("/api/stats?range=year")
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
