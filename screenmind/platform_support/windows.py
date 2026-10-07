@@ -5,6 +5,7 @@ Uses Win32 APIs (ctypes) for window detection and UI Automation for a11y.
 
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -137,9 +138,15 @@ def process_name(pid: int) -> Optional[str]:
 
 _UIA_TIMEOUT_MS = 1000  # UIA's default lets a hung app block a call for 20 s
 _UIA_ValueValuePropertyId = 30045
+_UIA_ValueIsReadOnlyPropertyId = 30046
 _UIA_ControlTypePropertyId = 30003
+_UIA_NamePropertyId = 30005
+_UIA_IsPasswordPropertyId = 30019
+_UIA_IsOffscreenPropertyId = 30022
+_UIA_AriaRolePropertyId = 30101
 _UIA_DocumentControlTypeId = 50030
 _TreeScope_Descendants = 4
+_TreeScope_Subtree = 7
 
 _uia_tls = threading.local()
 _uia_timeouts_set = False
@@ -224,6 +231,8 @@ _PAGE_URL_SCHEMES = ("http://", "https://", "file:///")
 # Documents that sit next to the page, not instead of it.
 _HELPER_DOC_SCHEMES = ("devtools://", "chrome-extension://", "moz-extension://",
                        "extension://", "edge-extension://")
+# A web Document's value: one URL, nothing else.
+_WEB_DOC_VALUE_RE = re.compile(r"(?:[a-z][a-z0-9+.\-]*://|about:)\S*\Z", re.IGNORECASE)
 
 
 def pick_page_document(docs: list) -> Optional[Tuple[str, str]]:
@@ -238,8 +247,7 @@ def pick_page_document(docs: list) -> Optional[Tuple[str, str]]:
     (about:, chrome://) still counts as the page, so it gives None rather
     than letting a side panel's URL stand in. A wrong URL is worse than none.
     """
-    shown = [d for d in docs if not d["nested"] and d["onscreen"] and d["url"]
-             and not d["url"].lower().startswith(_HELPER_DOC_SCHEMES)]
+    shown = [d for d in page_documents(docs) if d["url"]]
     if len(shown) != 1:
         return None
     page = shown[0]
@@ -248,8 +256,25 @@ def pick_page_document(docs: list) -> Optional[Tuple[str, str]]:
     return (page["name"] or "").strip(), page["url"]
 
 
+def is_web_document(read_only, value) -> bool:
+    """Web content (browsers, Electron apps) is a read-only Document whose
+    value is its URL. Editable Documents are text areas (Notepad, Word), and
+    a read-only text viewer has its text as the value."""
+    return read_only is True and isinstance(value, str) and bool(_WEB_DOC_VALUE_RE.match(value))
+
+
+def page_documents(docs: list) -> list:
+    """The Documents a browser window shows as pages: top-level, on screen, not
+    docked DevTools, extension panels or Chrome's own side panels
+    (chrome://*.top-chrome/). Split view shows two."""
+    return [d for d in docs if not d["nested"] and d["onscreen"]
+            and not (d["url"] or "").lower().startswith(_HELPER_DOC_SCHEMES)
+            and ".top-chrome" not in (d["url"] or "").lower()]
+
+
 def _window_documents(hwnd: int) -> list:
-    """All Document elements in a window, as dicts for pick_page_document().
+    """All Document elements in a window, as dicts for pick_page_document()
+    (element is the UIA element).
 
     Chrome and Firefox build this tree lazily: right after a window opens,
     the first query can find nothing.
@@ -267,6 +292,7 @@ def _window_documents(hwnd: int) -> list:
         doc = found.GetElement(i)
         try:
             value = doc.GetCurrentPropertyValue(_UIA_ValueValuePropertyId)
+            read_only = doc.GetCurrentPropertyValue(_UIA_ValueIsReadOnlyPropertyId)
             rect = doc.CurrentBoundingRectangle
             onscreen = not doc.CurrentIsOffscreen and rect.right > rect.left and rect.bottom > rect.top
             nested = False
@@ -279,7 +305,8 @@ def _window_documents(hwnd: int) -> list:
                     break
                 parent = walker.GetParentElement(parent)
             out.append({"name": doc.CurrentName, "url": value if isinstance(value, str) else "",
-                        "nested": nested, "onscreen": onscreen})
+                        "nested": nested, "onscreen": onscreen, "element": doc,
+                        "web": is_web_document(read_only, value)})
         except Exception as e:
             logger.debug(f"Skipped a Document: {e!r}")
             continue
@@ -291,10 +318,113 @@ def _window_documents(hwnd: int) -> list:
 # Subtrees with app chrome, not content (macOS skips its menu roles too).
 _A11Y_SKIP_TYPES = {"MenuBarControl", "MenuControl", "MenuItemControl",
                     "TitleBarControl", "ScrollBarControl"}
+# Outside web content, controls are window chrome: their labels are in the UI
+# language and say nothing about what is shown ("Свернуть", "Extensions",
+# other tabs' titles). Chosen by element type, so any UI language is covered.
+# In a web page, buttons and tabs are page content and are kept.
+_A11Y_NATIVE_CHROME_TYPES = {"ButtonControl", "SplitButtonControl", "ToolBarControl",
+                             "StatusBarControl", "TabItemControl"}
+# Web landmarks for site menus and sidebars. They repeat on every frame and
+# push out the main content (macOS skips the same landmarks).
+_A11Y_WEB_SKIP_ROLES = {"navigation", "complementary"}
+# Name of the pane that hosts Chromium web content; a constant, never localized.
+_CHROMIUM_HOST_PANE = "Chrome Legacy Window"
 # Text areas give at most this much: their visible part, or the end of the value.
 _A11Y_VISIBLE_ONLY_CHARS = 4000
 # Generous: analysis trims its own prompt (see engine/analyzer.py).
 _A11Y_MAX_TOTAL_CHARS = 300000
+# Web content is fetched whole and walked locally, so these are cheap. Text
+# sits up to ~40 levels below a Document (Electron apps).
+_A11Y_WEB_MAX_NODES = 20000
+_A11Y_WEB_MAX_DEPTH = 200
+
+
+def _repeats(a: str, b: str) -> bool:
+    """Whether the shorter text is the start or end of the longer one."""
+    short, long_ = sorted((a, b), key=len)
+    return len(short) >= 4 and (long_.startswith(short) or long_.endswith(short))
+
+
+def _add_line(text: str, texts: list, seen: set, budget: list) -> None:
+    """Append a line unless it is a repeat; budget is [chars left]."""
+    text = text.strip()
+    if len(text) <= 1 or text in seen or budget[0] <= 0:
+        return
+    # A link's name often repeats in its own text child, or the other way
+    # round with a prefix ("Idle Chat name", "Chat name"). Keep the longer.
+    if texts and _repeats(text, texts[-1]):
+        if len(text) > len(texts[-1]):
+            budget[0] += len(texts.pop())
+        else:
+            return
+    seen.add(text)
+    text = text[:budget[0]]
+    budget[0] -= len(text)
+    texts.append(text)
+
+
+def _cached_tree(element) -> Optional[dict]:
+    """A web Document's subtree as plain dicts, fetched in one UIA call.
+
+    Reading a page node by node costs a cross-process call per property:
+    1.2 s for a 500-node Chrome page, against 0.04 s for one cached fetch.
+    Nodes: type, name, value, role (ARIA), offscreen, password, children.
+    """
+    auto = uia()
+    if auto is None or element is None:
+        return None
+    ia = auto.uiautomation._AutomationClient.instance().IUIAutomation
+    request = ia.CreateCacheRequest()
+    for pid in (_UIA_NamePropertyId, _UIA_ControlTypePropertyId, _UIA_IsPasswordPropertyId,
+                _UIA_IsOffscreenPropertyId, _UIA_ValueValuePropertyId, _UIA_AriaRolePropertyId):
+        request.AddProperty(pid)
+    request.TreeScope = _TreeScope_Subtree
+    root = element.BuildUpdatedCache(request)
+    type_names = auto.ControlTypeNames
+    left = [_A11Y_WEB_MAX_NODES]
+
+    def _node(el, depth: int) -> dict:
+        left[0] -= 1
+        value = el.GetCachedPropertyValue(_UIA_ValueValuePropertyId)
+        role = el.GetCachedPropertyValue(_UIA_AriaRolePropertyId)
+        children = []
+        kids = el.GetCachedChildren() if depth < _A11Y_WEB_MAX_DEPTH else None
+        for i in range(kids.Length if kids else 0):
+            if left[0] <= 0:
+                break
+            children.append(_node(kids.GetElement(i), depth + 1))
+        return {"type": type_names.get(el.CachedControlType, ""), "name": el.CachedName or "",
+                "value": value if isinstance(value, str) else "",
+                "role": role.lower() if isinstance(role, str) else "",
+                "offscreen": bool(el.CachedIsOffscreen), "password": bool(el.CachedIsPassword),
+                "children": children}
+
+    return _node(root, 0)
+
+
+def web_text(node: dict, texts: list, seen: set, budget: list) -> None:
+    """Visible text of a web Document (a browser page, an Electron app) from
+    a _cached_tree() node.
+
+    Reads only on-screen elements, skips site menus and sidebars (nav and
+    complementary landmarks), menus, scroll bars and password fields.
+    Document values are URLs and link values are targets: neither is text,
+    and a raw URL would skip sanitize_url.
+    """
+    if (budget[0] <= 0 or node["password"] or node["type"] in _A11Y_SKIP_TYPES
+            or node["role"] in _A11Y_WEB_SKIP_ROLES):
+        return
+    if not node["offscreen"]:
+        name = node["name"]
+        _add_line(name[:_A11Y_VISIBLE_ONLY_CHARS], texts, seen, budget)
+        value = node["value"]
+        if (value and node["type"] not in ("DocumentControl", "HyperlinkControl")
+                and value.strip() != name.strip()):
+            _add_line(value[-_A11Y_VISIBLE_ONLY_CHARS:], texts, seen, budget)
+    for child in node["children"]:
+        web_text(child, texts, seen, budget)
+        if budget[0] <= 0:
+            return
 
 
 # ── Top window per display ───────────────────────────────────────────
@@ -571,26 +701,60 @@ class WindowsAdapter(PlatformAdapter):
             return None, "none"
 
     def _extract_uiautomation(self, hwnd: Optional[int] = None) -> Optional[str]:
-        """Extract text using the uiautomation library."""
+        """Extract text using the uiautomation library.
+
+        Browsers give only their on-screen pages, never their own UI (tabs,
+        toolbar, bookmarks, extension buttons): that is in the browser's UI
+        language and says nothing about the page. No page Document found
+        means no text, so analysis falls back to OCR.
+
+        Other apps: the native walk (depth 8), then their web Documents
+        (Electron apps), which sit 9+ levels down and are read whole.
+        """
         auto = uia() or self._uia
 
         try:
-            if hwnd:
-                window = auto.ControlFromHandle(hwnd)
-            else:
-                window = auto.GetForegroundControl()
-
-            if not window:
+            if not hwnd:
+                hwnd = _dlls()[1].GetForegroundWindow()
+            if not hwnd:
                 return None
 
-            texts = []
-            self._walk_tree(window, texts, depth=0, max_depth=8,
-                            seen=set(), budget=[_A11Y_MAX_TOTAL_CHARS])
+            texts, seen, budget = [], set(), [_A11Y_MAX_TOTAL_CHARS]
+            docs = _window_documents(hwnd)
+            if (process_name(_window_pid(hwnd)) or "").lower() in _BROWSER_EXES:
+                pages = page_documents(docs)
+            else:
+                window = auto.ControlFromHandle(hwnd)
+                if not window:
+                    return None
+                self._walk_tree(window, texts, depth=0, max_depth=8, seen=seen, budget=budget)
+                pages = [d for d in page_documents(docs) if d["web"]]
+            for page in pages:
+                self._walk_web_document(page["element"], texts, seen, budget)
 
             return '\n'.join(texts) if texts else None
 
         except Exception:
             return None
+
+    def _walk_web_document(self, element, texts: list, seen: set, budget: list) -> None:
+        """Add a web Document's visible text (see web_text)."""
+        try:
+            tree = _cached_tree(element)
+        except Exception as e:
+            # A huge page can outlast the 1 s UIA timeout; OCR covers it.
+            logger.debug(f"Could not read a web Document: {e!r}")
+            return
+        if tree:
+            web_text(tree, texts, seen, budget)
+
+    def _is_web_document(self, control) -> bool:
+        auto = self._uia or uia()
+        try:
+            vp = control.GetPattern(auto.PatternId.ValuePattern)
+            return vp is not None and is_web_document(vp.IsReadOnly, vp.Value)
+        except Exception:
+            return False
 
     def _walk_tree(self, control, texts: list, depth: int, max_depth: int = 8,
                    seen: Optional[set] = None, budget: Optional[list] = None):
@@ -599,7 +763,9 @@ class WindowsAdapter(PlatformAdapter):
         Same rules as the macOS walker: skips menus (and title bars and
         scroll bars), drops repeated lines, reads only the visible part of
         editable text areas, and stops after _A11Y_MAX_TOTAL_CHARS. Password
-        fields are never read.
+        fields are never read. Also skips window chrome by control type
+        (buttons, toolbars, tabs) and web Documents, which
+        _extract_uiautomation reads whole with web_text's rules.
         """
         seen = set() if seen is None else seen
         budget = [_A11Y_MAX_TOTAL_CHARS] if budget is None else budget
@@ -608,27 +774,20 @@ class WindowsAdapter(PlatformAdapter):
 
         try:
             control_type = control.ControlTypeName
-            if control_type in _A11Y_SKIP_TYPES:
+            if control_type in _A11Y_SKIP_TYPES or control_type in _A11Y_NATIVE_CHROME_TYPES:
                 return
-
-            def _add(text: str):
-                text = text.strip()
-                if len(text) <= 1 or text in seen or budget[0] <= 0:
-                    return
-                seen.add(text)
-                text = text[:budget[0]]
-                budget[0] -= len(text)
-                texts.append(text)
+            if control_type == "DocumentControl" and self._is_web_document(control):
+                return  # read whole afterwards, see _extract_uiautomation
 
             name = control.Name
-            if name and name.strip():
+            if name and name.strip() and name != _CHROMIUM_HOST_PANE:
                 # Some editors (Scintilla) put the whole document in the name.
-                _add(name[:_A11Y_VISIBLE_ONLY_CHARS])
+                _add_line(name[:_A11Y_VISIBLE_ONLY_CHARS], texts, seen, budget)
 
             if not control.IsPassword and control_type != "HyperlinkControl":
                 value = self._control_text(control, control_type)
                 if value and value.strip() != (name or "").strip():
-                    _add(value)
+                    _add_line(value, texts, seen, budget)
 
             children = control.GetChildren()
             if children:
@@ -643,7 +802,7 @@ class WindowsAdapter(PlatformAdapter):
     def _control_text(self, control, control_type: str) -> Optional[str]:
         """An element's value. Editable text areas (Notepad, editors) give only
         their visible lines, so a big file or a terminal's scrollback is not
-        read whole. Read-only Documents (web pages) give their URL value."""
+        read whole. (Web Documents are read by web_text.)"""
         auto = self._uia or uia()
         try:
             vp = control.GetPattern(auto.PatternId.ValuePattern)
