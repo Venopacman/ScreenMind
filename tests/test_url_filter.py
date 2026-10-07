@@ -42,5 +42,6 @@ def test_sanitize_url(url, expected):
     assert sanitize_url(url) == expected
 
 
-def test_file_url_kept_without_query():
-    assert sanitize_url("file:///Users/me/report.pdf?x=1#p2") == "file:///Users/me/report.pdf"
+def test_file_url_dropped():
+    assert sanitize_url("file:///Users/me/Downloads/report.pdf?x=1#p2") is None
+    assert sanitize_url("FILE:///Users/me/report.pdf") is None

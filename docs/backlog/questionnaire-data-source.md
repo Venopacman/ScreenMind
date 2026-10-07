@@ -39,13 +39,6 @@ Status: blocked (the user has to turn on UI Events in Settings and grant Input M
 
 Refs: `screenmind/capture/ui_events/`, settings `ui_events_enabled`, `ui_events_types`.
 
-### Drop file:// URLs in the sanitizer
-Status: open
-
-Activity 654 stored `file:///Users/pavel/Downloads/...` as `active_url`, which leaks a local path and is never a work page. `sanitize_url()` should return None for `file:` like it does for `chrome:`.
-
-Refs: `screenmind/privacy/url_filter.py` (`sanitize_url`).
-
 ### Do not backfill rows from before 55a9198
 Status: open (rule for the feed design)
 

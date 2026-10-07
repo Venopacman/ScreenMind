@@ -54,7 +54,8 @@ def sanitize_url(url: Optional[str]) -> Optional[str]:
       No fragment, no user:password.
     - Sign-in hosts and auth/token paths: scheme + host only.
     - Path segments that look like tokens are replaced by "<token>".
-    - file:// URLs: kept as-is without query/fragment (local files).
+    - Everything else (file://, chrome:, javascript:, ...): None. A file://
+      URL leaks a local path and is never a work page.
     """
     if not url:
         return None
@@ -63,8 +64,6 @@ def sanitize_url(url: Optional[str]) -> Optional[str]:
     except ValueError:
         return None
     scheme = parts.scheme.lower()
-    if scheme == "file":
-        return urlunsplit(("file", "", parts.path, "", ""))
     if scheme not in ("http", "https"):
         return None
     host = (parts.hostname or "").lower()
