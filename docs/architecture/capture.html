@@ -551,10 +551,10 @@ flowchart TB
     <div>
       <h3>Encryption</h3>
       <p><code>ENCRYPTION_ENABLED</code> (default off) encrypts each JPEG in place with Fernet. The key is in the OS keyring via <code>keyring</code>, with a <code>0600</code> file copy. The DB is never encrypted: typed text, OCR text and URLs are plain text (G23).</p>
-      <h3>Export</h3>
-      <p><code>GET /api/export</code> builds a zip for a user and a date range: one folder per day, one text file per session (split by idle gaps), JSONL copies and the screenshots. Only <code>status='ok'</code> rows go out, and URLs and text are filtered again on the way. Format: <code>docs/export-format.md</code> in the repo.</p>
     </div>
   </div>
+  <h3>Export</h3>
+  <p><code>GET /api/export</code> builds a zip for a user and a date range: one folder per day, one text file per session (split by idle gaps), JSONL copies and the screenshots. Only <code>status='ok'</code> rows go out, and URLs and text are filtered again on the way. Format: <code>docs/export-format.md</code> in the repo.</p>
 </section>
 
 <!-- 6 -->
