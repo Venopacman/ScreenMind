@@ -408,7 +408,7 @@ class TestRecorderWithUiaRoles:
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
 def test_create_backend_on_windows():
-    pytest.importorskip("uiautomation")  # not in requirements-test.txt (CI)
+    pytest.importorskip("uiautomation")
     from screenmind.capture.ui_events.recorder import create_backend
     assert isinstance(create_backend(), win.WindowsUiEventBackend)
 

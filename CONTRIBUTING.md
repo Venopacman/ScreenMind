@@ -10,23 +10,22 @@ Contributions are welcome — bug fixes, features, docs, tests, all of it.
    cd ScreenMind
    ```
 
-2. Install dependencies:
+2. Install dependencies with [uv](https://docs.astral.sh/uv/getting-started/installation/):
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # Windows: venv\Scripts\activate
-   pip install -r requirements.txt
-   pip install -r requirements-test.txt
+   uv sync
    ```
+   This creates `.venv` from `uv.lock`, including test tools and the MCP extra.
+   To add a dependency, run `uv add <package>` and commit `pyproject.toml` and `uv.lock`.
 
 3. Set up a Gemma model (needed for the analysis engine):
    ```bash
-   python -m screenmind.setup_llama
+   uv run python -m screenmind.setup_llama
    ```
    Or use the Model Hub in the web dashboard to download a model.
 
 4. Run tests:
    ```bash
-   pytest
+   uv run pytest
    ```
 
 ## Reporting Bugs

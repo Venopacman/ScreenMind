@@ -3,8 +3,9 @@
 #
 # The main instance runs from the main checkout: port 7777, data in ~/.screenmind.
 # A worktree instance gets its own data dir and port, so it never touches the
-# main DB, screenshots or settings. It shares the main checkout's venv, the
-# downloaded models (~/.screenmind/models) and the running llama-server.
+# main DB, screenshots or settings. It shares the downloaded models
+# (~/.screenmind/models) and the running llama-server. It uses the worktree's
+# own venv if it has one (`uv sync` in the worktree), else the main checkout's.
 #
 # Usage (from the worktree root):
 #   scripts/dev-instance.sh [run|info|reset]
@@ -63,11 +64,18 @@ case "${1:-run}" in
         echo "ScreenMind dev instance: $NAME"
         echo "  dashboard: http://127.0.0.1:$PORT"
         echo "  data dir:  $DATA"
-        # Main venv's Python (bin/ on macOS/Linux, Scripts/ on Windows Git Bash).
-        # SCREENMIND_PYTHON overrides it, e.g. for a branch with its own venv.
-        PY="$MAIN_ROOT/.venv/bin/python"
-        [ -x "$PY" ] || PY="$MAIN_ROOT/.venv/Scripts/python.exe"
+        # Python from the worktree's .venv if it exists (a branch with changed
+        # deps runs `uv sync` there), else the main checkout's .venv.
+        # bin/ on macOS/Linux, Scripts/ on Windows Git Bash.
+        # SCREENMIND_PYTHON overrides both.
+        PY=""
+        for venv in "$CODE_DIR/.venv" "$MAIN_ROOT/.venv"; do
+            for p in "$venv/bin/python" "$venv/Scripts/python.exe"; do
+                if [ -z "$PY" ] && [ -x "$p" ]; then PY="$p"; fi
+            done
+        done
         PY="${SCREENMIND_PYTHON:-$PY}"
+        echo "  python:    $PY"
         cd "$CODE_DIR"
         # -m with cwd = worktree imports the worktree's code, not the main checkout's
         exec "$PY" -m screenmind

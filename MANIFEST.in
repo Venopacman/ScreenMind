@@ -1,7 +1,5 @@
 include LICENSE
 include README.md
-include requirements.txt
-include requirements-test.txt
 include architecture.md
 include .env.example
 recursive-include screenmind/api/static *

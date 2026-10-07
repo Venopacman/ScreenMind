@@ -24,6 +24,8 @@ jobs:
         with:
           python-version: "3.11"
 
+      - uses: astral-sh/setup-uv@v6
+
       - name: Verify tag matches package version
         run: |
           PKG_VERSION=$(python -c "import re, pathlib; t = pathlib.Path('screenmind/__init__.py').read_text(); print(re.search(r'__version__\s*=\s*\"([^\"]+)\"', t).group(1))")
@@ -35,14 +37,10 @@ jobs:
           fi
 
       - name: Build sdist and wheel
-        run: |
-          python -m pip install --upgrade pip build
-          python -m build
+        run: uv build
 
       - name: Check metadata
-        run: |
-          python -m pip install --upgrade twine
-          python -m twine check dist/*
+        run: uvx twine check dist/*
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

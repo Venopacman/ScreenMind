@@ -215,6 +215,8 @@ If you have more VRAM, E4B offers richer analysis. The 12B model gives the best 
 
 ```bash
 pip install screenmind
+# or, with uv:
+uv tool install screenmind
 ```
 
 #### 2️⃣ Run
@@ -260,12 +262,29 @@ screenmind --help               # Show all options
 git clone https://github.com/ayushh0110/ScreenMind.git
 cd ScreenMind
 
-python -m venv venv
-venv\Scripts\activate        # Windows
-# source venv/bin/activate   # macOS/Linux
-
-pip install -e ".[ai,dev]"
+# Needs uv: https://docs.astral.sh/uv/getting-started/installation/
+uv sync                      # creates .venv from uv.lock, with dev tools and the MCP extra
+uv run screenmind            # or: uv run python -m screenmind
 ```
+
+Dependencies live in `pyproject.toml` and are pinned in `uv.lock`. Add or change one with `uv add <package>` (or edit `pyproject.toml` and run `uv lock`), then commit both files.
+
+</details>
+
+<details>
+<summary><b>Install from source with pip</b></summary>
+
+<br>
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # macOS/Linux
+
+pip install -e ".[mcp]" pytest pytest-asyncio pytest-cov
+```
+
+This ignores `uv.lock`, so you may get newer versions than CI tests.
 
 </details>
 
@@ -592,8 +611,8 @@ screenmind/
 ├── setup_llama.py             # Auto-detect + install llama-server
 ├── launcher.py                # Splash screen launcher (tkinter)
 ├── startup.py                 # Cross-platform auto-start registration
-├── requirements.txt           # Full Python dependencies
-├── requirements-test.txt      # Lightweight CI deps (no PyTorch)
+├── pyproject.toml             # Dependencies (uv dev group, mcp/windows extras)
+├── uv.lock                    # Exact versions for every platform (uv)
 │   ├── main.py              # MCP server for Claude/Cursor/VS Code
 ├── screenmind_sdk.py          # SDK for Python plugin agents
 │
@@ -709,17 +728,11 @@ Dark glassmorphism UI. No build step. Instant load.
 Run the test suite:
 
 ```bash
-# Fast (lightweight deps — same as CI, ~2 min install)
-pip install -r requirements-test.txt
-pytest --cov=. --cov-report=term-missing -q
-
-# Full (includes OCR and embedding models: RapidOCR, ONNX Runtime)
-pip install -r requirements.txt
-pip install pytest pytest-asyncio pytest-cov
-pytest --cov=. --cov-report=term-missing -q
+uv run pytest tests -q
+uv run pytest --cov=screenmind --cov-report=term-missing -q   # with coverage
 ```
 
-CI runs automatically on push/PR via GitHub Actions using the lightweight deps.
+`uv run` installs the locked dependencies first if needed. CI runs the same locked install on push/PR via GitHub Actions (Windows, Python 3.10).
 
 ---
 

@@ -22,7 +22,8 @@ The MCP server exposes your ScreenMind data as **tools** that AI assistants can 
 ### 1. Install Dependencies
 
 ```bash
-pip install "mcp[cli]"
+pip install "screenmind[mcp]"
+# from a source checkout: uv sync (the dev group already includes the mcp extra)
 ```
 
 ### 2. Configure Your AI Client

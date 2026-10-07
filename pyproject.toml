@@ -90,12 +90,18 @@ mcp = ["mcp[cli]>=1.26.0,<2.0"]
 # `pip install screenmind[windows]` still works.
 windows = ["uiautomation>=2.0,<3.0 ; sys_platform == 'win32'"]
 
-# Development / Testing
+[dependency-groups]
+# Development / testing. `uv sync` installs this group by default.
+# Tests also need the MCP server, so the group pulls in the `mcp` extra.
 dev = [
+    "screenmind[mcp]",
     "pytest>=7.0",
     "pytest-asyncio",
     "pytest-cov",
+    "flake8",
+    "flake8-print",
 ]
+
 
 [project.scripts]
 screenmind = "screenmind.main:run"
@@ -131,3 +137,19 @@ version = {attr = "screenmind.__version__"}
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+
+# ── uv ────────────────────────────────────────────────────────────────
+[tool.uv]
+# The lock must install from wheels on these platforms, for every Python in
+# requires-python. Without this, uv may lock a version that has no wheel for
+# one of them (onnxruntime >= 1.24 has no Python 3.10 wheels).
+required-environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+# uv checks the platform of each wheel, not its Python version. onnxruntime
+# 1.24+ ships no wheels for Python 3.10, so cap it there by hand.
+constraint-dependencies = [
+    "onnxruntime<1.24 ; python_version < '3.11'",
+]
