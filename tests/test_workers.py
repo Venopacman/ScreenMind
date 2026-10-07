@@ -402,3 +402,162 @@ class TestCaptureAllMonitors:
         assert len(first) == 2
         assert second == []
         assert worker._consecutive_skips == 1
+
+
+class TestBacklogSkip:
+    """Frames too old to analyze keep what was read at capture time."""
+
+    def _stale_capture(self, db, tmp_path, **kw):
+        from datetime import timedelta
+        from PIL import Image
+        from screenmind.storage.models import ScreenshotEntry
+
+        shot = tmp_path / "shot.jpg"
+        Image.new("RGB", (64, 64), "white").save(shot)
+        ts = datetime.now() - timedelta(seconds=600)
+        activity_id = db.insert_activity(ScreenshotEntry(
+            timestamp=ts, screenshot_path=str(shot), window_title="Twitch — Mozilla Firefox",
+            detected_app_name="firefox", bookmarked=False, analyzed=False,
+        ))
+        db.set_user_actions(activity_id, "- clicked 'Browse'")
+        return CaptureResult(
+            filepath=shot, timestamp=ts, window_title="Twitch — Mozilla Firefox",
+            app_name="firefox", image=Image.open(shot), activity_id=activity_id,
+            user_actions="- clicked 'Browse'", **kw,
+        )
+
+    async def _run_once(self, db, capture):
+        from screenmind.workers.analysis_worker import AnalysisWorker
+
+        queue = asyncio.Queue(maxsize=10)
+        worker = AnalysisWorker(queue=queue, database=db)
+        worker._ensure_embedder = lambda: None
+        worker._backfill_skipped = AsyncMock()
+        worker._ocr = MagicMock(is_available=True)
+        worker._analyzer = MagicMock()
+        await queue.put(capture)
+        task = asyncio.create_task(worker.run())
+        try:
+            await asyncio.wait_for(queue.join(), timeout=5)
+        finally:
+            worker.stop()
+            task.cancel()
+        return worker
+
+    async def test_skip_keeps_capture_data(self, db, tmp_path):
+        capture = self._stale_capture(
+            db, tmp_path, browser_url="https://www.twitch.tv/",
+            a11y_text="Browse channels\nSSN 123-45-6789",
+        )
+        worker = await self._run_once(db, capture)
+
+        row = db.get_activity_by_id(capture.activity_id)
+        assert row["status"] == "skipped"
+        assert row["analysis_method"] == "skipped"
+        assert row["active_url"] == "https://www.twitch.tv/"
+        assert "Browse channels" in row["ocr_text"]
+        assert "123-45-6789" not in row["ocr_text"]  # same filter as the normal path
+        assert row["user_actions"] == "- clicked 'Browse'"
+        assert row["app_name"] == "firefox"
+        # Nothing analyzed the frame: no made-up category or summary
+        assert row["category"] is None
+        assert row["summary"] is None
+        assert not worker._ocr.extract_text_with_boxes.called
+        assert not worker._analyzer.method_calls
+
+    async def test_skipped_frames_not_in_analytics(self, db, tmp_path):
+        capture = self._stale_capture(db, tmp_path, a11y_text="text")
+        await self._run_once(db, capture)
+
+        day = capture.timestamp.date().isoformat()
+        stats = db.get_stats(day, day)
+        assert stats["category_breakdown"] == {}
+        assert stats["total_activities"] == 0
+        assert stats["status_breakdown"] == {"skipped": 1}
+
+    async def test_backfill_reuses_kept_text_and_url(self, db, tmp_path):
+        from screenmind.workers.analysis_worker import AnalysisWorker
+
+        capture = self._stale_capture(
+            db, tmp_path, browser_url="https://www.twitch.tv/", a11y_text="Browse channels")
+        db.mark_skipped(capture.activity_id, ocr_text="Browse channels",
+                        active_url="https://www.twitch.tv/")
+        db._get_conn().execute("UPDATE activities SET timestamp = ? WHERE id = ?",
+                               (datetime.now().isoformat(), capture.activity_id))
+        db._get_conn().commit()
+
+        worker = AnalysisWorker(queue=asyncio.Queue(maxsize=10), database=db)
+        worker._process = AsyncMock()
+        await worker._backfill_skipped()
+
+        again = worker._process.await_args.args[0]
+        assert again.a11y_text == "Browse channels"
+        assert again.browser_url == "https://www.twitch.tv/"
+        assert again.user_actions == "- clicked 'Browse'"
+
+
+class TestFocusConsistency:
+    """A11y text and URL must describe the same window as the image and title."""
+
+    def _make_worker(self, tmp_path, titles, db=None):
+        from PIL import Image
+
+        worker = CaptureWorker(queue=asyncio.Queue(maxsize=10), database=db)
+        shot = tmp_path / "shot.jpg"
+        Image.new("RGB", (64, 64), "white").save(shot)
+        screen = MagicMock()
+        screen.monitors_to_capture.return_value = [None]
+        screen.capture.return_value = (shot, Image.open(shot))
+        screen.last_monitor_key = None
+        worker._screen = screen
+        worker._a11y = MagicMock(is_available=True)
+        calls = []
+        worker._a11y.extract_text.side_effect = lambda: (calls.append("a11y"), ("page text", "a11y"))[1]
+
+        title_iter = iter(titles)
+        patches = [
+            patch("screenmind.workers.capture_worker.get_active_app_name", return_value="chrome"),
+            patch("screenmind.workers.capture_worker.get_active_window_title",
+                  side_effect=lambda: next(title_iter)),
+            patch("screenmind.workers.capture_worker._get_browser_url",
+                  side_effect=lambda: (calls.append("url"), "https://ru.wikipedia.org/wiki/GitHub")[1]),
+        ]
+        for p in patches:
+            p.start()
+        return worker, patches, calls
+
+    async def _tick(self, worker, patches):
+        try:
+            await worker._capture_tick()
+        finally:
+            for p in patches:
+                p.stop()
+        return await worker._queue.get()
+
+    async def test_same_window_keeps_text_and_url(self, tmp_path):
+        worker, patches, _ = self._make_worker(tmp_path, ["GitHub — Wikipedia", "GitHub — Wikipedia"])
+        item = await self._tick(worker, patches)
+        assert item.browser_url == "https://ru.wikipedia.org/wiki/GitHub"
+        assert item.a11y_text == "page text"
+
+    async def test_tab_switch_mid_capture_drops_text_and_url(self, tmp_path):
+        """#184: the dashboard's title with the URL of the tab clicked next."""
+        worker, patches, _ = self._make_worker(
+            tmp_path, ["ScreenMind — Dashboard", "GitHub — Wikipedia"])
+        item = await self._tick(worker, patches)
+        assert item.window_title == "ScreenMind — Dashboard"
+        assert item.browser_url is None
+        assert item.a11y_text is None
+
+    async def test_read_before_db_insert_and_event_linking(self, db, tmp_path):
+        worker, patches, calls = self._make_worker(tmp_path, ["T", "T"], db=db)
+        db_insert = db.insert_activity
+        db.insert_activity = lambda entry: (calls.append("insert"), db_insert(entry))[1]
+
+        async def link(activity_id, now):
+            calls.append("link")
+            return None
+        worker._link_ui_events = link
+
+        await self._tick(worker, patches)
+        assert calls == ["url", "a11y", "insert", "link"]

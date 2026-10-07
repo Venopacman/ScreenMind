@@ -166,7 +166,8 @@ class CaptureWorker:
                     continue
 
                 attempted = True
-                if await self._capture_monitor(monitor, mon_app, mon_title, focused, trigger):
+                if await self._capture_monitor(monitor, mon_app, mon_title, focused, trigger,
+                                               active_title=window_title):
                     saved = True
 
             if not saved:
@@ -218,8 +219,12 @@ class CaptureWorker:
             self._monitor_dedups[key] = ScreenDeduplicator(threshold=8)
         return self._monitor_dedups[key]
 
-    async def _capture_monitor(self, monitor, app_name, window_title, focused, trigger) -> bool:
-        """Capture one display. Returns True if a new frame was saved and enqueued."""
+    async def _capture_monitor(self, monitor, app_name, window_title, focused, trigger,
+                               active_title) -> bool:
+        """Capture one display. Returns True if a new frame was saved and enqueued.
+
+        active_title is the focused window's title read before the grab.
+        """
         result = self._screen.capture(monitor)
         if result is None:
             return False
@@ -241,6 +246,10 @@ class CaptureWorker:
         # Content has changed! Save it.
         now = datetime.now()
 
+        # Read the focused window right after the grab, before the DB insert
+        # and UI-event linking, so text and URL match the image.
+        a11y_text, browser_url = self._read_focused(focused, active_title)
+
         # Insert to DB immediately so it shows in timeline right away
         activity_id = None
         if self._db:
@@ -257,14 +266,6 @@ class CaptureWorker:
         # UI events go to the first frame saved after them; with several
         # displays the later frames of the same tick find nothing left to link.
         user_actions = await self._link_ui_events(activity_id, now)
-
-        # A11y extraction — MUST happen now while window is still focused
-        # This fixes the wrong-window bug (analysis worker runs later).
-        # It reads the focused window, so skip it for the other displays.
-        a11y_text = None
-        if focused and self._a11y.is_available:
-            a11y_text, _ = self._a11y.extract_text()
-        browser_url = _get_browser_url() if focused else None
 
         capture_result = CaptureResult(
             filepath=filepath,
@@ -313,9 +314,10 @@ class CaptureWorker:
             mon_app, mon_title, focused = self._label_monitor(
                 monitor, active, app_name, window_title
             )
-            await self._bookmark_monitor(monitor, mon_app, mon_title, focused)
+            await self._bookmark_monitor(monitor, mon_app, mon_title, focused,
+                                         active_title=window_title)
 
-    async def _bookmark_monitor(self, monitor, app_name, window_title, focused):
+    async def _bookmark_monitor(self, monitor, app_name, window_title, focused, active_title):
         result = self._screen.capture(monitor)
         if result is None:
             return
@@ -324,6 +326,7 @@ class CaptureWorker:
 
         # Always process bookmarked captures — never dedup
         now = datetime.now()
+        a11y_text, browser_url = self._read_focused(focused, active_title)
 
         # Insert to DB immediately
         activity_id = None
@@ -339,12 +342,6 @@ class CaptureWorker:
             activity_id = self._db.insert_activity(entry)
 
         user_actions = await self._link_ui_events(activity_id, now)
-
-        # A11y extraction at capture time (correct window)
-        a11y_text = None
-        if focused and self._a11y.is_available:
-            a11y_text, _ = self._a11y.extract_text()
-        browser_url = _get_browser_url() if focused else None
 
         # Compute pHash for bookmark captures (dedup doesn't run for bookmarks)
         import imagehash
@@ -367,6 +364,25 @@ class CaptureWorker:
         await self._queue.put(capture_result)
         self._capture_count += 1
         logger.info(f"[*] Bookmarked capture #{self._capture_count}")
+
+    def _read_focused(self, focused, active_title):
+        """A11y text and browser URL of the focused window, read just after the grab.
+
+        Both read whatever window has focus now. If its title is no longer the
+        one read before the grab (tab or app switch mid-capture), they would
+        describe another window than the image, so drop them: OCR covers the
+        text, and a wrong URL is worse than none.
+        """
+        if not focused:
+            return None, None
+        browser_url = _get_browser_url()
+        a11y_text = None
+        if self._a11y.is_available:
+            a11y_text, _ = self._a11y.extract_text()
+        if get_active_window_title() != active_title:
+            logger.debug("Focus moved during capture; dropping a11y text and URL")
+            return None, None
+        return a11y_text, browser_url
 
     # ── UI-event-driven captures ─────────────────────────────────────
 

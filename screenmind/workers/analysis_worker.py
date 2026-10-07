@@ -150,6 +150,19 @@ def _extract_all_urls(text: str) -> list[str]:
     return result
 
 
+def _filter_sensitive(text: Optional[str]) -> Optional[str]:
+    """Redact sensitive data (per settings) before text reaches the AI or the DB."""
+    if not settings.sensitive_filter_enabled or not text:
+        return text
+    try:
+        from screenmind.privacy.data_filter import filter_sensitive_text, parse_enabled_types
+        enabled_types = parse_enabled_types(settings.sensitive_filter_types)
+        return filter_sensitive_text(text, enabled_types)["clean_text"]
+    except Exception as e:
+        logger.warning(f"Sensitive filter error: {e}")
+        return text
+
+
 class AnalysisWorker:
     """
     Background worker that processes queued screenshots through the full pipeline:
@@ -262,16 +275,11 @@ class AnalysisWorker:
                 age_seconds = (datetime.now() - capture.timestamp).total_seconds()
                 if age_seconds > 180 and not capture.bookmarked and not from_priority:
                     if capture.activity_id:
-                        self._db.update_activity_analysis(
-                            activity_id=capture.activity_id,
-                            analysis=ActivityRecord(
-                                app_name=capture.app_name or "unknown",
-                                activity_category="other",
-                                activity_summary="Skipped (analysis backlog)",
-                                confidence=0.0,
-                            ),
-                            analysis_method="skipped",
-                            status="skipped",
+                        # Keep what was read at capture time; no OCR, no Gemma.
+                        self._db.mark_skipped(
+                            capture.activity_id,
+                            ocr_text=_filter_sensitive(capture.a11y_text),
+                            active_url=capture.browser_url,
                         )
                     self._cache_skips += 1
                     self._queue.task_done()
@@ -422,14 +430,7 @@ class AnalysisWorker:
                             text_method = "ocr"
 
             # 3c. Sensitive data filter — redact before AI + storage
-            if settings.sensitive_filter_enabled and ocr_text:
-                try:
-                    from screenmind.privacy.data_filter import filter_sensitive_text, parse_enabled_types
-                    enabled_types = parse_enabled_types(settings.sensitive_filter_types)
-                    filter_result = filter_sensitive_text(ocr_text, enabled_types)
-                    ocr_text = filter_result["clean_text"]
-                except Exception as e:
-                    logger.warning(f"Sensitive filter error: {e}")
+            ocr_text = _filter_sensitive(ocr_text)
 
             # 3c'. Nothing on screen: no window label and almost no text (e.g. a
             #      display showing only the wallpaper). Skip Gemma. Without hints
@@ -738,7 +739,7 @@ class AnalysisWorker:
             conn = self._db._get_conn()
             row = conn.execute(
                 """SELECT id, screenshot_path, window_title, COALESCE(detected_app, app_name), ocr_text, ocr_boxes,
-                          user_actions
+                          user_actions, status, active_url
                    FROM activities
                    WHERE status IN ('pending', 'skipped', 'failed')
                      AND DATE(timestamp) = DATE('now', 'localtime')
@@ -748,7 +749,8 @@ class AnalysisWorker:
             if not row:
                 return  # No skipped entries — nothing to backfill
 
-            activity_id, ss_path, window_title, app_name, ocr_text, ocr_boxes_raw, user_actions = row
+            (activity_id, ss_path, window_title, app_name, ocr_text, ocr_boxes_raw,
+             user_actions, status, active_url) = row
 
             # Check screenshot still exists on disk
             if not ss_path or not Path(ss_path).exists():
@@ -792,9 +794,11 @@ class AnalysisWorker:
                 bookmarked=False,
                 image=img,
                 activity_id=activity_id,
-                a11y_text=None,
+                # A skipped frame kept its capture-time a11y text and URL
+                a11y_text=ocr_text if status == 'skipped' else None,
                 phash=phash,
                 user_actions=user_actions,
+                browser_url=active_url,
             )
 
             self._is_backfill = True

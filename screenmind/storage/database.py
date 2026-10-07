@@ -377,6 +377,36 @@ class Database:
         # FTS5 sync is handled automatically by AFTER UPDATE trigger
         conn.commit()
 
+    def mark_skipped(
+        self,
+        activity_id: int,
+        ocr_text: Optional[str] = None,
+        active_url: Optional[str] = None,
+    ):
+        """Finish a frame without analysis, keeping what was read at capture time.
+
+        Analysis fields (category, summary, confidence...) stay NULL: nothing
+        looked at the frame, and a made-up category would count as work time.
+        user_actions is left as the capture worker wrote it. Backfill can still
+        analyze the row later (status 'skipped').
+        """
+        conn = self._get_conn()
+        conn.execute(
+            """
+            UPDATE activities SET
+                app_name = COALESCE(app_name, detected_app),
+                category = NULL, summary = NULL, details = NULL,
+                visible_text = NULL, mood = NULL, confidence = NULL,
+                embedding = NULL, scene_description = NULL, organized_text = NULL,
+                ocr_text = ?, ocr_boxes = NULL, active_url = ?,
+                analysis_method = 'skipped',
+                analyzed = 1, status = 'skipped', analysis_error = NULL
+            WHERE id = ?
+            """,
+            (ocr_text, active_url, activity_id),
+        )
+        conn.commit()
+
     def get_activities_by_date(
         self, target_date: str, limit: int = 200, offset: int = 0
     ) -> List[Dict[str, Any]]:
