@@ -204,12 +204,8 @@ class Instance:
             "EVENT_TRIGGERED_CAPTURE": "true",
             "SENSITIVE_FILTER_ENABLED": "true",
             "RETENTION_DAYS": "7",
-            # Nothing leaves the machine, nothing extra runs
+            # Nothing extra runs
             "MEETING_TRANSCRIPTION": "false",
-            "AGENTS_ENABLED": "false",
-            "WEBHOOK_ENABLED": "false",
-            "OBSIDIAN_ENABLED": "false",
-            "NOTION_ENABLED": "false",
             "SCREENMIND_LOG_LEVEL": "INFO",
             "PYTHONUNBUFFERED": "1",
             "PYTHONUTF8": "1",

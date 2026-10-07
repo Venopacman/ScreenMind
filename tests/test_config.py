@@ -58,3 +58,24 @@ def test_data_path_resolution():
     s = Settings(data_dir="~/.screenmind")
     assert s.data_path.is_absolute()
     assert "~" not in str(s.data_path)
+
+
+def test_settings_json_keys_of_removed_settings_are_ignored(tmp_path, caplog):
+    """An old settings.json still holds removed keys. Load the rest, quietly."""
+    import json
+    import logging
+    s = Settings(data_dir=str(tmp_path))
+    s.settings_json_path.write_text(json.dumps({
+        "capture_interval": 25,
+        "bookmark_hotkey": "ctrl+shift+b", "voice_hotkey": "ctrl+shift+v",
+        "webhook_url": "https://example.com", "notion_token": "x",
+        "obsidian_enabled": True, "agents_enabled": True, "auto_bookmark": True,
+        "dashboard_lock_timeout": 30,
+    }))
+    with caplog.at_level(logging.INFO, logger="screenmind.config"):
+        s.load_runtime_overrides()
+    assert s.capture_interval == 25
+    assert not hasattr(s, "bookmark_hotkey")
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert "bookmark_hotkey" not in caplog.text
+
