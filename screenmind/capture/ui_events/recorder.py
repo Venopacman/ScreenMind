@@ -18,6 +18,7 @@ import logging
 import queue
 import threading
 import time
+from collections import Counter
 from datetime import datetime
 from typing import List, Optional
 
@@ -47,6 +48,10 @@ _LOCK_TIMEOUT_S = 2.0
 _STOP_JOIN_S = 3.0
 # How long a typed label ("pwd -") waits for its value in the next chunk.
 _LABEL_CARRY_S = 30.0
+# Warn when a freshly installed hook gets no input for this long.
+_SILENCE_WARN_S = 120.0
+# How often to log what was recorded, so the user sees it in the console.
+_SUMMARY_S = 600.0
 
 # Delays before an event-driven capture, so the screen can finish updating.
 TRIGGER_DELAYS = {
@@ -102,6 +107,20 @@ class UiEventRecorder:
         self._last_error: Optional[str] = None
         # (field identity, end time, label) of a chunk that ended in "pwd -".
         self._open_label: Optional[tuple] = None
+        # Health and counters, logged so a silent failure shows up in the console.
+        self._off_logged = False
+        self._started_at = 0.0
+        self._input_events = 0
+        self._first_input_seen = False
+        self._silence_warned = False
+        self._hook_dead_warned = False
+        self._seen_callback_errors = 0
+        self._seen_reenabled = 0
+        self._skipped: Counter = Counter()
+        self._last_summary = 0.0
+        self._period_input = 0
+        self._period_stored: Counter = Counter()
+        self._period_skipped: Counter = Counter()
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
@@ -115,10 +134,16 @@ class UiEventRecorder:
 
     def sync_with_settings(self):
         """Start or stop to match settings.ui_events_enabled."""
-        if settings.ui_events_enabled and not self.running:
-            self.start()
-        elif not settings.ui_events_enabled and self.running:
+        if settings.ui_events_enabled:
+            if not self.running:
+                self.start()
+            return
+        if self.running:
             self.stop()
+        if not self._off_logged:
+            self._off_logged = True
+            logger.info("UI events are off (ui_events_enabled=false). Clicks and app switches "
+                        "are not recorded. Turn them on in Settings > Privacy & Security > UI Events.")
 
     def start(self) -> bool:
         if not self.supported:
@@ -128,22 +153,30 @@ class UiEventRecorder:
             return True
         perms = self._backend.check_permissions()
         if not perms.accessibility:
-            logger.warning("UI events: Accessibility permission missing. "
-                           "Typed text will not be recorded until it is granted.")
-        if not perms.input_monitoring:
-            logger.warning("UI events: Input Monitoring permission missing. "
-                           "Key presses will not be recorded until it is granted.")
+            logger.warning("UI events: no Accessibility permission. Clicks are stored without "
+                           "the button or field name, and typed text is not recorded. Grant "
+                           "Accessibility to the app that starts ScreenMind (e.g. Terminal) "
+                           "and restart ScreenMind.")
+        # Missing Input Monitoring is reported by the backend: it knows
+        # whether it fell back to clicks only.
         if not self._backend.start(self._queue):
             self._last_error = "Could not install the input hook"
+            logger.warning("UI events: could not install the input hook. Nothing will be recorded.")
             return False
         self._clip_count = self._backend.clipboard_change_count()
+        self._off_logged = False
+        self._started_at = self._last_summary = time.time()
+        self._first_input_seen = self._silence_warned = self._hook_dead_warned = False
         # A new event per thread: an old enricher still stuck in a backend
         # call must not come back to life when we restart.
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, args=(self._stop,),
                                         name="ui-events-enricher", daemon=True)
         self._thread.start()
-        logger.info("UI event recording started")
+        types = settings.ui_events_types_list
+        logger.info(f"UI event recording started (types: {', '.join(types) or 'none'})")
+        if not types:
+            logger.warning("UI events: ui_events_types is empty, so nothing will be recorded.")
         return True
 
     def stop(self):
@@ -162,13 +195,18 @@ class UiEventRecorder:
 
     def status(self) -> dict:
         perms = self._backend.check_permissions().as_dict() if self.supported else None
+        stats = self._backend.tap_stats() if self.supported else {}
         return {
             "supported": self.supported,
             "backend": self._backend.name if self.supported else None,
             "enabled": settings.ui_events_enabled,
             "running": self.running,
+            "hook_running": self.supported and self.running and self._backend.is_running(),
+            "keys_tapped": stats.get("keys_tapped"),
             "permissions": perms,
+            "input_events": self._input_events,
             "events_recorded": self._events_recorded,
+            "skipped": dict(self._skipped),
             "last_error": self._last_error,
         }
 
@@ -227,6 +265,65 @@ class UiEventRecorder:
                 now - self._last_db_flush >= _DB_FLUSH_S or len(self._pending) >= _DB_FLUSH_BATCH
             ):
                 self._write_pending()
+        self._check_health(raw, now)
+
+    # ── Health ───────────────────────────────────────────────────────
+
+    def _check_health(self, raw: Optional[RawEvent], now: float):
+        """Log what would otherwise fail silently: no input arriving, events
+        lost in the hook, a dead hook. Runs on the enricher thread."""
+        if raw is not None:
+            self._input_events += 1
+            self._period_input += 1
+            if not self._first_input_seen:
+                self._first_input_seen = True
+                logger.info(f"UI events: first input event received ({raw.kind})")
+        elif (self._started_at and not self._first_input_seen and not self._silence_warned
+              and now - self._started_at >= _SILENCE_WARN_S):
+            self._silence_warned = True
+            logger.warning(f"UI events: no clicks or keys arrived in {int(_SILENCE_WARN_S)}s. "
+                           "If you clicked in that time, the OS is not sending input to "
+                           "ScreenMind. On macOS, check Input Monitoring for the app that "
+                           "starts ScreenMind (e.g. Terminal) and restart ScreenMind.")
+
+        stats = self._backend.tap_stats()
+        errors = stats.get("callback_errors", 0)
+        if errors > self._seen_callback_errors:
+            logger.warning(f"UI events: {errors - self._seen_callback_errors} input events lost "
+                           f"in the hook (last error: {stats.get('last_callback_error')})")
+            self._seen_callback_errors = errors
+        reenabled = stats.get("reenabled", 0)
+        if reenabled > self._seen_reenabled:
+            logger.info(f"UI events: the OS turned the input hook off {reenabled - self._seen_reenabled} "
+                        "time(s); turned it back on")
+            self._seen_reenabled = reenabled
+
+        if self._started_at and not self._hook_dead_warned and not self._backend.is_running():
+            self._hook_dead_warned = True
+            self._last_error = "The input hook stopped"
+            logger.warning("UI events: the input hook stopped. Clicks and keys are no longer "
+                           "recorded. Restart ScreenMind.")
+
+        if self._started_at and now - self._last_summary >= _SUMMARY_S:
+            self._log_summary(now)
+
+    def _log_summary(self, now: float):
+        self._last_summary = now
+        if not (self._period_input or self._period_stored or self._period_skipped):
+            return
+        stored = ", ".join(f"{k} {v}" for k, v in sorted(self._period_stored.items())) or "nothing"
+        msg = (f"UI events, last {int(_SUMMARY_S // 60)} min: {self._period_input} clicks/keys in, "
+               f"stored {stored}")
+        if self._period_skipped:
+            msg += "; skipped: " + ", ".join(f"{v} ({k})" for k, v in sorted(self._period_skipped.items()))
+        logger.info(msg)
+        self._period_input = 0
+        self._period_stored.clear()
+        self._period_skipped.clear()
+
+    def _skip(self, reason: str):
+        self._skipped[reason] += 1
+        self._period_skipped[reason] += 1
 
     # ── Gates ────────────────────────────────────────────────────────
 
@@ -241,7 +338,13 @@ class UiEventRecorder:
         return bool(app_name) and app_name.lower() in settings.blocked_apps_list
 
     def _should_record(self, app_name: Optional[str]) -> bool:
-        return self._capture_active() and not self._app_blocked(app_name)
+        if not self._capture_active():
+            self._skip("capture paused")
+            return False
+        if self._app_blocked(app_name):
+            self._skip("blocked app")
+            return False
+        return True
 
     # ── Handlers ─────────────────────────────────────────────────────
 
@@ -451,6 +554,7 @@ class UiEventRecorder:
         try:
             self._db.insert_ui_events(events)
             self._events_recorded += len(events)
+            self._period_stored.update(e.type.value for e in events)
         except Exception as e:
             self._last_error = str(e)
             logger.error(f"Could not store {len(events)} UI events: {e}")

@@ -97,13 +97,13 @@ The hook callback never calls AX, UIA, the DB or the logger.
 
 These apply in the enricher, before anything reaches the DB:
 
-1. **Off by default.** New setting `ui_events_enabled: bool = False`. It is turned on in Settings with a clear note that it records typed text.
+1. **Off by default.** New setting `ui_events_enabled: bool = False`. It is turned on in Settings with a clear note that it records typed text. *Changed 2026-10-07:* on by default with `ui_events_types=click,app_switch`, since action collection is now the core of the product. Typed text and clipboard stay opt-in until there is PII detection.
 2. **Password fields.** If the focused element has subrole `AXSecureTextField` (macOS) or `IsPassword` (Windows), drop the typed text. Store only `text` = `[password field]`, with no element value. Screenpipe does the same.
 3. **Blocked apps.** Drop every event when the frontmost app is in `settings.blocked_apps_list`. This is the same check `_capture_tick` uses.
 4. **Paused capture.** When `CaptureWorker` is paused, the recorder drops events. The hook stays installed, so resuming is instant.
 5. **Sensitive data.** Run `filter_sensitive_text()` on typed text, clipboard text and element values.
 6. **Clipboard size.** Store at most 1,000 chars of clipboard text.
-7. **Per-type switches.** `ui_events_types` lists which types to record, default `click,app_switch,text,clipboard`. A user can turn off `text` and still get clicks and app switches.
+7. **Per-type switches.** `ui_events_types` lists which types to record, default `click,app_switch` (was `click,app_switch,text,clipboard` until 2026-10-07). A user can turn on `text` and `clipboard` in Settings.
 
 ### Storage
 

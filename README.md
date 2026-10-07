@@ -518,8 +518,8 @@ All settings configurable via `.env`, environment variables, or the **Settings**
 | `ENCRYPTION_ENABLED` | `false` | Encrypt screenshots at rest |
 | `SENSITIVE_FILTER_ENABLED` | `true` | Redact credit cards, SSNs, API keys |
 | `CAPTURE_PAUSED` | `true` | Persisted capture state across restarts |
-| `UI_EVENTS_ENABLED` | `false` | Record clicks, typed text, app switches, clipboard (macOS, Windows) |
-| `UI_EVENTS_TYPES` | `click,app_switch,text,clipboard` | Which UI event types to record (`window_focus` also available) |
+| `UI_EVENTS_ENABLED` | `true` | Record clicks and app switches, plus typed text and clipboard if listed in `UI_EVENTS_TYPES` (macOS, Windows) |
+| `UI_EVENTS_TYPES` | `click,app_switch` | Which UI event types to record (`text`, `clipboard`, `window_focus` also available) |
 | `EVENT_TRIGGERED_CAPTURE` | `true` | Capture right after app switches, clicks and typing pauses |
 | `SCREENMIND_LOG_LEVEL` | `INFO` | Log verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `SCREENMIND_LOG_FILE` | *(none)* | Path to a log file (rotating, 10MB × 3 backups) |

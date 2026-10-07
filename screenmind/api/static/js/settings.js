@@ -204,7 +204,7 @@ async function renderSettings(el) {
 
   + '<div class="settings-card" id="ui-events-card"><div class="settings-card-header"><div><div class="settings-title">UI Events <span style="background:var(--accent-primary);color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px;vertical-align:middle">Beta</span></div><div class="settings-desc">Record clicks, typed text, app switches and clipboard through OS accessibility APIs. Gives the AI exact context for each screenshot.</div></div>'
   + _sw('ui-events-enabled', cfg.ui_events_enabled) + '</div>'
-  + '<div class="settings-note">This records what you type. Password fields are never recorded, and the Sensitive Data Filter runs on all text. Paused capture and blocked apps stop recording too. Works on macOS and Windows.</div>'
+  + '<div class="settings-note">Clicks and app switches are on by default. Typed text and clipboard are off by default, because they can hold private content. If you turn them on, password fields are never recorded, and the Sensitive Data Filter runs on all text. Paused capture and blocked apps stop recording too. Works on macOS and Windows.</div>'
   + '<div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px">'
   + [['click','Clicks'],['app_switch','App switches'],['window_focus','Window changes'],['text','Typed text'],['clipboard','Clipboard']].map(function(t) {
       var checked = (cfg.ui_events_types || '').split(',').indexOf(t[0]) >= 0 ? 'checked' : '';
@@ -292,7 +292,8 @@ async function loadUiEventsStatus() {
       ? _perm(p.input_monitoring, 'Input Monitoring') + ' &nbsp; ' + _perm(p.accessibility, 'Accessibility')
       : _perm(true, 'No permissions needed'))
     + ' &nbsp; <span style="color:var(--text-muted)">' + (st.running ? 'Recording' : 'Stopped')
-    + (st.running ? ' &middot; ' + st.events_recorded + ' events this session' : '') + '</span>';
+    + (st.running ? ' &middot; ' + st.events_recorded + ' events this session' : '')
+    + (st.running && st.keys_tapped === false ? ' &middot; clicks only (no Input Monitoring)' : '') + '</span>';
   if (isMac && !p.all_granted) {
     html += '<div style="margin-top:6px">macOS asks for these for the app that started ScreenMind (Terminal, or Python for a login item), not for "ScreenMind". '
       + 'Grant both in System Settings &rarr; Privacy &amp; Security, then restart ScreenMind. '

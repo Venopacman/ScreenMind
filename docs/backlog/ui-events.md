@@ -30,7 +30,14 @@ Refs: `MacOSAdapter._best_title()`, `capture_worker._get_browser_url()`, `UiEven
 ### UI events are off on the main instance
 Status: blocked on the user
 
-`ui_events_enabled` is false by default, and the main instance's `settings.json` doesn't set it. So `ui_events` and `activities.user_actions` stay empty, and the workflows feed gets no clicks or app switches. To turn it on, go to Settings → Privacy & Security → UI Events. The app that starts ScreenMind (Terminal) needs Input Monitoring and Accessibility.
+Since 2026-10-07 UI events are on by default (clicks and app switches). But the main instance's `settings.json` saved `ui_events_enabled: false` earlier, and a saved value wins over the default. So `ui_events` and `activities.user_actions` stay empty there until it is turned on in Settings → Privacy & Security → UI Events. The app that starts ScreenMind (Terminal) needs Accessibility for element names. Input Monitoring is only needed for typed text: clicks work without it.
+
+### PII detection before storing typed text and clipboard
+Status: open
+
+Typed text and clipboard are off by default, because they can hold private content: messages, names, addresses, health or money details. Today only passwords and known secret patterns are removed (`privacy/data_filter.py`: cards, SSNs, API keys, JWTs, passwords). Before `text` and `clipboard` can be on by default, add PII detection that runs before a row is stored. For example names, emails, phone numbers, addresses, and free-form private messages. Then decide again whether to add `text,clipboard` to the default `ui_events_types`.
+
+Refs: `UiEventRecorder._add()` (the one place every text field is filtered), `privacy/data_filter.py`, `config.ui_events_types`.
 
 ### Firefox: probably no URL on macOS
 Status: idea

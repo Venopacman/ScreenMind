@@ -83,6 +83,12 @@ class UiEventBackend(ABC):
         except Exception:
             return None
 
+    def tap_stats(self) -> dict:
+        """Health of the input hook, read by the recorder from its own thread.
+        Keys: keys_tapped (bool), callback_errors (int), last_callback_error
+        (str or None), reenabled (int, times the OS turned the hook off)."""
+        return {}
+
     def app_name_for_pid(self, pid: int) -> Optional[str]:
         """Name of the app that owns a process. Optional for backends."""
         return None

@@ -338,6 +338,9 @@ class WinFake:
     def read_clipboard(self):
         return None
 
+    def tap_stats(self):
+        return {}
+
 
 @pytest.fixture
 def ui_settings(monkeypatch):

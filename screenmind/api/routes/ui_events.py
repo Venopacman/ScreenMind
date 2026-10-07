@@ -33,8 +33,10 @@ async def ui_events_request_permissions():
         return {"ok": False, "error": "UI events are not supported on this platform"}
     perms = recorder.request_permissions()
     # A grant only takes effect for a hook installed after it, so restart.
-    if perms and perms["all_granted"] and recorder.running:
-        recorder.stop()
+    # Also start it if it failed to start before the grant.
+    if perms and perms["all_granted"]:
+        if recorder.running:
+            recorder.stop()
         recorder.sync_with_settings()
     return {"ok": True, "permissions": perms}
 

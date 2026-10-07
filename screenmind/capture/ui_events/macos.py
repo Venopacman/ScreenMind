@@ -92,6 +92,12 @@ class MacOSUiEventBackend(UiEventBackend):
         self._run_loop = None
         self._tap = None
         self._out: Optional[queue.SimpleQueue] = None
+        # Written by the tap callback, read by the recorder's health check.
+        # Plain ints: the callback must not take locks or log.
+        self._callback_errors = 0
+        self._last_callback_error: Optional[str] = None
+        self._reenabled = 0
+        self._keys_tapped = False
 
     # ── Permissions ──────────────────────────────────────────────────
 
@@ -136,14 +142,9 @@ class MacOSUiEventBackend(UiEventBackend):
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def _run_tap(self, ready: threading.Event, result: dict):
+    def _create_tap(self, mask):
         Q = self._Q
-        mask = (
-            (1 << Q.kCGEventLeftMouseDown)
-            | (1 << Q.kCGEventRightMouseDown)
-            | (1 << Q.kCGEventKeyDown)
-        )
-        tap = Q.CGEventTapCreate(
+        return Q.CGEventTapCreate(
             Q.kCGSessionEventTap,
             Q.kCGTailAppendEventTap,
             Q.kCGEventTapOptionListenOnly,
@@ -151,8 +152,23 @@ class MacOSUiEventBackend(UiEventBackend):
             self._tap_callback,
             None,
         )
+
+    def _run_tap(self, ready: threading.Event, result: dict):
+        Q = self._Q
+        mouse = (1 << Q.kCGEventLeftMouseDown) | (1 << Q.kCGEventRightMouseDown)
+        tap = self._create_tap(mouse | (1 << Q.kCGEventKeyDown))
+        self._keys_tapped = tap is not None
         if tap is None:
-            logger.warning("CGEventTapCreate failed: Input Monitoring permission is missing")
+            # Keyboard taps need Input Monitoring. Mouse taps don't, so
+            # clicks still work without it.
+            logger.warning(
+                "UI events: no Input Monitoring permission, so typed text and shortcuts "
+                "are not recorded. Recording clicks only. Grant Input Monitoring to the app "
+                "that starts ScreenMind (e.g. Terminal) and restart ScreenMind.")
+            tap = self._create_tap(mouse)
+        if tap is None:
+            logger.warning("UI events: could not create the event tap (CGEventTapCreate returned "
+                           "NULL, also for clicks only). Nothing will be recorded.")
             ready.set()
             return
         self._tap = tap
@@ -162,7 +178,7 @@ class MacOSUiEventBackend(UiEventBackend):
         Q.CGEventTapEnable(tap, True)
         result["ok"] = True
         ready.set()
-        logger.info("Event tap installed")
+        logger.info("Event tap installed (%s)", "clicks and keys" if self._keys_tapped else "clicks only")
         try:
             Q.CFRunLoopRun()
         finally:
@@ -175,6 +191,7 @@ class MacOSUiEventBackend(UiEventBackend):
         Q = self._Q
         try:
             if type_ in (_TAP_DISABLED_BY_TIMEOUT, _TAP_DISABLED_BY_USER_INPUT):
+                self._reenabled += 1
                 if self._tap is not None:
                     Q.CGEventTapEnable(self._tap, True)
                 return event
@@ -188,10 +205,20 @@ class MacOSUiEventBackend(UiEventBackend):
                 ))
             elif type_ == Q.kCGEventKeyDown:
                 self._out.put(self._key_event(event, now))
-        except Exception:
+        except Exception as e:
             # Never raise into the tap; never log here either (too slow).
-            pass
+            # The recorder reports these from its own thread.
+            self._callback_errors += 1
+            self._last_callback_error = repr(e)
         return event
+
+    def tap_stats(self) -> dict:
+        return {
+            "keys_tapped": self._keys_tapped,
+            "callback_errors": self._callback_errors,
+            "last_callback_error": self._last_callback_error,
+            "reenabled": self._reenabled,
+        }
 
     def _key_event(self, event, now: float) -> RawEvent:
         Q = self._Q
