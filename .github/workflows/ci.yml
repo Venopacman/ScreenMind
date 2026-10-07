@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: "20"
 
-      # Full locked install: project, mcp extra (via the dev group) and dev tools.
+      # Full locked install: project and dev tools (the dev group).
       # --locked fails if uv.lock is out of date with pyproject.toml.
       - name: Install dependencies
         run: uv sync --locked
@@ -38,7 +38,7 @@ jobs:
 
       - name: Lint — no bare print() in source
         run: |
-          uv run --locked flake8 --select=T201 --exclude=.venv,tests/,screenmind/ui/overlay.py,screenmind/setup_llama.py,screenmind/setup_wizard.py .
+          uv run --locked flake8 --select=T201 --exclude=.venv,tests/,screenmind/setup_llama.py,screenmind/setup_wizard.py .
 
       - name: Run tests with coverage
         run: |

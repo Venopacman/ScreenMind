@@ -41,23 +41,16 @@ dependencies = [
     "Pillow>=10.0,<13.0",
     "imagehash>=4.3,<5.0",
 
-    # Hotkey
-    "keyboard>=0.13.5,<1.0",
-
     # HTTP client (for llama-server communication)
     "httpx>=0.28.0,<1.0",
 
     # Numerical
     "numpy>=1.26,<3.0",
 
-    # OCR and semantic search on ONNX Runtime (CPU, no PyTorch)
+    # OCR on ONNX Runtime (CPU, no PyTorch)
     "rapidocr>=3.9,<4.0",
     "onnxruntime>=1.18,<2.0",
-    "tokenizers>=0.15,<1.0",
-    "huggingface_hub>=0.20,<2.0",  # model downloads (Gemma, embedder)
-
-    # Git Integration
-    "gitpython>=3.1,<4.0",
+    "huggingface_hub>=0.20,<2.0",  # model downloads (Gemma)
 
     # Audio / Meeting Transcription
     "sounddevice>=0.5,<1.0",
@@ -78,12 +71,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# OCR and embeddings are core dependencies now (ONNX Runtime, no PyTorch).
+# OCR is a core dependency now (ONNX Runtime, no PyTorch).
 # Kept so `pip install screenmind[ai]` still works.
 ai = []
-
-# MCP server for Claude Desktop / Cursor / VS Code
-mcp = ["mcp[cli]>=1.26.0,<2.0"]
 
 # Windows accessibility API. Now a core dependency on Windows; kept so
 # `pip install screenmind[windows]` still works.
@@ -91,9 +81,7 @@ windows = ["uiautomation>=2.0,<3.0 ; sys_platform == 'win32'"]
 
 [dependency-groups]
 # Development / testing. `uv sync` installs this group by default.
-# Tests also need the MCP server, so the group pulls in the `mcp` extra.
 dev = [
-    "screenmind[mcp]",
     "pytest>=7.0",
     "pytest-asyncio",
     "pytest-cov",
@@ -123,7 +111,6 @@ screenmind = [
     "api/static/css/*",
     "api/static/js/*",
     "api/static/index.html",
-    "default_agents/*.md",
     "assets/*",
 ]
 
