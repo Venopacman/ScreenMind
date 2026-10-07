@@ -28,7 +28,7 @@ from screenmind.privacy.url_filter import sanitize_url
 
 logger = logging.getLogger("screenmind.export.archive")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_DAYS = 31
 # The workflows mapper takes uploads up to 1 MB. Leave some room.
 MAX_TEXT_FILE_BYTES = 900_000
@@ -41,10 +41,9 @@ _DEFAULT_FILTER_TYPES = ["credit_card", "ssn", "api_key", "jwt", "password"]
 
 _ACTIVITY_COLUMNS = """
     a.id, a.timestamp, a.screenshot_path, a.window_title, a.detected_app,
-    a.bookmarked, a.app_name, a.category, a.summary, a.details, a.visible_text,
+    a.app_name, a.category, a.summary, a.details, a.visible_text,
     a.mood, a.confidence, a.ocr_text, a.scene_description, a.organized_text,
-    a.analysis_method, a.active_url, a.user_actions,
-    d.repo_name, d.branch, d.last_commit, d.changed_files, d.insertions, d.deletions
+    a.analysis_method, a.active_url, a.user_actions
 """
 
 
@@ -116,34 +115,19 @@ def _load_activities(db, day: date, scrub: _Scrubber) -> List[Dict[str, Any]]:
         f"""
         SELECT {_ACTIVITY_COLUMNS}
         FROM activities a
-        LEFT JOIN dev_contexts d ON d.activity_id = a.id
         WHERE DATE(a.timestamp) = ? AND a.status = 'ok'
         ORDER BY a.timestamp, a.id
         """,
         (day.isoformat(),),
     ).fetchall()
 
-    out, seen = [], set()
+    out = []
     for r in rows:
         r = dict(r)
-        if r["id"] in seen:  # more than one dev_context row
-            continue
-        seen.add(r["id"])
         try:
             visible = json.loads(r["visible_text"]) if r["visible_text"] else []
         except (json.JSONDecodeError, TypeError):
             visible = []
-        dev = None
-        if r["repo_name"]:
-            try:
-                files = json.loads(r["changed_files"]) if r["changed_files"] else []
-            except (json.JSONDecodeError, TypeError):
-                files = []
-            dev = {
-                "repo": r["repo_name"], "branch": r["branch"],
-                "last_commit": scrub(r["last_commit"]), "changed_files": files,
-                "insertions": r["insertions"], "deletions": r["deletions"],
-            }
         out.append({
             "id": r["id"],
             "_ts": _local(r["timestamp"]),
@@ -163,8 +147,6 @@ def _load_activities(db, day: date, scrub: _Scrubber) -> List[Dict[str, Any]]:
             "mood": r["mood"],
             "confidence": r["confidence"],
             "analysis_method": r["analysis_method"],
-            "bookmarked": bool(r["bookmarked"]),
-            "dev_context": dev,
         })
     return out
 
@@ -279,9 +261,6 @@ def _activity_block(a: Dict[str, Any], prev_text: Optional[str]) -> str:
         lines.append(f"Details: {a['details']}")
     if a["user_actions"]:
         lines.append(f"User actions: {a['user_actions']}")
-    if a["dev_context"]:
-        d = a["dev_context"]
-        lines.append(f"Repo: {d['repo']} ({d['branch']})")
     if a.get("_screenshot_arcname"):
         lines.append(f"Screenshot: {a['_screenshot_arcname']}")
     text = a["organized_text"] or a["screen_text"]

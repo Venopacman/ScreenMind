@@ -1,7 +1,7 @@
 """
 SQLite Database Module
 Handles all database operations for ScreenMind.
-Schema creation, CRUD for activities, dev contexts, and daily summaries.
+Schema creation and CRUD for activities, UI events and meetings.
 """
 
 import json
@@ -98,7 +98,6 @@ class Database:
                 screenshot_path TEXT NOT NULL,
                 window_title    TEXT,
                 detected_app    TEXT,
-                bookmarked      BOOLEAN DEFAULT 0,
                 app_name        TEXT,
                 category        TEXT,
                 summary         TEXT,
@@ -106,7 +105,6 @@ class Database:
                 visible_text    TEXT,
                 mood            TEXT,
                 confidence      REAL,
-                embedding       BLOB,
                 ocr_text        TEXT,
                 ocr_boxes       TEXT,
                 scene_description TEXT,
@@ -118,40 +116,11 @@ class Database:
                 created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
-            -- Developer context (linked to activities)
-            CREATE TABLE IF NOT EXISTS dev_contexts (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                activity_id     INTEGER REFERENCES activities(id) ON DELETE CASCADE,
-                repo_name       TEXT,
-                branch          TEXT,
-                last_commit     TEXT,
-                changed_files   TEXT,
-                insertions      INTEGER DEFAULT 0,
-                deletions       INTEGER DEFAULT 0
-            );
-
-            -- Daily summaries
-            CREATE TABLE IF NOT EXISTS daily_summaries (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                date                DATE UNIQUE NOT NULL,
-                summary             TEXT,
-                standup             TEXT,
-                total_activities    INTEGER DEFAULT 0,
-                category_breakdown  TEXT,
-                top_repos           TEXT,
-                productive_hours    REAL DEFAULT 0.0,
-                created_at          DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
-
             -- Indexes for fast queries
             CREATE INDEX IF NOT EXISTS idx_activities_timestamp ON activities(timestamp);
             CREATE INDEX IF NOT EXISTS idx_activities_category ON activities(category);
             CREATE INDEX IF NOT EXISTS idx_activities_app ON activities(app_name);
-            CREATE INDEX IF NOT EXISTS idx_activities_bookmarked ON activities(bookmarked);
             CREATE INDEX IF NOT EXISTS idx_activities_analyzed ON activities(analyzed);
-            CREATE INDEX IF NOT EXISTS idx_dev_repo ON dev_contexts(repo_name);
-            CREATE INDEX IF NOT EXISTS idx_dev_branch ON dev_contexts(branch);
-            CREATE INDEX IF NOT EXISTS idx_dev_activity ON dev_contexts(activity_id);
         """
         )
 
@@ -237,17 +206,34 @@ class Database:
                 "ALTER TABLE meetings ADD COLUMN window_title TEXT",
                 "ALTER TABLE meetings ADD COLUMN url TEXT",
             ],
+            # v11: drop what removed features wrote: embeddings (semantic
+            # search), bookmarks, git context and daily summaries. A fresh DB
+            # never has them, so "no such column" is fine.
+            [
+                "DROP INDEX IF EXISTS idx_activities_bookmarked",
+                "DROP TABLE IF EXISTS dev_contexts",
+                "DROP TABLE IF EXISTS daily_summaries",
+                "ALTER TABLE activities DROP COLUMN embedding",
+                "ALTER TABLE activities DROP COLUMN bookmarked",
+            ],
         ]
 
         for i, migration in enumerate(migrations, start=1):
             if i > current:
                 statements = migration if isinstance(migration, list) else [migration]
                 for sql in statements:
+                    if "DROP COLUMN" in sql and sqlite3.sqlite_version_info < (3, 35, 0):
+                        # SQLite gained DROP COLUMN in 3.35. Older runtimes keep
+                        # the column; nothing writes it any more.
+                        logger.warning("Migration %d: SQLite %s cannot drop columns, skipped: %s",
+                                       i, sqlite3.sqlite_version, sql)
+                        continue
                     try:
                         conn.execute(sql)
                     except Exception as e:
                         err_msg = str(e).lower()
-                        if "duplicate column" in err_msg or "already exists" in err_msg:
+                        if ("duplicate column" in err_msg or "already exists" in err_msg
+                                or ("DROP COLUMN" in sql and "no such column" in err_msg)):
                             logger.debug("Migration %d: %s (already applied)", i, e)
                         else:
                             logger.error("Migration %d failed: %s — SQL: %s", i, e, sql[:100])
@@ -558,10 +544,6 @@ class Database:
         cursor = conn.execute(
             "DELETE FROM activities WHERE DATE(timestamp) = ?", (target_date,)
         )
-        # Also remove the daily summary if any
-        conn.execute(
-            "DELETE FROM daily_summaries WHERE date = ?", (target_date,)
-        )
         # Also remove meetings for this date
         conn.execute(
             "DELETE FROM meetings WHERE DATE(start_time) = ?", (target_date,)
@@ -619,11 +601,6 @@ class Database:
             "DELETE FROM activities WHERE DATE(timestamp) < ?", (cutoff,)
         )
         activities_deleted = act_cursor.rowcount
-
-        # Delete old daily summaries
-        conn.execute(
-            "DELETE FROM daily_summaries WHERE date < ?", (cutoff,)
-        )
 
         # Delete old UI events
         conn.execute("DELETE FROM ui_events WHERE DATE(timestamp) < ?", (cutoff,))
@@ -702,8 +679,6 @@ class Database:
     def _row_to_dict(self, row: sqlite3.Row) -> Dict[str, Any]:
         """Convert a SQLite Row to a dict with parsed JSON fields."""
         d = dict(row)
-        # Remove embedding BLOB — not JSON-serializable, only used internally
-        d.pop("embedding", None)
         # Parse JSON fields
         if d.get("visible_text"):
             try:

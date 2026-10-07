@@ -4,7 +4,7 @@ ScreenMind can export captured data as a zip archive. The archive has one folder
 
 Code: [`screenmind/export/`](../screenmind/export/) and [`screenmind/api/routes/export.py`](../screenmind/api/routes/export.py). Tests: [`tests/test_export.py`](../tests/test_export.py).
 
-Format version: **1** (`manifest.json` → `schema_version`). Change `SCHEMA_VERSION` in `archive.py` and this file when a field changes meaning or goes away. Adding a field does not need a new version.
+Format version: **2** (`manifest.json` → `schema_version`). Change `SCHEMA_VERSION` in `archive.py` and this file when a field changes meaning or goes away. Adding a field does not need a new version.
 
 ## Dashboard
 
@@ -84,7 +84,7 @@ To add a rule: write a class with `name`, `params()` and `split(activities)`, an
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Format version, `1` |
+| `schema_version` | Format version, `2`. Version 2 dropped `bookmarked` and `dev_context` from `activities.jsonl` and the `Repo:` line (bookmarks and git context were removed from ScreenMind). |
 | `generator`, `app_version`, `git_sha` | `ScreenMind`, the package version, the commit (null for an installed package) |
 | `exported_at` | Local time with offset |
 | `user` | As typed |
@@ -114,7 +114,6 @@ URL: https://meet.google.com/dsv-einb-rbg
 Summary: ...
 Details: ...
 User actions: ...
-Repo: ScreenMind (custom)
 Screenshot: screenshots/1290_16-46-02_118_m2.jpg
 Screen text:
 ```
@@ -144,8 +143,6 @@ One JSON object per line, one line per captured screen, oldest first. Full text,
 | `visible_text` | Key snippets, a list |
 | `user_actions` | Readable summary of the UI events for this frame |
 | `analysis_method` | For example `full:fast`, `cache:minor` |
-| `bookmarked` | |
-| `dev_context` | null, or `repo`, `branch`, `last_commit`, `changed_files`, `insertions`, `deletions` |
 | `screenshot` | Path in the day folder, or null |
 
 Left out on purpose: `ocr_boxes`, `embedding`, `screenshot_path` (a local path), `status`, `analyzed`, `analysis_error`.
