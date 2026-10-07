@@ -42,9 +42,16 @@ Refs: `screenmind/platform_support/windows.py`, `base.PlatformAdapter.get_browse
 ### Firefox: probably no URL on macOS
 Status: idea
 
-`get_browser_url()` reads `AXURL` from the first `AXWebArea`. Chrome and Safari expose it. Firefox was not tested and may not, which would leave `active_url` NULL there. Test it, and if needed fall back to the address bar field.
+`get_browser_url()` now uses `_ax_page_url()`: exactly one top-level `AXWebArea` with an http(s) `AXURL`, so docked DevTools and side panels no longer hide or replace the URL. Firefox is still untested (not installed on this Mac). If Firefox exposes no `AXURL`, `active_url` stays NULL there; then fall back to the address bar field.
 
-Refs: `MacOSAdapter.get_browser_url()`, `BROWSER_APPS`.
+Refs: `MacOSAdapter._ax_page_url()`, `_ax_page_areas()`, `BROWSER_APPS`.
+
+### Chrome shows its page tree only after another client turns it on
+Status: idea
+
+Chrome ignores `AXManualAccessibility`, which `enable_full_a11y_tree()` sets. Its web content is in the AX tree only when some accessibility client has turned it on (VoiceOver, or another app that sets `AXEnhancedUserInterface`). Otherwise there is no `AXWebArea`: no `active_url` and no page text from a11y (OCR still works). Chrome rows with a URL: 135 of 225 on 2026-10-06, 0 of 72 on 2026-10-05, none after a reboot on 2026-10-07. Setting `AXEnhancedUserInterface` on browsers would fix it, but it is known to slow some apps and break window managers, so test it first. Windows does not have this problem: UIA clients turn the tree on.
+
+Refs: `MacOSAdapter.enable_full_a11y_tree()`.
 
 ### Events go to the first frame of a tick, not the matching display
 Status: idea

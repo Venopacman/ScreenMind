@@ -345,3 +345,10 @@ The macOS side added multi-display capture, cleaner a11y text, the browser's own
 - Not needed on Windows: `enable_full_a11y_tree`. Chromium, Electron and Firefox turn on their tree when a UIA client asks.
 - Tests: `tests/test_windows_adapter.py` (page choice incl. background tabs, iframes, DevTools, side panels; window filters; walk rules with fake controls; Electron title).
 
+### macOS parity with the Windows fixes (branch `fix/macos-parity`, 2026-10-07)
+
+- **Browser URL.** `get_browser_url()` used the first `AXWebArea`. With DevTools docked that is `devtools://`, so `active_url` was NULL (checked live). It now uses `_ax_page_url()`, shared with `get_window_url()`: top-level web areas only, `devtools:` and extension pages dropped, exactly one http(s) URL or `None`. Same rule as Windows `pick_page_document()`.
+- **A11y walk.** Depth starts again at each `AXWebArea` (limit 45, 4,000-node budget). Electron apps keep text 27-38 levels deep, and the old limit of 8 read almost nothing: Claude 55 -> 6,242 chars, Slack 46 -> 5,624, about 0.1 s each. Browsers give only their page areas (`_ax_page_areas()`), not the tab strip or the address bar, whose raw URL skipped `sanitize_url`. Password fields (`AXSecureTextField`) are skipped, titles capped at 4,000 chars.
+- **AX timeout.** 1 s for the whole process (`AXUIElementSetMessagingTimeout` on the system-wide element), down from 6 s per call. The UI-events backend still sets 0.25 s when it runs.
+- **Screen grab hang.** From any process started by a Claude session, `CGWindowListCreateImage` (mss) waits 30 s, even with Screen Recording granted and after a reboot. macOS serializes capture, so the main instance also slows to one frame per 30-70 s while it happens. `ScreenCapture._grab()` switches to the `screencapture` tool for good after one grab over 5 s (0.2 s per display, same pixel size).
+

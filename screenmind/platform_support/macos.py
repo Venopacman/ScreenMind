@@ -193,16 +193,7 @@ class MacOSAdapter(PlatformAdapter):
         if not front or (front["owner"] or "").lower() not in BROWSER_APPS:
             return None
         window = self._ax_focused_window(front["pid"])
-        if window is None:
-            return None
-        web_area = self._ax_find_role(window, "AXWebArea")
-        if web_area is not None:
-            url = self._ax_attr(web_area, "AXURL")
-            if url:
-                url = str(url)
-                if url.startswith(("http://", "https://", "file://")):
-                    return url
-        return None
+        return self._ax_page_url(window) if window is not None else None
 
     def get_window_url(self, pid: Optional[int], bounds: Optional[Tuple[int, int, int, int]]) -> Optional[str]:
         """Page URL of one browser window (found by its Quartz bounds), even
@@ -273,19 +264,8 @@ class MacOSAdapter(PlatformAdapter):
         http(s) URL when exactly one page area has one; None when there is
         none or it is ambiguous.
         """
-        queue = [window]
-        seen = 0
-        urls = set()
-        while queue and seen < max_nodes:
-            el = queue.pop(0)
-            seen += 1
-            if self._ax_attr(el, "AXRole") == "AXWebArea":
-                url = self._ax_attr(el, "AXURL")
-                url = str(url) if url else ""
-                if url.startswith(("http://", "https://")):
-                    urls.add(url)
-                continue  # do not descend into the page (iframes)
-            queue.extend(self._ax_attr(el, "AXChildren") or [])
+        urls = {str(self._ax_attr(area, "AXURL") or "") for area in self._ax_page_areas(window, max_nodes)}
+        urls = {url for url in urls if url.startswith(("http://", "https://"))}
         return urls.pop() if len(urls) == 1 else None
 
     def _ax_window_at(self, pid: Optional[int], bounds: Tuple[int, int, int, int]):

@@ -194,6 +194,26 @@ class TestTitlesAndUrls:
              patch.object(MacOSAdapter, "_ax_focused_window", return_value=win):
             assert mac.get_browser_url() == "https://truto.one/page"
 
+    def test_browser_url_ignores_docked_devtools(self, mac):
+        """DevTools is a web area too, and comes first in the tree."""
+        win = FakeEl("AXWindow", children=[FakeEl("AXGroup", children=[
+            FakeEl("AXWebArea", AXURL="devtools://devtools/bundled/devtools_app.html"),
+            FakeEl("AXWebArea", AXURL="https://example.com/")])])
+        front = {"owner": "Google Chrome", "pid": 7, "title": "x", "bounds": (0, 0, 1, 1)}
+        with patch.object(MacOSAdapter, "_front_window", return_value=front), \
+             patch.object(MacOSAdapter, "_ax_focused_window", return_value=win):
+            assert mac.get_browser_url() == "https://example.com/"
+
+    def test_browser_url_none_when_two_pages(self, mac):
+        """A side panel with its own https page: a wrong URL is worse than none."""
+        win = FakeEl("AXWindow", children=[
+            FakeEl("AXWebArea", AXURL="https://example.com/"),
+            FakeEl("AXWebArea", AXURL="https://www.google.com/search?q=x")])
+        front = {"owner": "Google Chrome", "pid": 7, "title": "x", "bounds": (0, 0, 1, 1)}
+        with patch.object(MacOSAdapter, "_front_window", return_value=front), \
+             patch.object(MacOSAdapter, "_ax_focused_window", return_value=win):
+            assert mac.get_browser_url() is None
+
     def test_browser_url_none_for_other_apps(self, mac):
         front = {"owner": "Terminal", "pid": 7, "title": "x", "bounds": (0, 0, 1, 1)}
         with patch.object(MacOSAdapter, "_front_window", return_value=front):
