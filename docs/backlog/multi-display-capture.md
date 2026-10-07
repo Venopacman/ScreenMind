@@ -11,25 +11,12 @@ Done today, on `custom`:
 
 ## Items
 
-### Calls that are not the focused window are not detected
-Status: open
-
-Today a Slack huddle (about 11:14-11:31, activity ids 240-266) and a Google Meet call (12:02-12:14, ids 287-300) left `meetings` empty. There are three causes:
-
-- `CaptureWorker.run()` passes only the focused app to `AudioWorker.check_meeting()`. The call usually sits on the other display.
-- On macOS the app name is the window owner ("Google Chrome"), so `meeting_apps` entries like "meet" never match a Meet tab. The window title ("Meet - ...") would.
-- `_is_meeting_process_alive()` uses `tasklist`, which only exists on Windows.
-
-Fix idea: detect a call from any visible window, matching on owner and title, and record start and end times. Decide whether call tracking should work while `MEETING_TRANSCRIPTION` is off.
-
-Refs: `screenmind/workers/audio_worker.py`, `screenmind/workers/capture_worker.py` (`run`), `MacOSAdapter._front_window()`.
-
 ### Per-frame list of visible apps and an "active call" flag
 Status: idea
 
 The workflows/questionnaire work needs to know which apps were visible in each frame, and whether a call was running. That way call time and participants count even while the user types in another app. Store the visible layer-0 windows (owner, title, bounds) per activity. Mark frames taken during a call.
 
-Depends on the item above. Needs a DB migration, so check the next free version number first: v9 is the last one used.
+`list_visible_windows()` in `screenmind/capture/window.py` already returns these windows, and `AudioWorker.in_meeting` says whether a call is running. Needs a DB migration, so check the next free version number first: v10 is the last one used.
 
 ### Linux: no per-display app lookup
 Status: open

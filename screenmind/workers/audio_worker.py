@@ -1,7 +1,9 @@
 """
-Audio Worker — Meeting Transcription
-Auto-detects meeting apps, captures dual-channel audio (system + mic),
-transcribes with Gemma 4's native audio encoder, and generates meeting summaries.
+Audio Worker — Call Tracking and Meeting Transcription
+Detects calls from every visible window (and, on macOS, which apps hold the
+mic), records each call's start and end in the meetings table, and, when
+meeting transcription is on, captures dual-channel audio (system + mic),
+transcribes it with Gemma 4's native audio encoder and writes a summary.
 """
 
 import io
@@ -16,76 +18,68 @@ import numpy as np
 
 from screenmind.config import settings
 from screenmind.storage.database import Database
+from screenmind.workers.call_detection import CallMatch, match_call, owner_on_mic
 
 logger = logging.getLogger("screenmind.workers.audio_worker")
 
 
-# Meeting app keywords
-MEETING_APPS = None  # Loaded from settings at runtime
-
-# Grace period (seconds) — keep recording if user briefly switches away
-# Process-alive check handles native apps immediately; this is the safety-net timeout
-MEETING_GRACE_PERIOD = 300  # 5 min — fallback for browser-based meetings
-
-# Audio probe settings — confirm voice activity before recording
-PROBE_DURATION = 2       # seconds of audio to sample per device
-PROBE_COOLDOWN = 5       # seconds between probes when meeting app is in foreground
-PROBE_RMS_THRESHOLD = 0.008  # minimum RMS energy to count as "voice detected" (lowered for Discord/earphone setups)
-SILENCE_AUTO_STOP_CHUNKS = 3  # stop meeting after N consecutive silent chunks (both mic+sys)
-
-# Confirmation probing — avoid false triggers from notification sounds or ambient noise
-PROBE_CONFIRM_COUNT = 2      # require N consecutive voice-detected probes before starting
-PROBE_CONFIRM_WINDOW = 20    # probes must happen within N seconds to count as consecutive
-
-
-# Map meeting app keywords → native process names
-# Browser-based apps (Meet, web Teams) have no entry → fall back to timeout only
-_APP_TO_PROCESS = {
-    "discord": "Discord.exe",
-    "zoom": "Zoom.exe",
-    "teams": "ms-teams.exe",
-    "webex": "webexmta.exe",
-    "slack": "slack.exe",
-}
+# Call detection runs on its own thread at this interval. It must not share
+# the capture loop: a slow screen grab there (30 s+) starves the check.
+CHECK_INTERVAL_S = 5
+# A call starts after this many detections in a row (CHECK_INTERVAL_S apart). Filters
+# out a window flashing past and short mic use like Slack voice clips.
+CONFIRM_CHECKS = 2
+# A call ends when neither its window nor its mic use was seen for this
+# long. Covers switching browser tabs away from Meet while muted. The end
+# time saved is the last time the call was seen, not when the grace ran out.
+END_GRACE_S = 120
+# While a call runs, save its duration this often so a crash keeps it.
+DURATION_SAVE_EVERY_S = 60
+# How often to retry reading the room URL when the first try failed.
+URL_RETRY_EVERY_S = 30
 
 
 class AudioWorker:
     """
-    Background worker for meeting transcription.
-    - Detects meeting apps via foreground window name
-    - Captures system audio (WASAPI loopback) + microphone
-    - Transcribes chunks with Gemma 4's audio encoder (via llama-server)
-    - Accumulates transcript during meeting session
-    - On meeting end: sends to Gemma for structured summary
-    - Uses process-alive check + silence detection for robust end-of-meeting detection
+    Background worker for call tracking and meeting transcription.
+    - Detects calls from all visible windows, matching owner app and title,
+      plus mic use where the OS reports it (see call_detection.py)
+    - Records start/end, app, window title and room URL for every call
+    - With meeting transcription on: captures system audio (loopback) +
+      microphone, transcribes chunks with Gemma 4 (via llama-server) and
+      generates a structured summary when the call ends
     """
 
     def __init__(self, database: Database):
         self._db = database
         self._running = False
         self._available = False
+        self._lock = threading.RLock()
+        self._detect_thread: Optional[threading.Thread] = None
+        self._detect_stop = threading.Event()
 
-        # Session state
+        # Call state
         self._in_meeting = False
         self._meeting_id: Optional[int] = None
         self._meeting_app: Optional[str] = None
-        self._meeting_process: Optional[str] = None  # e.g. "Discord.exe"
+        self._meeting_owner: Optional[str] = None  # window owner / mic app, for keep-alive
+        self._meeting_title: Optional[str] = None
+        self._meeting_url: Optional[str] = None
         self._session_start: Optional[datetime] = None
+        self._last_seen: float = 0
+        self._last_duration_save: float = 0
+        self._last_url_try: float = 0
+
+        # Candidate call, waiting for CONFIRM_CHECKS detections
+        self._pending: Optional[CallMatch] = None
+        self._pending_count = 0
+        self._pending_since: float = 0
+
+        # Transcription state
+        self._recording = False
         self._session_transcript: List[str] = []
-        self._last_meeting_app_seen: float = 0
         self._recording_thread: Optional[threading.Thread] = None
         self._stop_recording = threading.Event()
-
-        # Audio probe state — confirms voice activity before starting
-        self._probe_in_progress: bool = False
-        self._probe_complete: bool = False
-        self._probe_detected_audio: bool = False
-        self._last_probe_time: float = 0
-        self._pending_meeting_app: Optional[str] = None
-
-        # Confirmation state — require multiple consecutive voice probes
-        self._consecutive_voice_probes: int = 0
-        self._first_voice_probe_time: float = 0
 
         # Audio config
         self._sample_rate = 16000  # Gemma audio encoder expects 16kHz
@@ -110,197 +104,146 @@ class AudioWorker:
 
     @property
     def is_available(self) -> bool:
+        """Whether calls will be transcribed (tracking works regardless)."""
         return self._available and settings.meeting_transcription
 
     @property
     def in_meeting(self) -> bool:
         return self._in_meeting
 
-    def check_meeting(self, app_name: str):
-        """
-        Called by CaptureWorker every 5s with current foreground app name.
-        Detects meeting start/end transitions.
+    # ── Call detection ───────────────────────────────────────────────
 
-        Uses audio probe confirmation: when a meeting app is detected,
-        we sample mic + system audio briefly. Recording only starts if
-        actual voice activity is found. The probe thread directly triggers
-        meeting start for minimal delay (~2-3s from voice to recording).
-        """
-        if not self.is_available or not app_name:
+    def start(self):
+        """Start the call detection thread. It runs while capture is paused too."""
+        if self._detect_thread and self._detect_thread.is_alive():
             return
+        self._detect_stop.clear()
+        self._detect_thread = threading.Thread(
+            target=self._detect_loop, name="call-detection", daemon=True)
+        self._detect_thread.start()
 
-        app_lower = app_name.lower()
-        is_meeting_app = any(m in app_lower for m in settings.meeting_apps_list)
+    def stop(self):
+        """Stop detection and end the current call (shutdown)."""
+        self._detect_stop.set()
+        self.force_stop()
 
-        if is_meeting_app:
-            self._last_meeting_app_seen = time.time()
-            if not self._in_meeting and not self._probe_in_progress:
-                # No probe running — start one if cooldown elapsed
-                if time.time() - self._last_probe_time > PROBE_COOLDOWN:
-                    self._pending_meeting_app = app_name
-                    self._start_audio_probe()
-                # else: probe is still running, wait for next cycle
-        elif self._in_meeting:
-            # Grace period with process-alive check
-            elapsed = time.time() - self._last_meeting_app_seen
-            if elapsed > MEETING_GRACE_PERIOD:
-                # Hard timeout — meeting definitely over
-                logger.info(f"Meeting timeout ({elapsed:.0f}s away) — stopping")
-                self._stop_meeting()
-            elif elapsed > 30 and not self._is_meeting_process_alive():
-                # Process dead — meeting truly over (30s debounce)
-                logger.info("Meeting app process ended — stopping")
-                self._stop_meeting()
-        else:
-            # Not a meeting app and not in meeting — reset silence log
-            self._silence_logged_app = None
-
-    def _is_meeting_process_alive(self) -> bool:
-        """Check if the meeting app's native process is still running.
-        Returns True for browser-based meetings (no process to check).
-        """
-        # TODO: cross-platform — use pgrep on macOS/Linux
-        if not self._meeting_process:
-            return True  # Browser-based → assume alive, rely on timeout
-
-        try:
-            import subprocess
-            result = subprocess.run(
-                ["tasklist", "/FI", f"IMAGENAME eq {self._meeting_process}", "/NH"],
-                capture_output=True, text=True, timeout=3,
-            )
-            return self._meeting_process.lower() in result.stdout.lower()
-        except Exception:
-            return True  # Assume alive on error — don't stop recording
-
-    def _start_audio_probe(self):
-        """Kick off a background audio probe to detect voice activity."""
-        self._probe_in_progress = True
-        thread = threading.Thread(target=self._do_audio_probe, daemon=True)
-        thread.start()
-
-    def _do_audio_probe(self):
-        """
-        Quick audio probe: sample mic + system audio for ~1s each.
-        If voice detected → directly triggers _start_meeting (no waiting
-        for the next 5s check_meeting cycle).
-        """
-        detected = False
-        try:
-            import sounddevice as sd
-
-            samples = int(PROBE_DURATION * self._sample_rate)
-
-            # ── 1. Probe microphone ───────────────────────────────────
+    def _detect_loop(self):
+        while not self._detect_stop.wait(CHECK_INTERVAL_S):
             try:
-                mic_audio = sd.rec(
-                    samples, samplerate=self._sample_rate,
-                    channels=1, dtype="float32",
-                )
-                sd.wait()
-                rms = np.sqrt(np.mean(mic_audio ** 2))
-                if rms > PROBE_RMS_THRESHOLD:
-                    detected = True
-                    logger.info(f"Mic voice detected (RMS={rms:.4f})")
+                self.check_calls()
             except Exception as e:
-                logger.debug(f"Mic probe failed: {e}")
+                logger.debug(f"Call detection failed: {e}")
 
-            # ── 2. Probe system audio (loopback) ──────────────────────
-            if not detected:
-                try:
-                    devices = sd.query_devices()
-                    loopback_id = None
-                    for i, d in enumerate(devices):
-                        name = d.get("name", "").lower()
-                        if ("loopback" in name or "stereo mix" in name) \
-                                and d.get("max_input_channels", 0) > 0:
-                            loopback_id = i
-                            break
-
-                    if loopback_id is not None:
-                        sys_audio = sd.rec(
-                            samples, samplerate=self._sample_rate,
-                            channels=1, dtype="float32",
-                            device=loopback_id,
-                        )
-                        sd.wait()
-                        rms = np.sqrt(np.mean(sys_audio ** 2))
-                        if rms > PROBE_RMS_THRESHOLD:
-                            detected = True
-                            logger.info(f"System audio detected (RMS={rms:.4f})")
-                except Exception:
-                    pass  # Loopback not available — mic-only probe is fine
-
-        except ImportError:
-            logger.debug("sounddevice not available for audio probe")
-        except Exception as e:
-            logger.debug(f"Audio probe error: {e}")
-        finally:
-            self._probe_in_progress = False
-            self._last_probe_time = time.time()
-            if detected:
-                # Confirmation: require PROBE_CONFIRM_COUNT consecutive voice probes
-                now = time.time()
-                if (self._consecutive_voice_probes > 0 and
-                        now - self._first_voice_probe_time > PROBE_CONFIRM_WINDOW):
-                    # Too much time between probes — reset
-                    self._consecutive_voice_probes = 0
-
-                if self._consecutive_voice_probes == 0:
-                    self._first_voice_probe_time = now
-                self._consecutive_voice_probes += 1
-
-                if self._consecutive_voice_probes >= PROBE_CONFIRM_COUNT:
-                    # Confirmed! Start the meeting.
-                    app = self._pending_meeting_app or "Unknown"
-                    self._consecutive_voice_probes = 0
-                    self._start_meeting(app)
-                else:
-                    logger.info(f"Voice probe {self._consecutive_voice_probes}/{PROBE_CONFIRM_COUNT} "
-                          f"— confirming before starting meeting...")
-            else:
-                # No voice — reset confirmation counter
-                self._consecutive_voice_probes = 0
-                if not getattr(self, '_silence_logged_app', None) == self._pending_meeting_app:
-                    self._silence_logged_app = self._pending_meeting_app
-                    logger.info(f"{self._pending_meeting_app} in foreground but no voice detected — skipping")
-
-    def _start_meeting(self, app_name: str):
-        """Begin recording a meeting session."""
-        # Guard: don't record if active model can't transcribe audio
-        from screenmind.engine import model_manager
-        if not model_manager.is_audio_capable():
-            logger.info(f"Meeting detected ({app_name}) but active model "
-                  f"has no audio encoder — skipping recording")
+    def check_calls(self):
+        """One detection pass: read every visible window and the apps using
+        the mic, then advance the call state machine."""
+        from screenmind.capture.window import list_visible_windows, get_mic_apps
+        if not settings.meeting_apps_list:
             return
+        self.update(list_visible_windows(), get_mic_apps())
 
+    def update(self, windows: list, mic_apps: Optional[set], now: Optional[float] = None):
+        """Advance the call state machine with one snapshot of the screen."""
+        now = time.time() if now is None else now
+        match = match_call(windows, mic_apps, settings.meeting_apps_list)
+        with self._lock:
+            if self._in_meeting:
+                if match and match.app == self._meeting_app:
+                    self._seen(match, now)
+                    return
+                if owner_on_mic(self._meeting_owner, mic_apps):
+                    self._seen(None, now)
+                    return
+                if match:
+                    # A different call took over: close this one, confirm the new one
+                    logger.info(f"Call switched from {self._meeting_app} to {match.app}")
+                    self._stop_meeting(end=self._last_seen)
+                elif now - self._last_seen > END_GRACE_S:
+                    self._stop_meeting(end=self._last_seen)
+                    return
+                else:
+                    return
+
+            if not match:
+                self._pending = None
+                self._pending_count = 0
+                return
+            if self._pending and self._pending.app == match.app:
+                self._pending_count += 1
+            else:
+                self._pending = match
+                self._pending_count = 1
+                self._pending_since = now
+            if self._pending_count >= CONFIRM_CHECKS:
+                since = self._pending_since
+                self._pending = None
+                self._pending_count = 0
+                self._start_meeting(match, start=since, now=now)
+
+    def _seen(self, match: Optional[CallMatch], now: float):
+        """The current call is still running."""
+        self._last_seen = now
+        title = url = duration = None
+        if match and match.title and not self._meeting_title:
+            title = self._meeting_title = match.title
+        if match and match.is_browser and not self._meeting_url \
+                and now - self._last_url_try >= URL_RETRY_EVERY_S:
+            url = self._meeting_url = self._read_url(match, now)
+        if now - self._last_duration_save >= DURATION_SAVE_EVERY_S:
+            self._last_duration_save = now
+            duration = self._minutes(now)
+        if self._meeting_id and (title or url or duration is not None):
+            try:
+                self._db.update_meeting_call_info(
+                    self._meeting_id, window_title=title, url=url, duration_minutes=duration)
+            except Exception as e:
+                logger.warning(f"Could not update meeting {self._meeting_id}: {e}")
+
+    def _read_url(self, match: CallMatch, now: float) -> Optional[str]:
+        """Room URL of a browser call window, sanitized like other stored URLs."""
+        self._last_url_try = now
+        from screenmind.capture.window import get_window_url
+        from screenmind.privacy.url_filter import sanitize_url
+        return sanitize_url(get_window_url(match.pid, match.bounds))
+
+    def _minutes(self, now: float) -> float:
+        if not self._session_start:
+            return 0
+        return round(max(0.0, now - self._session_start.timestamp()) / 60, 1)
+
+    def _start_meeting(self, match: CallMatch, start: float, now: float):
+        """Begin tracking a call, and recording it if transcription is on."""
         self._in_meeting = True
-        self._meeting_app = app_name
-        self._session_start = datetime.now()
+        self._meeting_app = match.app
+        self._meeting_owner = match.owner
+        self._meeting_title = match.title
+        self._meeting_url = self._read_url(match, now) if match.is_browser else None
+        self._session_start = datetime.fromtimestamp(start)
         self._session_transcript = []
-        self._last_meeting_app_seen = time.time()
+        self._last_seen = now
+        self._last_duration_save = now
 
-        # Resolve process name for process-alive checks
-        self._meeting_process = None
-        for key, proc in _APP_TO_PROCESS.items():
-            if key in app_name.lower():
-                self._meeting_process = proc
-                break
-
-        # Insert meeting record
+        self._recording = self._can_record()
         self._meeting_id = self._db.insert_meeting(
             start_time=self._session_start,
-            app_name=app_name,
+            app_name=match.app,
+            transcript="" if self._recording else None,
+            summary="" if self._recording else None,
+            window_title=match.title,
+            url=self._meeting_url,
         )
-        proc_info = f", process={self._meeting_process}" if self._meeting_process else ", browser-based"
-        logger.info(f"Meeting started ({app_name}{proc_info}) — recording...")
+        logger.info(f"Call started ({match.app}"
+                    f"{', ' + match.title if match.title else ''})"
+                    f"{' — recording...' if self._recording else ''}")
+        if not self._recording:
+            return
 
         # System-wide overlay notification
         try:
             from screenmind.ui.overlay import show_overlay_notification
             show_overlay_notification(
                 title="ScreenMind is Transcribing",
-                message=f"Meeting detected in {app_name} — recording audio...",
+                message=f"Meeting detected in {match.app} — recording audio...",
                 duration=4.0,
                 color="#ec4899",
             )
@@ -314,23 +257,54 @@ class AudioWorker:
         )
         self._recording_thread.start()
 
-    def _stop_meeting(self):
-        """End recording and trigger summary generation."""
-        if not self._in_meeting:
+    def _can_record(self) -> bool:
+        """Transcription is on and the active model can take audio."""
+        if not self.is_available:
+            return False
+        try:
+            from screenmind.engine import model_manager
+            if model_manager.is_audio_capable():
+                return True
+            logger.info("Call detected but the active model has no audio encoder — tracking only")
+        except Exception as e:
+            logger.debug(f"Audio capability check failed: {e}")
+        return False
+
+    def _stop_meeting(self, end: Optional[float] = None):
+        """End the call. Saves the end time and, if it was recorded, the
+        transcript, then triggers summary generation."""
+        with self._lock:
+            if not self._in_meeting:
+                return
+            self._in_meeting = False
+            meeting_id = self._meeting_id
+            recording = self._recording
+            self._recording = False
+            end_time = datetime.fromtimestamp(end) if end else datetime.now()
+            duration = round(max(0.0, (end_time - self._session_start).total_seconds()) / 60, 1) \
+                if self._session_start else 0
+            app = self._meeting_app
+
+            self._meeting_id = None
+            self._meeting_app = None
+            self._meeting_owner = None
+            self._meeting_title = None
+            self._meeting_url = None
+            self._session_start = None
+
+        if not recording:
+            logger.info(f"Call ended ({app}, {duration:.1f} min)")
+            if meeting_id:
+                self._db.end_meeting(meeting_id, end_time, duration)
             return
 
-        self._in_meeting = False
         self._stop_recording.set()
-
         # Wait for recording thread to finish (skip if called from within it)
         if self._recording_thread and self._recording_thread.is_alive():
             if threading.current_thread() != self._recording_thread:
                 self._recording_thread.join(timeout=5)
 
-        end_time = datetime.now()
-        duration = (end_time - self._session_start).total_seconds() / 60 if self._session_start else 0
         full_transcript = "\n".join(self._session_transcript)
-
         logger.info(f"Meeting ended ({duration:.1f} min, {len(self._session_transcript)} chunks)")
 
         # System-wide overlay notification
@@ -346,12 +320,12 @@ class AudioWorker:
         except Exception:
             pass
 
-        if self._meeting_id and full_transcript.strip():
+        if meeting_id and full_transcript.strip():
             # Update with transcript (summary comes async)
             self._db.update_meeting(
-                meeting_id=self._meeting_id,
+                meeting_id=meeting_id,
                 end_time=end_time,
-                duration_minutes=round(duration, 1),
+                duration_minutes=duration,
                 transcript=full_transcript,
                 summary="⏳ Generating summary...",
             )
@@ -359,25 +333,19 @@ class AudioWorker:
             # Trigger summary in background thread
             summary_thread = threading.Thread(
                 target=self._generate_summary,
-                args=(self._meeting_id, full_transcript),
+                args=(meeting_id, full_transcript),
                 daemon=True,
             )
             summary_thread.start()
-        elif self._meeting_id:
+        elif meeting_id:
             logger.warning(f"No transcript to save (session_transcript={len(self._session_transcript)} items)")
             self._db.update_meeting(
-                meeting_id=self._meeting_id,
+                meeting_id=meeting_id,
                 end_time=end_time,
-                duration_minutes=round(duration, 1),
+                duration_minutes=duration,
                 transcript="(No speech detected)",
                 summary="No content to summarize.",
             )
-
-        # Reset state
-        self._meeting_id = None
-        self._meeting_app = None
-        self._meeting_process = None
-        self._session_start = None
         self._session_transcript = []
 
     def _recording_loop(self):
@@ -394,10 +362,6 @@ class AudioWorker:
 
         # Find system loopback device once (not every chunk)
         loopback_id = self._find_loopback_device(sd)
-
-
-        # Track consecutive silent chunks for auto-stop
-        consecutive_silent = 0
 
         while not self._stop_recording.is_set():
             try:
@@ -484,24 +448,13 @@ class AudioWorker:
                     mic_audio = audio_data.flatten() if audio_data is not None else None
 
                 # ── Transcribe mic and system audio separately ────
-                # Keeps [You] / [Others] labels — accurate with earphones
-                mic_had_speech = False
-                sys_had_speech = False
+                # Keeps [You] / [Others] labels — accurate with earphones.
+                # Silent chunks are skipped; the call's end comes from call
+                # detection, not from silence.
                 if mic_audio is not None and len(mic_audio) > self._sample_rate:
-                    mic_had_speech = self._transcribe_chunk(self._normalize_audio(mic_audio), speaker="You")
+                    self._transcribe_chunk(self._normalize_audio(mic_audio), speaker="You")
                 if sys_audio is not None and len(sys_audio) > self._sample_rate:
-                    sys_had_speech = self._transcribe_chunk(self._normalize_audio(sys_audio), speaker="Others")
-
-                # ── Silence-based auto-stop ───────────────────────
-                # If both mic AND system are silent, user likely left the call
-                if not mic_had_speech and not sys_had_speech:
-                    consecutive_silent += 1
-                    if consecutive_silent >= SILENCE_AUTO_STOP_CHUNKS:
-                        logger.info(f"{consecutive_silent} consecutive silent chunks -- auto-stopping meeting")
-                        self._stop_meeting()
-                        return
-                else:
-                    consecutive_silent = 0
+                    self._transcribe_chunk(self._normalize_audio(sys_audio), speaker="Others")
 
             except Exception as e:
                 logger.error(f"Recording error: {e}")
@@ -661,7 +614,7 @@ If a section has no content, write "None discussed."
             )
 
     def force_stop(self):
-        """Force-stop current meeting recording (e.g., on shutdown)."""
+        """End the current call now (e.g., on shutdown or delete)."""
         if self._in_meeting:
             self._stop_meeting()
 
@@ -670,8 +623,11 @@ If a section has no content, write "None discussed."
         return {
             "available": self._available,
             "enabled": settings.meeting_transcription,
+            "tracking": bool(settings.meeting_apps_list),
             "in_meeting": self._in_meeting,
+            "recording": self._recording,
             "meeting_app": self._meeting_app,
+            "meeting_title": self._meeting_title,
+            "meeting_url": self._meeting_url,
             "transcript_chunks": len(self._session_transcript),
-            "probing": self._probe_in_progress,
         }

@@ -52,6 +52,21 @@ class PlatformAdapter(ABC):
         frontmost app is not a browser or the OS does not expose it."""
         return None
 
+    def list_visible_windows(self) -> list:
+        """Every visible app window on all displays, front to back, as
+        {"owner", "pid", "title", "bounds"}. Empty if not supported; callers
+        then fall back to the focused window. Used for call detection."""
+        return []
+
+    def get_window_url(self, pid: Optional[int], bounds: Optional[Tuple[int, int, int, int]]) -> Optional[str]:
+        """Page URL of the browser window with these bounds, or None."""
+        return None
+
+    def mic_apps(self) -> Optional[set]:
+        """Lowercased names of apps capturing the microphone right now, or
+        None if the OS does not tell us."""
+        return None
+
     def get_front_window(self) -> Optional[dict]:
         """Frontmost window as {"pid", "app_name", "title"} from one consistent
         OS snapshot, or None if not supported. Used by UI event capture."""

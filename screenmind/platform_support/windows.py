@@ -427,10 +427,13 @@ class WindowsAdapter(PlatformAdapter):
     def can_find_top_window(self) -> bool:
         return True
 
-    def get_top_window_in(self, x: int, y: int, width: int, height: int) -> Optional[Tuple[str, Optional[str]]]:
-        """(app, title) of the top app window whose center is on this display.
+    def _app_windows(self, x: Optional[int] = None, y: Optional[int] = None,
+                     width: Optional[int] = None, height: Optional[int] = None,
+                     first_only: bool = False) -> list:
+        """App windows as (hwnd, title, rect), top of the z-order first.
 
         EnumWindows lists top-level windows from the top of the z-order down.
+        With a display rect, only windows whose center is on it count.
         Coordinates are physical pixels, like mss monitors (the process is
         per-monitor DPI aware once mss has started).
         """
@@ -444,7 +447,8 @@ class WindowsAdapter(PlatformAdapter):
                 rect = wintypes.RECT()
                 if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
                     return True
-                if not center_in((rect.left, rect.top, rect.right, rect.bottom), x, y, width, height):
+                box = (rect.left, rect.top, rect.right, rect.bottom)
+                if x is not None and not center_in(box, x, y, width, height):
                     return True
                 cls = ctypes.create_unicode_buffer(256)
                 user32.GetClassNameW(hwnd, cls, 256)
@@ -458,22 +462,38 @@ class WindowsAdapter(PlatformAdapter):
                     width=rect.right - rect.left, height=rect.bottom - rect.top,
                 ):
                     return True
-                found.append((hwnd, title))
-                return False  # topmost match wins
+                found.append((hwnd, title, box))
+                return not first_only  # with first_only, the topmost match wins
             except Exception:
                 return True
 
         try:
             user32.EnumWindows(_WNDENUMPROC(_check), 0)
         except Exception:
-            return None
+            return []
+        return found
+
+    def get_top_window_in(self, x: int, y: int, width: int, height: int) -> Optional[Tuple[str, Optional[str]]]:
+        """(app, title) of the top app window whose center is on this display."""
+        found = self._app_windows(x, y, width, height, first_only=True)
         if not found:
             return None
-        hwnd, title = found[0]
+        hwnd, title, _ = found[0]
         app = process_name(_window_pid(hwnd))
         if not app:
             return None
         return app, self._best_title(hwnd, title, app) or app
+
+    def list_visible_windows(self) -> list:
+        """Every visible app window on all displays, top of the z-order first."""
+        result = []
+        for hwnd, title, (left, top, right, bottom) in self._app_windows():
+            pid = _window_pid(hwnd)
+            result.append({
+                "owner": process_name(pid), "pid": pid, "title": title,
+                "bounds": (left, top, right - left, bottom - top),
+            })
+        return result
 
     def get_browser_url(self) -> Optional[str]:
         """URL of the page in the foreground browser window, read from the page's

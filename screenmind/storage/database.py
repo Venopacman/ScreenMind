@@ -8,7 +8,7 @@ import json
 import logging
 import sqlite3
 import threading
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -231,6 +231,12 @@ class Database:
             ],
             # v9: browser page URL per UI event (read from the browser, not OCR)
             "ALTER TABLE ui_events ADD COLUMN url TEXT",
+            # v10: call window title and room URL (calls are tracked even
+            # without transcription)
+            [
+                "ALTER TABLE meetings ADD COLUMN window_title TEXT",
+                "ALTER TABLE meetings ADD COLUMN url TEXT",
+            ],
         ]
 
         for i, migration in enumerate(migrations, start=1):
@@ -843,17 +849,43 @@ class Database:
 
     # ── Meetings ─────────────────────────────────────────────────────────
 
-    def insert_meeting(self, start_time, app_name, transcript="", summary="") -> int:
-        """Insert a new meeting record. Returns the meeting ID."""
+    def insert_meeting(self, start_time, app_name, transcript="", summary="",
+                       window_title=None, url=None) -> int:
+        """Insert a new meeting record. Returns the meeting ID.
+        transcript/summary are None for calls tracked without transcription."""
         conn = self._get_conn()
         cursor = conn.execute(
-            """INSERT INTO meetings (start_time, app_name, transcript, summary)
-               VALUES (?, ?, ?, ?)""",
+            """INSERT INTO meetings (start_time, app_name, transcript, summary, window_title, url)
+               VALUES (?, ?, ?, ?, ?, ?)""",
             (start_time.isoformat() if hasattr(start_time, 'isoformat') else start_time,
-             app_name, transcript, summary),
+             app_name, transcript, summary, window_title, url),
         )
         conn.commit()
         return cursor.lastrowid
+
+    def update_meeting_call_info(self, meeting_id: int, window_title=None, url=None,
+                                 duration_minutes=None):
+        """Fill in call details found after the start, and keep the running
+        duration current so a crash does not lose it. NULL args are skipped."""
+        conn = self._get_conn()
+        conn.execute(
+            """UPDATE meetings SET window_title = COALESCE(window_title, ?),
+                   url = COALESCE(url, ?),
+                   duration_minutes = COALESCE(?, duration_minutes)
+               WHERE id = ?""",
+            (window_title, url, duration_minutes, meeting_id),
+        )
+        conn.commit()
+
+    def end_meeting(self, meeting_id: int, end_time, duration_minutes: float):
+        """Close a call that has no transcript (transcription was off)."""
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE meetings SET end_time = ?, duration_minutes = ? WHERE id = ?",
+            (end_time.isoformat() if hasattr(end_time, 'isoformat') else end_time,
+             duration_minutes, meeting_id),
+        )
+        conn.commit()
 
     def update_meeting(self, meeting_id: int, end_time=None, duration_minutes=0,
                        transcript="", summary=""):
@@ -886,23 +918,33 @@ class Database:
     def cleanup_stale_meetings(self) -> int:
         """
         Fix meetings left 'ongoing' from a previous crashed session.
-        Sets end_time = start_time and marks summary as interrupted.
-        Returns count of fixed meetings.
+        Sets end_time = start_time + the last saved duration and marks the
+        summary as interrupted. Returns count of fixed meetings.
         """
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT id, start_time, transcript FROM meetings WHERE end_time IS NULL"
+            "SELECT id, start_time, transcript, duration_minutes FROM meetings WHERE end_time IS NULL"
         ).fetchall()
         count = 0
         for row in rows:
             mid = row["id"]
-            transcript = row["transcript"] or ""
-            summary = "(Session ended unexpectedly — no summary generated)"
-            if transcript.strip() and transcript.strip() != "(No speech detected)":
-                summary = "⚠️ Session was interrupted. Click re-analyze (🔄) to generate summary."
+            if row["transcript"] is None:
+                summary = None  # tracked without transcription: nothing to summarize
+            else:
+                transcript = row["transcript"]
+                summary = "(Session ended unexpectedly — no summary generated)"
+                if transcript.strip() and transcript.strip() != "(No speech detected)":
+                    summary = "⚠️ Session was interrupted. Click re-analyze (🔄) to generate summary."
+            minutes = row["duration_minutes"] or 0
+            end_time = row["start_time"]
+            try:
+                end_time = (datetime.fromisoformat(row["start_time"])
+                            + timedelta(minutes=minutes)).isoformat()
+            except (TypeError, ValueError):
+                minutes = 0
             conn.execute(
-                "UPDATE meetings SET end_time = start_time, duration_minutes = 0, summary = ? WHERE id = ?",
-                (summary, mid),
+                "UPDATE meetings SET end_time = ?, duration_minutes = ?, summary = ? WHERE id = ?",
+                (end_time, minutes, summary, mid),
             )
             count += 1
         if count:

@@ -198,10 +198,9 @@ async def main():
         capture_worker.resume(source="startup_restore")
         logger.info("Capture auto-resumed from previous session.")
 
-    # ── Audio Worker (Meeting Transcription) ─────────────────────────
+    # ── Audio Worker (call tracking + meeting transcription) ─────────
     audio_worker = AudioWorker(database=db)
-    # Inject audio_worker into capture_worker so it can signal meeting detection
-    capture_worker._audio_worker = audio_worker
+    audio_worker.start()  # own thread, independent of capture timing
 
     # ── UI Events (clicks, typing, app switches via accessibility APIs) ──
     from screenmind.capture.ui_events import UiEventRecorder, create_backend
@@ -424,7 +423,7 @@ async def main():
     logger.info("Shutting down...")
     capture_worker.stop()
     analysis_worker.stop()
-    audio_worker.force_stop()
+    audio_worker.stop()
     hotkey_listener.stop()
     ui_recorder.stop()
     if agent_scheduler:

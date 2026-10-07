@@ -53,11 +53,6 @@ Status: open
 
 Refs: `screenmind/engine/analyzer.py` (`analyze_screenshot_fast` prompt), bench scenarios `slack_channel_goals`, `slack_dm`.
 
-### Meetings are seen but not recorded
-Status: open (covered in `multi-display-capture.md`, "Calls that are not the focused window are not detected")
-
-From 16:31 to 17:24, "Meet - distillery daily #2" showed in 24 frames with one stable room URL (`meet.google.com/<room>`), and `meetings` stayed empty. The same room URL across days also gives the recurring-meeting `frequency`.
-
 ### Normalize app names for tools_used
 Status: open
 

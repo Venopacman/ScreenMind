@@ -91,8 +91,8 @@ async function renderSettings(el) {
   + _sec('&#127908;', 'Audio &amp; Meetings')
   + '<div class="settings-card"><div class="settings-card-header"><div><div class="settings-title">Meeting Transcription</div><div class="settings-desc">Auto-record and summarize meetings</div></div>'
   + _sw('meeting-toggle', cfg.meeting_transcription) + '</div>'
-  + '<div class="settings-note">Uses Gemma 4 audio decoding. Requires <code>sounddevice</code>.</div>'
-  + '<div class="settings-input-row"><label class="settings-label">Meeting app keywords:</label>'
+  + '<div class="settings-note">Uses Gemma 4 audio decoding. Requires <code>sounddevice</code>. Call start and end times are tracked even when this is off.</div>'
+  + '<div class="settings-input-row"><label class="settings-label">Call apps to detect:</label>'
   + '<input type="text" id="meeting-apps-input" class="settings-text-input" value="' + (cfg.meeting_apps || '') + '" placeholder="zoom,teams,meet,webex,slack..."></div></div>'
 
   // ── STORAGE ──

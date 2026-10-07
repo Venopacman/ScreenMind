@@ -230,11 +230,12 @@ class Settings(BaseSettings):
     # ── Meeting Transcription ────────────────────────────────────────────
     meeting_transcription: bool = Field(
         default=False,
-        description="Enable auto-transcription when meeting apps are detected",
+        description="Transcribe and summarize detected calls (calls are tracked either way)",
     )
     meeting_apps: str = Field(
         default="zoom,teams,meet,webex,slack,discord",
-        description="Comma-separated app substrings that indicate a meeting",
+        description="Call apps to detect. Built-in rules for zoom, teams, meet, webex, slack, "
+                    "discord; any other entry matches a window owner or title containing it",
     )
     # ── Integrations ─────────────────────────────────────────────────────
     obsidian_enabled: bool = Field(default=False, description="Auto-export summaries to Obsidian vault")

@@ -60,17 +60,17 @@ class MacOSAdapter(PlatformAdapter):
     def platform_name(self) -> str:
         return "macOS"
 
-    def _front_window(self, within: Optional[Tuple[int, int, int, int]] = None) -> Optional[dict]:
-        """Return the frontmost normal window from Quartz (owner, pid, title, bounds).
+    def _visible_windows(self) -> list:
+        """Normal on-screen windows from Quartz, front to back, as
+        {"owner", "pid", "title", "bounds"}.
 
         NSWorkspace.frontmostApplication() goes stale in a process without an
-        NSRunLoop, so we read the live on-screen window list instead. It is
-        ordered front to back; layer 0 is the normal app window layer.
-        kCGWindowName needs Screen Recording permission, else it is empty.
-
-        With `within` (x, y, width, height), only windows whose center lies in
-        that rect count. This finds the top window on one display.
+        NSRunLoop, so we read the live on-screen window list instead. Layer 0
+        is the normal app window layer. Windows behind other windows count;
+        minimized ones and ones on other Spaces do not. kCGWindowName needs
+        Screen Recording permission, else it is empty.
         """
+        result = []
         try:
             import Quartz  # type: ignore
             windows = Quartz.CGWindowListCopyWindowInfo(
@@ -83,13 +83,7 @@ class MacOSAdapter(PlatformAdapter):
                 bounds = w.get("kCGWindowBounds") or {}
                 if bounds.get("Width", 0) < 50 or bounds.get("Height", 0) < 50:
                     continue
-                if within:
-                    cx = bounds.get("X", 0) + bounds["Width"] / 2
-                    cy = bounds.get("Y", 0) + bounds["Height"] / 2
-                    rx, ry, rw, rh = within
-                    if not (rx <= cx < rx + rw and ry <= cy < ry + rh):
-                        continue
-                return {
+                result.append({
                     "owner": w.get("kCGWindowOwnerName"),
                     "pid": w.get("kCGWindowOwnerPID"),
                     "title": w.get("kCGWindowName") or None,
@@ -97,10 +91,35 @@ class MacOSAdapter(PlatformAdapter):
                         int(bounds.get("X", 0)), int(bounds.get("Y", 0)),
                         int(bounds["Width"]), int(bounds["Height"]),
                     ),
-                }
+                })
         except Exception as e:
             logger.debug(f"Quartz window lookup failed: {e}")
+        return result
+
+    def _front_window(self, within: Optional[Tuple[int, int, int, int]] = None) -> Optional[dict]:
+        """Return the frontmost normal window (owner, pid, title, bounds).
+
+        With `within` (x, y, width, height), only windows whose center lies in
+        that rect count. This finds the top window on one display.
+        """
+        for w in self._visible_windows():
+            if within:
+                x, y, width, height = w["bounds"]
+                cx, cy = x + width / 2, y + height / 2
+                rx, ry, rw, rh = within
+                if not (rx <= cx < rx + rw and ry <= cy < ry + rh):
+                    continue
+            return w
         return None
+
+    def list_visible_windows(self) -> list:
+        """Every visible app window on all displays, front to back."""
+        return self._visible_windows()
+
+    def mic_apps(self):
+        """Lowercased names of apps capturing the mic (CoreAudio), or None."""
+        from screenmind.platform_support.macos_audio import mic_apps
+        return mic_apps()
 
     def get_foreground_window_handle(self) -> Optional[int]:
         """macOS doesn't use integer window handles like Win32. Returns PID instead."""
@@ -173,6 +192,14 @@ class MacOSAdapter(PlatformAdapter):
                     return url
         return None
 
+    def get_window_url(self, pid: Optional[int], bounds: Optional[Tuple[int, int, int, int]]) -> Optional[str]:
+        """Page URL of one browser window (found by its Quartz bounds), even
+        when it is not the frontmost window."""
+        if not pid or not bounds:
+            return None
+        window = self._ax_window_at(pid, bounds)
+        return self._ax_page_url(window) if window is not None else None
+
     # ── AX helpers ───────────────────────────────────────────────────
 
     def _ax_attr(self, element, attr):
@@ -224,6 +251,30 @@ class MacOSAdapter(PlatformAdapter):
             children = self._ax_attr(el, "AXChildren") or []
             queue.extend(children)
         return None
+
+    def _ax_page_url(self, window, max_nodes: int = 400) -> Optional[str]:
+        """URL of the web page shown in a browser window, or None.
+
+        A window can hold several web areas: docked DevTools (devtools://),
+        extension popups (chrome-extension://) and the page. Only top-level
+        web areas count (iframes inside a page are not visited). Returns the
+        http(s) URL when exactly one page area has one; None when there is
+        none or it is ambiguous.
+        """
+        queue = [window]
+        seen = 0
+        urls = set()
+        while queue and seen < max_nodes:
+            el = queue.pop(0)
+            seen += 1
+            if self._ax_attr(el, "AXRole") == "AXWebArea":
+                url = self._ax_attr(el, "AXURL")
+                url = str(url) if url else ""
+                if url.startswith(("http://", "https://")):
+                    urls.add(url)
+                continue  # do not descend into the page (iframes)
+            queue.extend(self._ax_attr(el, "AXChildren") or [])
+        return urls.pop() if len(urls) == 1 else None
 
     def _ax_window_at(self, pid: Optional[int], bounds: Tuple[int, int, int, int]):
         """The app's AX window with these Quartz bounds (x, y, w, h).

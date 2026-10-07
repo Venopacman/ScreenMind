@@ -62,3 +62,42 @@ def get_top_window_in(monitor: dict) -> Optional[Tuple[str, Optional[str]]]:
         )
     except Exception:
         return None
+
+
+def list_visible_windows() -> list:
+    """
+    Every visible app window on all displays, front to back.
+
+    Falls back to the focused window alone where the OS adapter cannot
+    list windows (Linux).
+
+    Returns:
+        List of {"owner", "pid", "title", "bounds"} dicts (may be empty).
+    """
+    try:
+        windows = adapter().list_visible_windows()
+        if windows:
+            return windows
+        front = adapter().get_front_window()
+        if front:
+            return [{"owner": front.get("app_name"), "pid": front.get("pid"),
+                     "title": front.get("title"), "bounds": None}]
+    except Exception:
+        pass
+    return []
+
+
+def get_mic_apps() -> Optional[set]:
+    """Lowercased names of apps using the microphone, or None if unknown."""
+    try:
+        return adapter().mic_apps()
+    except Exception:
+        return None
+
+
+def get_window_url(pid: Optional[int], bounds) -> Optional[str]:
+    """Page URL of the browser window with these bounds, or None."""
+    try:
+        return adapter().get_window_url(pid, bounds)
+    except Exception:
+        return None

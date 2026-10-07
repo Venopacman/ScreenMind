@@ -62,7 +62,7 @@ async function loadMeetings() {
         <div class="empty-title">No meetings recorded</div>
         <div style="color:var(--text-muted);font-size:0.85rem;max-width:380px;margin:0 auto;line-height:1.6">
           <p>Meeting transcription is <strong>${(await api('/api/settings')).meeting_transcription ? '✅ enabled' : '❌ disabled'}</strong>.</p>
-          <p style="margin-top:8px">When enabled, ScreenMind auto-detects Zoom, Teams, Meet and other meeting apps, records audio, transcribes with Gemma 4's native audio encoder, and generates AI-powered summaries.</p>
+          <p style="margin-top:8px">ScreenMind notices Zoom, Teams, Meet, Slack huddles and other calls on any display and records when they start and end. With transcription enabled it also records audio, transcribes with Gemma 4's native audio encoder, and generates AI-powered summaries.</p>
           <p style="margin-top:8px;color:var(--accent)">Enable it in <a href="#settings" style="color:var(--accent);cursor:pointer" onclick="navigate('settings')">⚙️ Settings</a></p>
         </div>
       </div>`;
@@ -79,12 +79,15 @@ async function loadMeetingStatus() {
     const status = await api('/api/meetings/status');
     const el = $('#mtg-recording-status');
     if (!el) return;
-    if (status.in_meeting) {
-      el.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;color:#ef4444;font-weight:600"><span class="pulse-dot" style="background:#ef4444"></span> Recording — ${status.meeting_app || 'Meeting'} (${status.transcript_chunks} chunks)</span>`;
+    const app = (status.meeting_app || 'Meeting').replace(/</g, '&lt;');
+    if (status.in_meeting && status.recording) {
+      el.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;color:#ef4444;font-weight:600"><span class="pulse-dot" style="background:#ef4444"></span> Recording — ${app} (${status.transcript_chunks} chunks)</span>`;
+    } else if (status.in_meeting) {
+      el.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-weight:600"><span class="pulse-dot"></span> In a call — ${app}</span>`;
     } else if (status.enabled) {
-      el.innerHTML = `<span style="color:var(--text-muted)">🎙️ Listening for meeting apps...</span>`;
+      el.innerHTML = `<span style="color:var(--text-muted)">🎙️ Listening for calls...</span>`;
     } else {
-      el.innerHTML = `<span style="color:var(--text-muted)">❌ Transcription disabled</span>`;
+      el.innerHTML = `<span style="color:var(--text-muted)">Tracking calls · transcription off</span>`;
     }
   } catch { /* endpoint not available */ }
 }
@@ -93,7 +96,12 @@ function meetingDetailCard(m) {
   const startTime = new Date(m.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
   const endTime = m.end_time ? new Date(m.end_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : 'ongoing';
   const duration = m.duration_minutes ? `${Math.round(m.duration_minutes)} min` : '—';
-  const summaryText = (m.summary || '⏳ Generating summary...').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // transcript is NULL for calls tracked without transcription
+  const tracked = m.transcript === null || m.transcript === undefined;
+  const summaryText = (m.summary || (tracked ? (m.end_time ? 'Call tracked. Transcription was off.' : 'Call in progress.') : '⏳ Generating summary...')).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const titleLine = m.window_title ? ` · ${esc(m.window_title)}` : '';
+  const urlLine = m.url ? ` · <a href="${esc(m.url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(m.url.replace(/^https?:\/\//, ''))}</a>` : '';
   const transcriptText = (m.transcript || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const tid = `mtg-transcript-${m.id}`;
   const menuId = `mtg-menu-${m.id}`;
@@ -103,7 +111,7 @@ function meetingDetailCard(m) {
         <div class="meeting-icon">🎙️</div>
         <div>
           <div class="meeting-title">Meeting — ${(m.app_name || 'Unknown').replace(/</g, '&lt;')}</div>
-          <div class="meeting-meta">${startTime} – ${endTime}</div>
+          <div class="meeting-meta">${startTime} – ${endTime}${titleLine}${urlLine}</div>
         </div>
         <div class="meeting-duration">${duration}</div>
         <div class="card-menu-wrap" style="margin-left:12px">

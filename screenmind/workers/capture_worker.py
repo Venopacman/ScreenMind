@@ -106,18 +106,6 @@ class CaptureWorker:
             if reason and not self._paused:
                 await self._capture_tick(trigger=reason)
 
-            # Meeting detection runs ALWAYS (even when paused)
-            try:
-                if hasattr(self, '_audio_worker') and self._audio_worker:
-                    from screenmind.capture.window import get_active_app_name as _get_app
-                    _app = _get_app()
-                    if _app:
-                        await asyncio.get_event_loop().run_in_executor(
-                            None, self._audio_worker.check_meeting, _app
-                        )
-            except Exception:
-                pass
-
             if not self._paused:
                 now = time.time()
                 since_last = now - self._last_save_time
