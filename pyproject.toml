@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Privacy-first AI screen activity journal -- captures, analyzes, and searches your screen history using Gemma 4, 100% locally."
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 authors = [
     {name = "Ayush Shekhar"},
 ]
@@ -22,10 +22,7 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Desktop Environment",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Multimedia :: Graphics :: Capture :: Screen Capture",
@@ -142,16 +139,11 @@ python_files = ["test_*.py"]
 
 # ── uv ────────────────────────────────────────────────────────────────
 [tool.uv]
-# The lock must install from wheels on these platforms, for every Python in
-# requires-python. Without this, uv may lock a version that has no wheel for
-# one of them (onnxruntime >= 1.24 has no Python 3.10 wheels).
+# The lock must have wheels for these platforms. Without this, uv may lock a
+# version that has no wheel for one of them (it checks the platform tag only,
+# not the Python version).
 required-environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
     "sys_platform == 'win32' and platform_machine == 'AMD64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
-]
-# uv checks the platform of each wheel, not its Python version. onnxruntime
-# 1.24+ ships no wheels for Python 3.10, so cap it there by hand.
-constraint-dependencies = [
-    "onnxruntime<1.24 ; python_version < '3.11'",
 ]

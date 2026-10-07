@@ -12,10 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Lowest supported Python. The lock covers 3.10+.
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.10"
+          python-version: "3.14"
           enable-cache: true
 
       - uses: actions/setup-node@v4

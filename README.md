@@ -14,7 +14,7 @@
 [![PyPI](https://img.shields.io/pypi/v/screenmind?style=flat-square&logo=pypi&logoColor=white&label=PyPI)](https://pypi.org/project/screenmind/)
 [![CI](https://github.com/ayushh0110/ScreenMind/actions/workflows/ci.yml/badge.svg)](https://github.com/ayushh0110/ScreenMind/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/ayushh0110/ScreenMind/graph/badge.svg)](https://codecov.io/gh/ayushh0110/ScreenMind)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![Python 3.14+](https://img.shields.io/badge/Python-3.14+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Gemma 4](https://img.shields.io/badge/Gemma_4-E2B_%7C_E4B_%7C_12B-8B5CF6?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev/gemma)
 [![llama.cpp](https://img.shields.io/badge/llama.cpp-Local_Inference-333?style=flat-square)](https://github.com/ggerganov/llama.cpp)
 [![License MIT](https://img.shields.io/badge/License-MIT-10B981?style=flat-square)](LICENSE)
@@ -209,7 +209,7 @@ If you have more VRAM, E4B offers richer analysis. The 12B model gives the best 
 
 ## 🚀 Quick Start
 
-> **Requirements:** Python 3.10+ · GPU recommended (4GB+ VRAM) · ~2GB disk for model (E2B Q4_0)
+> **Requirements:** Python 3.14+ · GPU recommended (4GB+ VRAM) · ~2GB disk for model (E2B Q4_0)
 
 #### 1️⃣ Install
 
@@ -732,7 +732,7 @@ uv run pytest tests -q
 uv run pytest --cov=screenmind --cov-report=term-missing -q   # with coverage
 ```
 
-`uv run` installs the locked dependencies first if needed. CI runs the same locked install on push/PR via GitHub Actions (Windows, Python 3.10).
+`uv run` installs the locked dependencies first if needed. CI runs the same locked install on push/PR via GitHub Actions (Windows, Python 3.14).
 
 ---
 
