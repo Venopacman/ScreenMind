@@ -409,6 +409,10 @@ Migrations live in `Database._init_db()` as a list. Version = list index + 1. Th
 
 `ENCRYPTION_ENABLED` (default off) encrypts each JPEG in place with Fernet (AES-128-CBC + HMAC) after saving. The key is in the OS keyring (macOS Keychain, Windows Credential Manager) via `keyring`, with a `0600` file copy. The SQLite DB is never encrypted: typed text, OCR text and URLs are plain text (G23).
 
+### Export
+
+`GET /api/export` builds a zip for a user and a date range: one folder per day, one text file per session (split by idle gaps), JSONL copies and the screenshots. Only `status='ok'` rows go out, and URLs and text are filtered again on the way. Format: [`docs/export-format.md`](../export-format.md).
+
 ## 6. Permissions
 
 | Permission | macOS: what needs it | What happens without it | Windows | Linux |
