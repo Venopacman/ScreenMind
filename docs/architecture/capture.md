@@ -6,6 +6,8 @@ This file is the source of truth. It was written from the code on `custom` at `4
 
 A rendered version with the same content is published as an Artifact: https://claude.ai/artifact/DUVgVLd84bMqUUNciuf7vA (private to the owner). Its source is [`capture.html`](capture.html) next to this file.
 
+This file says what the code is meant to collect. What a real run actually collected on each machine is in [`docs/status/`](../status/README.md): one file per machine, written by the end-to-end check `scripts/e2e_collect.py`. See [`summary.md`](../status/summary.md) for all machines side by side.
+
 Contents:
 
 1. [Data flow](#1-data-flow)
@@ -502,3 +504,4 @@ The code wins in each case below. Backlog files belong to other sessions, so the
 - Mermaid: keep labels in double quotes. Check the diagram renders (GitHub preview or the Artifact).
 - Then sync [`capture.html`](capture.html): edit the same facts there and republish it to the same Artifact URL (https://claude.ai/artifact/DUVgVLd84bMqUUNciuf7vA; from another session, pass it as `url`). The HTML has the same section numbers and gap ids, so a diff of one maps to the other.
 - New gaps that need work go in [`docs/backlog/capture-architecture.md`](../backlog/capture-architecture.md) or the owning topic's backlog file.
+- After a capture change, run `scripts/e2e_collect.py --write-status` on each machine you can, and commit its file in [`docs/status/`](../status/README.md). A new gap id that a check relates to goes into `CHECKS` in that script too.
