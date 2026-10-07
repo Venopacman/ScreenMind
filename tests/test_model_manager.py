@@ -11,6 +11,7 @@
   - shared llama-server (dev instances): never started, never stopped
 """
 
+import sys
 import threading
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -595,3 +596,51 @@ class TestSharedServer:
         assert Settings(_env_file=None).llama_server_shared is True
         monkeypatch.delenv("LLAMA_SERVER_SHARED")
         assert Settings(_env_file=None).llama_server_shared is False
+
+
+# ── Host prompt cache (--cache-ram) ───────────────────────────────────
+
+class TestCacheRam:
+    """llama-server's host prompt cache defaults to 8 GiB. We turn it off."""
+
+    @pytest.fixture
+    def started_cmd(self, monkeypatch, tmp_path):
+        """Run start_server() with fake model files; return the command it ran."""
+        info = model_manager.get_model_info("gemma-4-e2b")
+        variant = info["variants"][0]
+        (tmp_path / "gemma-4-e2b" / variant["quant"]).mkdir(parents=True)
+        (tmp_path / "gemma-4-e2b" / variant["quant"] / variant["hf_file"]).touch()
+        (tmp_path / "gemma-4-e2b" / info["mmproj_file"]).touch()
+        monkeypatch.setattr(model_manager, "_models_dir", lambda: tmp_path)
+        monkeypatch.setattr(model_manager.settings, "llama_server_shared", False)
+        monkeypatch.setattr(model_manager, "_server_process", None)
+        monkeypatch.setattr(model_manager.time, "sleep", lambda s: None)
+
+        def run():
+            with patch("subprocess.Popen") as popen:
+                popen.return_value.poll.return_value = 1  # exits at once; we only need the command
+                model_manager.start_server("gemma-4-e2b", timeout=1, hf_file=variant["hf_file"])
+            return popen.call_args[0][0]
+        return run
+
+    def test_flag_added_when_supported(self, monkeypatch, started_cmd):
+        monkeypatch.setattr(model_manager, "_llama_supports", lambda binary, flag: True)
+        cmd = started_cmd()
+        assert cmd[cmd.index("--cache-ram") + 1] == "0"
+
+    def test_flag_skipped_on_old_builds(self, monkeypatch, started_cmd):
+        monkeypatch.setattr(model_manager, "_llama_supports", lambda binary, flag: False)
+        assert "--cache-ram" not in started_cmd()
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="shell script as fake binary")
+    def test_llama_supports_reads_help(self, tmp_path):
+        new = tmp_path / "new-llama"
+        new.write_text("#!/bin/sh\necho '-cram, --cache-ram N   set the maximum cache size in MiB'\n")
+        old = tmp_path / "old-llama"
+        old.write_text("#!/bin/sh\necho '--parallel N'\n")
+        new.chmod(0o755)
+        old.chmod(0o755)
+        model_manager._llama_supports.cache_clear()
+        assert model_manager._llama_supports(str(new), "--cache-ram") is True
+        assert model_manager._llama_supports(str(old), "--cache-ram") is False
+        assert model_manager._llama_supports(str(tmp_path / "missing"), "--cache-ram") is False

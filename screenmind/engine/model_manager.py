@@ -3,6 +3,7 @@ Model Manager for ScreenMind
 Handles llama-server process lifecycle, GGUF model downloads, and model switching.
 """
 
+import functools
 import logging
 import shutil
 import subprocess
@@ -447,6 +448,19 @@ def _do_download(key: str, hf_file: str, quant: str) -> bool:
         return False
 
 
+@functools.lru_cache(maxsize=None)
+def _llama_supports(llama_bin: str, flag: str) -> bool:
+    """True if this llama-server build lists `flag` in its --help."""
+    try:
+        out = subprocess.run(
+            [llama_bin, "--help"], capture_output=True, text=True, timeout=15,
+            stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception:
+        return False
+    return flag in out.stdout + out.stderr
+
+
 def start_server(model_key: Optional[str] = None, timeout: int = 60, hf_file: str = None) -> bool:
     """
     Start llama-server with the specified model.
@@ -545,6 +559,13 @@ def start_server(model_key: Optional[str] = None, timeout: int = 60, hf_file: st
         # KV cache quantization — saves ~60% KV VRAM with negligible quality loss
         if settings.kv_cache_quant:
             cmd.extend(["--cache-type-k", "q8_0", "--cache-type-v", "q4_0"])
+
+        # Host prompt cache: off. It defaults to 8 GiB and keeps every past prompt
+        # in RAM (measured: +21 MB per analysis call, never freed). With one slot
+        # the slot still reuses its own prompt prefix. Builds older than the flag
+        # (llama.cpp PR 16391, Oct 2025) have no such cache.
+        if _llama_supports(llama_bin, "--cache-ram"):
+            cmd.extend(["--cache-ram", "0"])
 
         logger.info(f"Starting llama-server: {info['name']} on port {port} (timeout={timeout}s)")
 

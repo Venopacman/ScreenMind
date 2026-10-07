@@ -207,7 +207,7 @@ Gemma 4 handles audio with its own encoder. There is no Whisper dependency. Deta
 
 ### 3.7 Inference
 
-llama-server runs with one slot (`--parallel 1`). Analysis, call transcription and call summaries share it and run one after another. `engine/model_manager.py` starts and stops the server, downloads models and switches between them. It also adopts a llama-server that is already running.
+llama-server runs with one slot (`--parallel 1`). Analysis, call transcription and call summaries share it and run one after another. Its host prompt cache is off (`--cache-ram 0`, if the build has the flag). The default 8 GiB cache grew about 21 MB per call. `engine/model_manager.py` starts and stops the server, downloads models and switches between them. It also adopts a llama-server that is already running.
 
 ### 3.8 Export
 
