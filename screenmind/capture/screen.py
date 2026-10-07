@@ -1,6 +1,7 @@
 """
 Screen Capture Module
 Captures screenshots using mss (fastest cross-platform method).
+On macOS, tries ScreenCaptureKit first, then the screencapture tool, then mss.
 On Wayland, delegates to WaylandScreenCapture (grim / XDG Portal).
 Saves as JPEG with configurable quality to date-organized directories.
 """
@@ -27,8 +28,9 @@ logger = logging.getLogger("screenmind.capture.screen")
 # macOS: a CoreGraphics grab (what mss uses) can hang for 30 s. We saw it in
 # every process started from a Claude session, with Screen Recording granted.
 # The system serializes screen capture, so one hung grab also stalls other apps
-# that capture (the main instance). After one slow grab, this process uses the
-# `screencapture` tool instead, which takes about 0.2 s there.
+# that capture (the main instance). ScreenCaptureKit (sck.py) comes first now.
+# Without it, after one slow grab, this process uses the `screencapture` tool
+# instead, which takes about 0.2 s there.
 _SLOW_GRAB_SECONDS = 5.0
 
 
@@ -49,16 +51,32 @@ def _grab_screencapture(monitor: dict) -> Optional[Image.Image]:
             return None
 
 
+def _make_sck_grabber():
+    """macOS: a ScreenCaptureKit grabber, or None when SCK is missing (< 14)."""
+    from screenmind.capture import sck
+
+    if not sck.available():
+        logger.info("ScreenCaptureKit not available; using mss")
+        return None
+    try:
+        return sck.SCKGrabber()
+    except Exception as e:
+        logger.warning(f"ScreenCaptureKit init failed, using mss: {e}")
+        return None
+
+
 class ScreenCapture:
     """Handles screenshot capture, compression, and storage.
 
     On Wayland Linux, delegates to WaylandScreenCapture (grim/XDG Portal).
-    On X11/Windows/macOS, uses mss directly.
+    On X11/Windows, uses mss directly. On macOS, ScreenCaptureKit with
+    screencapture and mss as fallbacks.
     """
 
     def __init__(self):
         self._backend = None
         self._sct = None
+        self._sck = None
         self._use_screencapture = False
 
         if sys.platform == "linux" and is_wayland():
@@ -71,6 +89,8 @@ class ScreenCapture:
                 # self._backend stays None — capture() returns None gracefully
         else:
             self._sct = mss.MSS() if hasattr(mss, "MSS") else mss.mss()
+            if sys.platform == "darwin":
+                self._sck = _make_sck_grabber()
 
     def _get_active_monitor(self) -> dict:
         """Return mss monitor dict for the monitor containing the active window.
@@ -287,11 +307,29 @@ class ScreenCapture:
         return None  # both _backend and _sct are None (init failure)
 
     def _grab(self, monitor: dict) -> Image.Image:
-        """One display as an RGB image."""
-        if self._use_screencapture:
+        """One display as an RGB image.
+
+        macOS order: ScreenCaptureKit, then the screencapture tool, then mss.
+        """
+        start = time.monotonic()
+        img, backend = self._grab_with_fallback(monitor)
+        if backend != getattr(self, "_grab_backend", None):
+            # Once at start and on every switch; the WARNING before it says why
+            logger.info("Screen grab backend: %s", backend)
+            self._grab_backend = backend
+        logger.debug("Grabbed %dx%d with %s in %.2fs",
+                     img.width, img.height, backend, time.monotonic() - start)
+        return img
+
+    def _grab_with_fallback(self, monitor: dict) -> Tuple[Image.Image, str]:
+        if self._sck is not None:
+            img = self._sck.grab(monitor)
+            if img is not None:
+                return img, "sck"
+        if self._sck is not None or self._use_screencapture:
             img = _grab_screencapture(monitor)
             if img is not None:
-                return img
+                return img, "screencapture"
         start = time.monotonic()
         raw = self._sct.grab(monitor)
         if sys.platform == "darwin" and time.monotonic() - start > _SLOW_GRAB_SECONDS:
@@ -301,7 +339,7 @@ class ScreenCapture:
             )
             self._use_screencapture = True
         # mss returns BGRA, PIL expects RGB
-        return Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+        return Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX"), "mss"
 
     def capture_to_bytes(self) -> Optional[Tuple[bytes, Image.Image]]:
         """
