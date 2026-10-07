@@ -82,6 +82,8 @@ async function renderSettings(el) {
   + '<div class="radio-group" id="retention-group">' + _rp('retention','1','1 Day',cfg.retention_days) + _rp('retention','7','7 Days',cfg.retention_days) + _rp('retention','30','30 Days',cfg.retention_days) + _rp('retention','90','90 Days',cfg.retention_days) + _rp('retention','0','Forever',cfg.retention_days) + '</div>'
   + '<div id="storage-estimate" class="settings-note" style="margin-top:8px;font-size:0.82rem"></div></div>'
 
+  + renderExportCard()
+
   // ── PRIVACY & SECURITY ──
   + _sec('&#128737;', 'Privacy &amp; Security')
   + '<div class="settings-card"><div class="settings-card-header"><div><div class="settings-title">Sensitive Data Filter</div><div class="settings-desc">Auto-redact PII from captured text before storage</div></div>'
@@ -164,6 +166,7 @@ async function renderSettings(el) {
   }
 
   updateStorageEstimate();
+  initExportCard();
   loadModels();
   loadUiEventsStatus();
 }
@@ -458,6 +461,7 @@ function _captureSettingsSnapshot(container) {
   // Capture current state of all form inputs as a string for comparison
   var parts = [];
   container.querySelectorAll('input, textarea, select').forEach(function(el) {
+    if (el.hasAttribute('data-no-save')) return;  // e.g. the export card
     if (el.type === 'checkbox' || el.type === 'radio') {
       parts.push(el.id + ':' + el.checked);
     } else {

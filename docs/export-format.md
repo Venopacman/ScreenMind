@@ -6,6 +6,10 @@ Code: [`screenmind/export/`](../screenmind/export/) and [`screenmind/api/routes/
 
 Format version: **1** (`manifest.json` → `schema_version`). Change `SCHEMA_VERSION` in `archive.py` and this file when a field changes meaning or goes away. Adding a field does not need a new version.
 
+## Dashboard
+
+Settings → Storage → Data Export: a user field, From and To dates, a screenshots checkbox and an Export button. It shows the counts and the screenshot size before you export ([`static/js/export.js`](../screenmind/api/static/js/export.js)).
+
 ## API
 
 Both routes work only from this computer (`127.0.0.1` / `::1`). When a dashboard PIN is set, they need a signed-in dashboard session like every other route.
