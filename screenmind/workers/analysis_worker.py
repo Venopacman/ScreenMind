@@ -18,6 +18,7 @@ Per-app pHash cache avoids redundant processing for similar screens:
 import asyncio
 import logging
 import re
+import sys
 import time
 from collections import OrderedDict, deque
 from datetime import datetime
@@ -50,6 +51,10 @@ _URL_NOISE = {'http://localhost', 'http://127.0.0.1', 'https://fonts.googleapis.
               'https://cdn.', 'http://schemas.', 'chrome-extension://'}
 
 
+# The Windows adapter leaves window chrome out of a11y text by element type,
+# in any UI language. The macOS and Linux walkers do not, so there English
+# chrome words still mark window chrome (see _a11y_is_content).
+_A11Y_TYPE_FILTERED = sys.platform == "win32"
 # Window chrome that every windowed app exposes to the accessibility tree.
 _CHROME_MARKERS = [
     'minimize', 'maximize', 'restore', 'close',
@@ -92,16 +97,22 @@ def _screen_text_len(text: Optional[str]) -> int:
 
 
 def _a11y_is_content(text: Optional[str], window_title: Optional[str] = None,
-                     app_name: Optional[str] = None) -> bool:
+                     app_name: Optional[str] = None,
+                     type_filtered: bool = _A11Y_TYPE_FILTERED) -> bool:
     """Whether a11y text is real window content, good enough to replace OCR.
 
-    False for: window chrome (buttons, tabs), menu bars, the window title on
-    its own, and text that is mostly the same lines repeated.
+    False for the window title or app name on its own, text that is mostly
+    the same lines repeated, and too little text. These rules are structural
+    and hold in any UI language.
+
+    type_filtered: the adapter already left window chrome out by element
+    type (Windows: buttons, toolbars, tabs; browsers give only the page).
+    Elsewhere (macOS keeps buttons and tabs, Linux filters nothing) English
+    chrome markers and menu-word lines are also checked.
     """
     if not text:
         return False
-    lower = text.lower()
-    if sum(1 for m in _CHROME_MARKERS if m in lower) >= 3:
+    if not type_filtered and sum(1 for m in _CHROME_MARKERS if m in text.lower()) >= 3:
         return False
     lines = [l.strip() for l in text.split('\n') if l.strip()]
     if not lines:
@@ -114,9 +125,10 @@ def _a11y_is_content(text: Optional[str], window_title: Optional[str] = None,
         low = line.lower()
         if low in skip:
             continue
-        words = [w for w in re.split(r'[\s|/·•]+', low) if w]
-        if words and all(w in _MENU_WORDS for w in words):
-            continue
+        if not type_filtered:
+            words = [w for w in re.split(r'[\s|/·•]+', low) if w]
+            if words and all(w in _MENU_WORDS for w in words):
+                continue
         content.append(line)
     return sum(len(l) for l in content) >= _A11Y_MIN_CONTENT_CHARS
 

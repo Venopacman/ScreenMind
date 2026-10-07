@@ -1,10 +1,12 @@
 """Tests for a11y text quality: content detection, walk limits, browser URL, Electron titles."""
 
+import sys
 from unittest.mock import patch
 
 import pytest
 
 from screenmind.platform_support.macos import MacOSAdapter
+from screenmind.workers import analysis_worker as aw
 from screenmind.workers.analysis_worker import _a11y_is_content, _screen_text_len
 
 
@@ -32,9 +34,58 @@ class TestA11yIsContent:
         lines = ["same line of text that is long enough to count"] * 30 + ["other"] * 2
         assert not _a11y_is_content("\n".join(lines))
 
+    def test_repeated_title_lines_in_any_language(self):
+        title = "Яндекс — быстрый поиск в интернете — Mozilla Firefox"
+        for filtered in (True, False):
+            assert not _a11y_is_content("\n".join([title, "Mozilla Firefox"] * 3), title,
+                                        "Mozilla Firefox", type_filtered=filtered)
+
+    def test_word_checks_only_where_the_adapter_did_not_filter_by_type(self):
+        assert aw._A11Y_TYPE_FILTERED == (sys.platform == "win32")
+
+
+# Mentions chrome words, but it is page text.
+_HELP_EN = ("Close the extensions menu, then minimize or maximize the window.\n"
+            "Memory usage of each tab is shown in the address and search bar.\n"
+            "Restore a sleeping tab by clicking it; no access needed for this site.\n"
+            "Bookmarks and history stay where they were.")
+_HELP_RU = ("Закройте меню расширений, затем сверните или разверните окно.\n"
+            "Использование памяти каждой вкладкой видно в адресной строке.\n"
+            "Чтобы восстановить спящую вкладку, нажмите на неё; доступ сайту не нужен.\n"
+            "Закладки и история останутся на месте.")
+_MENU_LINES = "\n".join(["File | Edit | View | History | Bookmarks | Window | Help",
+                         "Chrome | Apple | File | Edit | View | Profiles | Tab | Tools",
+                         "Go | Format | Insert | Shell | Window | Help | View | Edit",
+                         "Apple | Chrome | File | Bookmarks | History | Go | Tab"])
+
+
+class TestA11yIsContentTypeFiltered:
+    """Windows: the adapter left chrome out by element type, so no word checks."""
+
+    def test_same_verdict_in_any_language(self):
+        assert _a11y_is_content(_HELP_EN, "Help", "chrome", type_filtered=True)
+        assert _a11y_is_content(_HELP_RU, "Справка", "chrome", type_filtered=True)
+        assert not _a11y_is_content(_HELP_RU[:150], "Справка", "chrome", type_filtered=True)
+
+    def test_menu_words_are_not_dropped(self):
+        assert _a11y_is_content(_MENU_LINES + "\n" + "x" * 10, type_filtered=True)
+
+
+class TestA11yIsContentWordChecks:
+    """macOS and Linux: the walkers keep buttons and tabs, so English chrome
+    markers and menu-word lines still count as chrome."""
+
     def test_window_chrome_markers(self):
         text = "Minimize\nMaximize\nClose\n" + "x" * 300
-        assert not _a11y_is_content(text)
+        assert not _a11y_is_content(text, type_filtered=False)
+        assert _a11y_is_content(text, type_filtered=True)
+
+    def test_menu_word_lines_are_not_content(self):
+        assert not _a11y_is_content(_MENU_LINES + "\n" + "x" * 10, type_filtered=False)
+
+    def test_real_content_still_passes(self):
+        text = "\n".join(f"Line {i}: some real text in a document about the roadmap" for i in range(10))
+        assert _a11y_is_content(text, "Doc", "Pages", type_filtered=False)
 
     def test_empty(self):
         assert not _a11y_is_content(None)
