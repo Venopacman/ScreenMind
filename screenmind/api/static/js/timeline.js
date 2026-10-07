@@ -67,10 +67,14 @@ async function loadTimeline(silent = false) {
       </div>`;
       return;
     }
-    // Render meeting cards first, then activity cards
-    const meetingHtml = meetings.map(m => meetingCard(m)).join('');
-    const activityHtml = acts.map((a, i) => timelineCard(a, i)).join('');
-    list.innerHTML = meetingHtml + activityHtml;
+    // One feed, newest first (same order as /api/timeline). Both times are
+    // local ISO strings, so string compare sorts them. A meeting older than
+    // the oldest loaded activity lands at the end.
+    const items = [
+      ...meetings.map(m => ({ t: m.start_time || '', m })),
+      ...acts.map(a => ({ t: a.timestamp || '', a })),
+    ].sort((x, y) => (x.t < y.t ? 1 : x.t > y.t ? -1 : 0));
+    list.innerHTML = items.map((it, i) => it.m ? meetingCard(it.m) : timelineCard(it.a, i)).join('');
   } catch (err) {
     list.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Error</div><div>${err.message}</div></div>`;
   }
