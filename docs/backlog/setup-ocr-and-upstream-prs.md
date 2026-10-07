@@ -36,25 +36,20 @@ Refs: `tests/conftest.py` (`_isolate_data_dir`), `tests/test_logging_conventions
 ### #23 and #24 stay fork-only for now
 Status: blocked on the upstream author
 
-The user closed both upstream PRs. The OCR memory change is tuned for this Mac, and the upstream author can decide later whether they want multi-language OCR. If they ask, rebase `feat/ocr-multilingual` onto upstream `main` without `perf/ocr-memory`. It only needs `OCR_CANVAS_SIZE`, or upstream's default 2560.
+The user closed both upstream PRs. The OCR memory change is tuned for this Mac, and the upstream author can decide later whether they want multi-language OCR. If they ask, rebase `feat/ocr-multilingual` onto upstream `main` without `perf/ocr-memory`. It only needs `OCR_CANVAS_SIZE`, or upstream's default 2560. Both branches are EasyOCR. `custom` itself uses RapidOCR since `4cb9030`.
 
-Refs: `screenmind/engine/ocr.py`, `local-notes/ocr-findings.md`.
-
-### Russian OCR not checked on live captures
-Status: open
-
-Multi-language OCR was checked on a synthetic 5-language screen and on saved screenshots (Telegram, Slack). It hasn't been checked yet on a live frame captured after the change. Look for a frame with Russian text and check `ocr_text` for Cyrillic.
-
-Refs: `activities.ocr_text`, `OCR_LANGUAGES` in `.env`.
+Refs: branches `perf/ocr-memory`, `feat/ocr-multilingual`, `local-notes/ocr-findings.md`.
 
 ### OCR known limits
 Status: idea
 
-- The Cyrillic model sometimes puts a Latin `V` inside Russian words (38 of 62 mixed-script words left after cleanup). A post-fix could map `V` to the Cyrillic letter that's most likely in that position.
-- At `canvas_size=800`, short words (1–2 letters) are often missed, about 10% of text. 960 keeps 96% at about 4 GB.
-- Other scripts (Chinese, Japanese, Arabic) would need another `detector=False` Reader, the same way Cyrillic works.
+OCR is RapidOCR since `4cb9030`. Measured on live OCR boxes since 2026-10-06 14:00: 4,658 Cyrillic words, 352 of them mixed-script.
+- The most common one is `Docтyп` (Доступ, 72 times). `_fix_lookalikes()` picks the script by letter count, and 4 of 6 letters are Latin, so the word stays Latin. `т` and `п` have no Latin twin, but a rule "such a letter means Cyrillic" would break Latin words with the same misread (`OpeпAl`).
+- An icon before a Latin word often becomes one Cyrillic letter: `ёDIS-873:`, `мInbox`, `ЯGoogle`, `ёconfig.py`.
+- A Latin `V` for `у` is now rare: 19 words.
+- One recognizer reads the whole frame. That is gap G14 in `capture-architecture.md`.
 
-Refs: `screenmind/engine/ocr.py` (`_merge_readings`, `_fix_lookalikes`, `OCR_CANVAS_SIZE`).
+Refs: `screenmind/engine/ocr.py` (`_rec_model`, `_fix_lookalikes`).
 
 ### Workflows app integration
 Status: blocked on the user (monorepo path, and whether the workflows app runs on a server or on the laptop)
@@ -95,8 +90,3 @@ Status: idea
 The module docstring in `analysis_worker.py` says the pHash cache tiers are `<= 2` and `3-7`. The code uses `<= 3` and `4-10`, with a 240s/420s stale limit. The thresholds are hardcoded, and they set API cost if the model moves to a paid vendor.
 
 Refs: `screenmind/workers/analysis_worker.py` (top docstring and `_process`), `screenmind/capture/dedup.py` (threshold 8).
-
-### Clarify the push policy for `custom`
-Status: blocked on the user
-
-Two other sessions relayed different rules: "`custom` stays local, never push it unless the user asks" and "push `custom` to origin after adding backlog docs". This session merged its backlog file into `custom` locally and asked the user before pushing. `origin/custom` on the fork exists from earlier pushes.

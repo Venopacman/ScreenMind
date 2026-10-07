@@ -32,13 +32,6 @@ Status: blocked on the user
 
 `ui_events_enabled` is false by default, and the main instance's `settings.json` doesn't set it. So `ui_events` and `activities.user_actions` stay empty, and the workflows feed gets no clicks or app switches. To turn it on, go to Settings → Privacy & Security → UI Events. The app that starts ScreenMind (Terminal) needs Input Monitoring and Accessibility.
 
-### Windows: no browser URL
-Status: open
-
-`WindowsAdapter` has no `get_browser_url()`, so `active_url` and `ui_events.url` are always NULL on Windows. Read the address bar with UI Automation, for example the Edit control named "Address and search bar" in Chrome or Edge. Add `https://` when it is missing. Callers already run the result through `sanitize_url()`.
-
-Refs: `screenmind/platform_support/windows.py`, `base.PlatformAdapter.get_browser_url()`, `privacy/url_filter.py`.
-
 ### Firefox: probably no URL on macOS
 Status: idea
 

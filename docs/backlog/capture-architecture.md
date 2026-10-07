@@ -35,7 +35,7 @@ Refs: `analysis_worker._process()` (step 3), `storage/database.py` migrations.
 ### G14: OCR reads one script per frame
 Status: open
 
-`_rec_model()` picks one recognizer. With `OCR_LANGUAGES=en,es,de,fr,ru` the Cyrillic model reads all Latin text. Check accented Latin (é, ü, ñ) on a live frame. If it is poor, run a second recognizer on the same boxes for Latin-heavy lines. The OCR items in `setup-ocr-and-upstream-prs.md` still describe EasyOCR, which is gone since `4cb9030`.
+`_rec_model()` picks one recognizer. With `OCR_LANGUAGES=en,es,de,fr,ru` the Cyrillic model reads all Latin text. Check accented Latin (é, ü, ñ) on a live frame. If it is poor, run a second recognizer on the same boxes for Latin-heavy lines.
 
 Refs: `screenmind/engine/ocr.py` (`_rec_model`, `_fix_lookalikes`).
 
@@ -87,10 +87,3 @@ Status: idea
 `create_backend()` returns `None` on Linux, and `LinuxAdapter` has no `get_browser_url()`, `list_visible_windows()` or `mic_apps()`. AT-SPI can give the URL (document attribute) and events. Low priority: nobody runs Linux here.
 
 Refs: `screenmind/platform_support/linux.py`, `capture/ui_events/recorder.py` (`create_backend`).
-
-### Stale items in other backlog files
-Status: open (for the owning sessions)
-
-- `ui-events.md` "Windows: no browser URL" is done: `WindowsAdapter.get_browser_url()` exists since `16f933a`. Only the call room URL is missing (G16).
-- `setup-ocr-and-upstream-prs.md` "OCR known limits" talks about EasyOCR `canvas_size`, `OCR_CANVAS_SIZE` and `_merge_readings`. None of these exist since `4cb9030` (RapidOCR).
-- `docs/plans/ui-events.md` says the Windows a11y text is capped at 20,000 chars. It is 300,000 since `87b058d`.
