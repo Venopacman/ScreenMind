@@ -53,13 +53,6 @@ Status: idea
 
 Refs: `AudioWorker._find_loopback_device()`, `_recording_loop()`.
 
-### G19: No global hotkeys on macOS
-Status: idea
-
-`capture/hotkey.py` skips the `keyboard` library on macOS, so bookmark, pause and voice memo work only from the dashboard. The UI events `CGEventTap` already sees every key when it runs; a hotkey could use the same tap, or a separate `NSEvent` global monitor.
-
-Refs: `screenmind/capture/hotkey.py`, `capture/ui_events/macos.py`.
-
 ### G24: Retention runs only at startup
 Status: open
 

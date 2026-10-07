@@ -2,7 +2,7 @@
 
 What ScreenMind captures on macOS and Windows, how, and where it ends up. Linux gets a short side column.
 
-This file is the source of truth. It was written from the code on `custom` at `482c275` (2026-10-07), DB schema v10. Where the code and a backlog file disagree, this file follows the code. See [Code vs backlog](#9-code-vs-backlog).
+This file is the source of truth. It was written from the code on `custom` at `482c275` (2026-10-07) and updated for the strip-down to action collection ([plan](../plans/strip-to-actions.md)), DB schema v11. Where the code and a backlog file disagree, this file follows the code. See [Code vs backlog](#9-code-vs-backlog).
 
 A rendered version with the same content is published as an Artifact: https://claude.ai/artifact/DUVgVLd84bMqUUNciuf7vA (private to the owner). Its source is [`capture.html`](capture.html) next to this file.
 
@@ -57,8 +57,6 @@ flowchart TB
     Q[["asyncio.Queue of CaptureResult"]]
     OCR["RapidOCR<br/>when a11y text is not real content"]
     GEMMA["Gemma 4 via llama-server :5809"]
-    EMB["all-MiniLM-L6-v2 ONNX<br/>384-dim embedding"]
-    GIT["DevContextDetector<br/>gitpython"]
   end
 
   subgraph STORE["Storage (data_dir)"]
@@ -85,11 +83,7 @@ flowchart TB
   SD --> TRANS
   TRANS -- "audio chunks" --> GEMMA
   Q --> OCR --> GEMMA
-  GEMMA --> EMB
-  GEMMA --> GIT
   GEMMA -- "update row, status=ok" --> DB
-  EMB --> DB
-  GIT -- "dev_contexts" --> DB
 ```
 
 The order inside one tick, from `CaptureWorker._capture_monitor()`:
@@ -120,10 +114,7 @@ Gap ids (G1, G2...) point to [section 8](#8-gaps).
 | UI events | Clicks, typed text, app switches, tab/page changes, clipboard | `CGEventTap` (listen-only) + `AXUIElement` + `NSPasteboard` | `WH_KEYBOARD_LL` / `WH_MOUSE_LL` hooks + UIA + Win32 clipboard | none | `ui_events`, `activities.user_actions` | G21, G22, G25, G27, G31 |
 | Call start/end | App, title, room URL, duration | Window rules + CoreAudio "is running input" per process | Window rules only (no mic info) | Window rules on the focused window only | `meetings` | G16, G17, G27 |
 | Call audio | Mic + system audio, transcript, summary | `sounddevice` mic; system audio only with a virtual loopback device | `sounddevice` mic + a device named "loopback" / "Stereo Mix" | `sounddevice` mic | `meetings.transcript`, `meetings.summary` | G18 |
-| Voice memo | Mic audio + one screenshot on a hotkey | hotkeys off; dashboard only | `keyboard` hotkey `ctrl+shift+v` | `keyboard` (needs root) | `activities` row with app "Voice Memo" | G19 |
 | Analysis | Category, summary, scene, layout | Gemma 4 E2B (llama-server) | same | same | `activities.app_name`, `category`, `summary`, `details`, `visible_text`, `mood`, `confidence`, `scene_description` | G15 |
-| Embedding | Vector for semantic search | all-MiniLM-L6-v2, ONNX Runtime | same | same | `activities.embedding` (384 float32 BLOB) | |
-| Git context | Repo, branch, last commit, changes | `gitpython` over `WORKSPACE_DIRS` | same | same | `dev_contexts` | |
 
 ## 3. Components per OS
 
@@ -156,7 +147,7 @@ flowchart TB
     S4["engine/a11y_extractor.py (adapter facade)"]
     S5["capture/ui_events/recorder.py, text_buffer.py, models.py"]
     S6["workers/call_detection.py, audio_worker.py"]
-    S7["workers/analysis_worker.py, engine/ocr.py, analyzer.py, llm_client.py, embedder.py"]
+    S7["workers/analysis_worker.py, engine/ocr.py, analyzer.py, llm_client.py"]
     S8["privacy/url_filter.py, data_filter.py, encryption.py"]
     S9["storage/database.py"]
   end
@@ -201,7 +192,6 @@ SCK needs `pyobjc-framework-ScreenCaptureKit` (a macOS dependency in `pyproject.
 - Active: a "change" grab if 10 s passed since the last saved frame. A "periodic" grab at `CAPTURE_INTERVAL` (default 40 s, range 10-120).
 - Idle: after 3 ticks in a row with no new frame, only the periodic grab.
 - Event-driven, only with UI events on: `request_capture()` after an app switch (1.0 s delay), click (1.5 s), Enter in a text field (0.5 s) or a page change (1.0 s). Requests within 3 s merge into one grab, and grabs are at least 3 s apart.
-- Bookmark: hotkey, dashboard, or an auto-bookmark keyword. Never deduped.
 
 Every grab, including the periodic one, goes through dedup. A screen that does not change gets no new row. See G4.
 
@@ -351,7 +341,6 @@ OS hook thread -> queue.SimpleQueue -> enricher thread -> ui_events table
 - Each chunk goes to Gemma via llama-server (`input_audio`). The transcript and a summary are written to `meetings.transcript` and `meetings.summary`.
 - macOS has no such loopback device by default, so it records the mic only (G18).
 
-**Voice memos:** hold `VOICE_HOTKEY` to record the mic and one screenshot. The result is an `activities` row with app and title "Voice Memo". The hotkeys use the `keyboard` library, which is skipped on macOS (G19).
 
 ### 4.9 Analysis
 
@@ -372,9 +361,9 @@ Before the call:
 
 - The sensitive-data filter cleans the text and the OCR boxes (`filter_ocr_boxes()`, before `ocr_boxes` and `organized_text` are built). The image is not cleaned.
 - A frame with no app, no title and under 20 chars of real text is stored as `idle` without Gemma (`rule:empty_screen`).
-- A frame older than 180 s when its turn comes is finished by `Database.mark_skipped()`: `status='skipped'`, analysis fields NULL, and the capture-time a11y text (filtered) and URL kept in `ocr_text` and `active_url`. Bookmarks are never skipped. The idle backfill re-analyzes today's `pending`, `skipped` and `failed` rows later, and reuses that a11y text and URL.
+- A frame older than 180 s when its turn comes is finished by `Database.mark_skipped()`: `status='skipped'`, analysis fields NULL, and the capture-time a11y text (filtered) and URL kept in `ocr_text` and `active_url`. The idle backfill re-analyzes today's `pending`, `skipped` and `failed` rows later, and reuses that a11y text and URL.
 
-After the call: the embedding (all-MiniLM-L6-v2 on ONNX Runtime, 384 dims) from summary, details, snippets, app, category and scene. `DevContextDetector` adds git info for coding frames. Auto-bookmark checks `AUTO_BOOKMARK_KEYWORDS`. Chat can cancel a running analysis; the frame goes back to the front of the queue.
+After the call the row is updated (`status='ok'`). Nothing else runs. Embeddings, git context and auto-bookmarks were removed in `57cf0dd`, and migration v11 dropped their data.
 
 ## 5. Storage
 
@@ -385,27 +374,24 @@ Everything lives under `DATA_DIR` (default `~/.screenmind`). Dev instances use `
 | `screenmind.db` | SQLite, WAL mode, FTS5 |
 | `screenshots/YYYY-MM-DD/HH-MM-SS_mmm[_mN].jpg` | JPEG frames. `_mN` is the mss monitor index when all displays are grabbed. |
 | `settings.json` | Runtime overrides from the dashboard |
-| `models/` | GGUF models, `ocr/`, `embedder/` |
+| `models/` | GGUF models, `ocr/`. An old `embedder/` folder is no longer used and can be deleted. |
 | `.encryption_key` | Fernet key backup (also in the OS keyring) |
-| `webhook_log.db` | `deliveries` table, webhook delivery log |
 
 ### Tables in `screenmind.db`
 
-Migrations live in `Database._init_db()` as a list. Version = list index + 1. The latest is **v10**.
+Migrations live in `Database._init_db()` as a list. Version = list index + 1. The latest is **v11**. It dropped `activities.embedding`, `activities.bookmarked`, `dev_contexts` and `daily_summaries`, which only removed features used.
 
 | Table | Written by | Columns (migration) |
 |---|---|---|
-| `activities` | `CaptureWorker` inserts; `AnalysisWorker` updates | `id`, `timestamp`, `screenshot_path`, `window_title`, `detected_app`, `bookmarked`, `created_at` (capture). `app_name`, `category`, `summary`, `details`, `visible_text` (JSON list), `mood`, `confidence`, `embedding` (BLOB), `analyzed`, `analysis_error` (analysis). `ocr_text` (v1), `ocr_boxes` (v2), `scene_description` (v3), `organized_text` (v4), `analysis_method` (v5), `active_url` (v6), `status` `pending/ok/skipped/failed/dead` (v7), `user_actions` (v8, capture) |
+| `activities` | `CaptureWorker` inserts; `AnalysisWorker` updates | `id`, `timestamp`, `screenshot_path`, `window_title`, `detected_app`, `created_at` (capture). `app_name`, `category`, `summary`, `details`, `visible_text` (JSON list), `mood`, `confidence`, `analyzed`, `analysis_error` (analysis). `ocr_text` (v1), `ocr_boxes` (v2), `scene_description` (v3), `organized_text` (v4), `analysis_method` (v5), `active_url` (v6), `status` `pending/ok/skipped/failed/dead` (v7), `user_actions` (v8, capture) |
 | `ui_events` | `UiEventRecorder` | `id`, `timestamp`, `type` (`click`, `text`, `app_switch`, `window_focus`, `clipboard`), `app_name`, `window_title`, `element_role`, `element_name`, `element_value`, `text`, `x`, `y`, `activity_id` → `activities` ON DELETE SET NULL (v8); `url` (v9) |
 | `meetings` | `AudioWorker` | `id`, `start_time`, `end_time`, `app_name`, `duration_minutes`, `transcript`, `summary`, `created_at`; `window_title`, `url` (v10) |
-| `dev_contexts` | `AnalysisWorker` | `activity_id` → `activities` ON DELETE CASCADE, `repo_name`, `branch`, `last_commit`, `changed_files`, `insertions`, `deletions` |
-| `daily_summaries` | summary route | `date`, `summary`, `standup`, `total_activities`, `category_breakdown`, `top_repos`, `productive_hours` |
 | `activities_fts` | triggers on `activities` | FTS5 over `summary`, `details`, `ocr_text`, `app_name`, `scene_description`, `organized_text`, `user_actions` |
 | `schema_version` | `_init_db()` | `version` |
 
 ### Retention
 
-`RETENTION_DAYS` (default 7, 0 = keep forever). `Database.cleanup_old_data()` deletes `activities` (and their JPEGs), `daily_summaries`, `ui_events` and `meetings` older than the cutoff. It runs once, at startup in `main.py` (G24).
+`RETENTION_DAYS` (default 7, 0 = keep forever). `Database.cleanup_old_data()` deletes `activities` (and their JPEGs), `ui_events` and `meetings` older than the cutoff. It runs once, at startup in `main.py` (G24).
 
 ### Encryption
 
@@ -422,7 +408,7 @@ Migrations live in `Database._init_db()` as a list. Version = list index + 1. Th
 | Screen Recording | SCK, `screencapture`, mss; also `kCGWindowName` window titles | Grabs fail or show only the wallpaper; titles are empty | not needed | X11: none. Wayland: portal prompt on GNOME/KDE |
 | Accessibility | a11y text, Electron titles, browser URL, UI event element lookups (`AXIsProcessTrusted`) | AX calls fail quietly: no a11y text, no URL, titles fall back to Quartz | not needed (UIA) | AT-SPI must be on |
 | Input Monitoring | UI events `CGEventTap` (`CGPreflightListenEventAccess`) | Keyboard tap creation fails; falls back to a mouse-only tap: clicks yes, typed text and shortcuts no | not needed (LL hooks) | no backend |
-| Microphone | Transcription and voice memos (`sounddevice`) | Silent audio | "Let desktop apps access your microphone" in Privacy settings | PulseAudio/PipeWire access |
+| Microphone | Call transcription (`sounddevice`) | Silent audio | "Let desktop apps access your microphone" in Privacy settings | PulseAudio/PipeWire access |
 | Mic-in-use detection | CoreAudio process list, no permission | | not available | not available |
 | Keychain | Encryption key via `keyring` | Falls back to the key file | Credential Manager | Secret Service |
 
@@ -469,7 +455,6 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G16 | No `get_window_url()` on Windows, so `meetings.url` is always NULL there. | Windows | new |
 | G17 | No mic-in-use signal on Windows. Discord calls are never detected. Slack needs "huddle" in the title. A call whose window is hidden ends after 120 s. | Windows | new |
 | G18 | System audio is recorded only from a device named "loopback" or "Stereo Mix". macOS has none by default, so transcripts have the mic side only. | both (macOS always) | new |
-| G19 | Global hotkeys (bookmark, pause, voice memo) are off on macOS because the `keyboard` library cannot do them there. | macOS | new |
 | G21 | With several displays, all UI events go to the first frame saved in the tick. | both | [ui-events.md](../backlog/ui-events.md) "Events go to the first frame of a tick" |
 | G22 | Permission prompts name Terminal or Python, not ScreenMind. | macOS | [ui-events.md](../backlog/ui-events.md) "macOS permission prompts name Terminal or Python" |
 | G23 | The DB is plain text. Only screenshots can be encrypted, and that is off by default. | both | [ui-events.md](../backlog/ui-events.md) "Encrypt the whole DB" |
@@ -481,7 +466,7 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G29 | Wayland hides window positions: no window list, no active display, no per-display labels. | Linux | [multi-display-capture.md](../backlog/multi-display-capture.md) (Wayland note) |
 | G31 | Typed text and clipboard are opt-in, because there is no PII detection before they are stored. | both | [ui-events.md](../backlog/ui-events.md) "PII detection before storing typed text and clipboard" |
 
-Closed while this map was written: G10 and G11 by `fa80d39` (Windows a11y reads the page, not the browser UI), G13 by `81277a8` (capture-time data kept on backlog skips), G20 by `399a565` (UI events on by default, live on the main instance since 2026-10-07). Their ids stay reserved.
+Closed while this map was written: G10 and G11 by `fa80d39` (Windows a11y reads the page, not the browser UI), G13 by `81277a8` (capture-time data kept on backlog skips), G20 by `399a565` (UI events on by default, live on the main instance since 2026-10-07). G19 (no global hotkeys on macOS) went away with the hotkeys themselves in `57cf0dd`. Their ids stay reserved.
 
 ## 9. Code vs backlog
 
@@ -493,7 +478,6 @@ The code wins in each case below. Backlog files belong to other sessions, so the
 | [setup-ocr-and-upstream-prs.md](../backlog/setup-ocr-and-upstream-prs.md) "OCR known limits": EasyOCR `canvas_size`, `OCR_CANVAS_SIZE`, `_merge_readings`, extra `Reader`s. | OCR is RapidOCR since `4cb9030`. `OCR_CANVAS_SIZE` and `_merge_readings` do not exist. One recognizer per frame (G14). |
 | [docs/plans/ui-events.md](../plans/ui-events.md) Windows notes: a11y total capped at 20,000 chars. | 300,000 chars on both OSes since `87b058d`. Only the Gemma prompt is trimmed (8,000 chars). |
 | `capture_worker.py` `run()` docstring: forces a capture every 30 s even with no change. | `CAPTURE_INTERVAL` defaults to 40 s, and the periodic grab is deduped too (G4). |
-| `analysis_worker.py` module docstring: cache tiers `<= 2` and `3-7`. | `<= 3` and `4-10`. Already parked in [setup-ocr-and-upstream-prs.md](../backlog/setup-ocr-and-upstream-prs.md) "Docstring thresholds out of date". |
 
 ## 10. How to update
 

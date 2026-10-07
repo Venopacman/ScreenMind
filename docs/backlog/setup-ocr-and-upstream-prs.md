@@ -56,13 +56,12 @@ Status: blocked on the user (monorepo path, and whether the workflows app runs o
 
 Goal: use ScreenMind data as a source for the workflows app in the backend monorepo. What we learned:
 
-- The REST API binds to `127.0.0.1:7777` only. `/api/agents/sdk/activities` and `/api/timeline` also reject non-local callers. There's no auth if no PIN is set.
-- The MCP server is stdio only (`python -m screenmind.mcp_server`). It fits a local LLM client, not a backend feed.
-- Webhooks fire only for `daily_summary`, `bookmark` and `meeting_end`.
-- Rows start as `pending` and get their analysis 10–30s later. `since` uses capture time and filters within one `date`. So sync only `status='ok'` rows and track the last synced id.
-- Suggested shape if the app is server-side: a small push agent on the laptop polls `/api/agents/sdk/activities` and posts `ok` rows to a backend ingest endpoint, text only by default.
+- The REST API binds to `127.0.0.1:7777` only and has no auth. The MCP server, webhooks and the agent SDK endpoint (`/api/agents/sdk/activities`) were removed in the strip-down (`57cf0dd`).
+- The way out now is the export: `GET /api/export` (localhost only) builds a per-day zip of sessions, text and screenshots. See `docs/export-format.md`.
+- Rows start as `pending` and get their analysis 10–30s later. So sync only `status='ok'` rows and track the last synced id.
+- Suggested shape if the app is server-side: a small push agent on the laptop pulls the export (or reads `ok` rows) and posts them to a backend ingest endpoint, text only by default.
 
-Refs: `screenmind/api/server.py` (localhost-only paths), `screenmind/api/routes/agents.py` (`/sdk/activities`), `screenmind/mcp_server.py`, the `activities` and `dev_contexts` tables.
+Refs: `screenmind/export/`, `screenmind/api/routes/export.py`, `docs/export-format.md`, the `activities`, `ui_events` and `meetings` tables.
 
 ### Swap Gemma for a vendor LLM API
 Status: idea
@@ -83,10 +82,3 @@ Status: open, low priority
 On 2026-10-06 at 12:02:06, `~/.screenmind/settings.json` got `capture_paused: true` while the app kept capturing. Only `CaptureWorker.pause()` writes that. A test run was ruled out. `CAPTURE_ON_START=true` makes it harmless locally, but the source is still unknown. It could be another instance, for example a dev instance on another port that shares `~/.screenmind`.
 
 Refs: `screenmind/workers/capture_worker.py` (`pause`, `resume`), `screenmind/config.py` (`save_runtime_overrides`).
-
-### Docstring thresholds out of date
-Status: idea
-
-The module docstring in `analysis_worker.py` says the pHash cache tiers are `<= 2` and `3-7`. The code uses `<= 3` and `4-10`, with a 240s/420s stale limit. The thresholds are hardcoded, and they set API cost if the model moves to a paid vendor.
-
-Refs: `screenmind/workers/analysis_worker.py` (top docstring and `_process`), `screenmind/capture/dedup.py` (threshold 8).

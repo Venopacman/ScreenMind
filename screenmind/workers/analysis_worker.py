@@ -3,16 +3,18 @@ Analysis Worker
 Consumes screenshots from the capture queue, extracts text (a11y/OCR),
 labels them with Gemma 4, then stores everything.
 
-Two analysis modes (configurable via settings.analysis_mode):
+Three analysis modes (configurable via settings.analysis_mode):
   - "merged" (Accurate): Single LLM call with thinking (~76s). Gemma detects
     layout regions + produces analysis in one pass. Best for complex layouts.
+  - "balanced": thinking for the analysis, no layout (~40s).
   - "fast": No-thinking LLM call for analysis (~12s) + instant OCR-based
     layout clustering. 6x faster, no LLM needed for layout.
 
 Per-app pHash cache avoids redundant processing for similar screens:
-  - identical (diff <= 2): skip OCR + Gemma, reuse everything from cache
-  - minor (diff 3-7): reuse layout + Gemma analysis, re-run OCR
-  - full (diff > 7): run full pipeline
+  - identical (diff <= 3): skip OCR + Gemma, reuse everything from cache
+  - minor (diff 4-10, cache younger than 240 s for chat apps or 420 s for
+    others): reuse layout + Gemma analysis, re-run OCR
+  - full (otherwise): run full pipeline
 """
 
 import asyncio

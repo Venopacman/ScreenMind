@@ -1,7 +1,10 @@
-# ScreenMind — System Architecture
+# ScreenMind: System Architecture
 
-> **Privacy-First Local Screen Activity Journal + AI Memory**  
-> Powered by Gemma 4 (E2B / E4B / 12B — Vision + Audio + Reasoning) via llama.cpp
+ScreenMind is a local screen activity recorder. It collects actions and does the minimal analysis needed to dedup, unify and label them. It is a data source for a workflows app.
+
+Gemma 4 (E2B / E4B / 12B) runs locally through llama.cpp.
+
+This file gives the overview. The detailed, per-OS map of what is captured, and how, is [docs/architecture/capture.md](docs/architecture/capture.md). When the two disagree, capture.md follows the code and wins.
 
 ---
 
@@ -9,81 +12,75 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                            ScreenMind                                    │
+│                               ScreenMind                                │
 │                                                                         │
-│  ┌──────────────┐   ┌────────────┐   ┌───────────────────────────────┐ │
-│  │ Capture      │──▶│ Async Queue│──▶│ Analysis Worker               │ │
-│  │ Worker       │   │ (max: 100) │   │                               │ │
-│  │              │   └────────────┘   │ pHash Cache → OCR → Gemma 4   │ │
-│  │ • mss grab   │                    │ → Layout → Embeddings → Store │ │
-│  │ • pHash dedup│                    └───────────────────────────────┘ │
-│  │ • A11y text  │                                                      │
-│  │ • Privacy    │   ┌────────────┐   ┌───────────────────────────────┐ │
-│  └──────────────┘   │ Audio      │   │ Agent Scheduler               │ │
-│                     │ Worker     │   │                               │ │
-│  ┌──────────────┐   │            │   │ • .md → Gemma prompt          │ │
-│  │ Hotkey       │   │ • Detect   │   │ • .py → SDK execution         │ │
-│  │ Listener     │   │ • Record   │   │ • Cron scheduling             │ │
-│  │              │   │ • Transcr. │   └───────────────────────────────┘ │
-│  │ • Bookmark   │   │ • Summary  │                                     │
-│  │ • Pause      │   └────────────┘              │                      │
-│  │ • Voice memo │                               ▼                      │
-│  └──────────────┘                    ┌───────────────────┐             │
-│                                      │ SQLite (WAL)      │             │
-│                                      │ + FTS5 index      │             │
-│                                      │ + Embeddings BLOB │             │
-│                                      └─────────┬─────────┘             │
-│                                                │                       │
-│  ┌─────────────────────────────────────────────┴─────────────────────┐ │
-│  │                    FastAPI REST Server (:7777)                     │ │
-│  │  /timeline · /search · /chat · /stats · /agents · /mcp · /rewind │ │
-│  │                                                                   │ │
-│  │  ┌───────────────────────────────────────────────────────────┐   │ │
-│  │  │              Web Dashboard (Vanilla JS SPA)                │   │ │
-│  │  │  Timeline · Chat · Search · Analytics · Memos · Agents    │   │ │
-│  │  └───────────────────────────────────────────────────────────┘   │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-│  ┌───────────────────┐                                                 │
-│  │ MCP Server (stdio)│ ← Claude Desktop / Cursor / VS Code            │
-│  │ Separate process  │                                                 │
-│  └───────────────────┘                                                 │
+│  ┌──────────────┐   ┌────────────┐   ┌───────────────────────────────┐  │
+│  │ Capture      │──▶│ asyncio    │──▶│ Analysis Worker               │  │
+│  │ Worker       │   │ Queue      │   │                               │  │
+│  │              │   └────────────┘   │ per-app cache → a11y / OCR    │  │
+│  │ • grab per   │                    │ → data filter → Gemma 4       │  │
+│  │   display    │                    │ → layout text → store         │  │
+│  │ • pHash dedup│                    └───────────────┬───────────────┘  │
+│  │ • window,    │                                    │                  │
+│  │   a11y, URL  │   ┌────────────┐   ┌────────────┐  │                  │
+│  └──────┬───────┘   │ UI event   │   │ Audio      │  │                  │
+│         │           │ recorder   │   │ Worker     │  │                  │
+│         │           │ (optional) │   │ • calls    │  │                  │
+│         │           │ • clicks   │   │ • transcr. │  │                  │
+│         │           │ • app sw.  │   │ • summary  │  │                  │
+│         │           └─────┬──────┘   └─────┬──────┘  │                  │
+│         ▼                 ▼                ▼         ▼                  │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │ SQLite (WAL) + FTS5: activities, ui_events, meetings              │  │
+│  │ screenshots/YYYY-MM-DD/*.jpg                                      │  │
+│  └─────────────────────────────────┬─────────────────────────────────┘  │
+│                                    │                                    │
+│  ┌─────────────────────────────────┴─────────────────────────────────┐  │
+│  │                 FastAPI REST Server (127.0.0.1:7777)              │  │
+│  │  /timeline · /search · /stats · /meetings · /ui-events · /export  │  │
+│  │                                                                   │  │
+│  │  ┌─────────────────────────────────────────────────────────────┐  │  │
+│  │  │              Web Dashboard (Vanilla JS SPA)                 │  │  │
+│  │  │  Timeline · Search · Analytics · Meetings · Settings        │  │  │
+│  │  └─────────────────────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
+
+        llama-server (separate process, default port 5809), single slot
+        ▲ used by the Analysis Worker (labels) and the Audio Worker (calls)
 ```
 
-**Core Principle:** Everything runs locally. No network calls. No telemetry. Screenshots, analysis, search, and chat — all on your machine.
+**Core principle:** everything runs locally. The network is used only to download llama-server and models. There is no telemetry.
+
+**Removed features.** Rewind, chat, voice memos, agents, bookmarks, daily summaries, the MCP server, integrations, global hotkeys, semantic search, git context and the dashboard PIN were removed (`57cf0dd`). Migration v11 dropped their data. See [docs/plans/strip-to-actions.md](docs/plans/strip-to-actions.md).
 
 ---
 
-## 2. Multi-Model AI Pipeline
+## 2. Analysis Pipeline
 
 ```
-Screenshot
+Screenshot (+ window info, a11y text and URL read at grab time)
     │
-    ├──▶ EasyOCR (text extraction, ~3-10s, CPU)
-    │         │
-    │         ▼
-    ├──▶ Gemma 4 (understanding, 12-76s, GPU)  ◀── OCR text fed as context
-    │         │
-    │         ├── Structured JSON: app, category, summary, mood, scene
-    │         └── Layout regions: sidebar, chat area, toolbar (accurate mode)
+    ├──▶ Per-app pHash cache: identical → copy last analysis, stop here
     │
-    ├──▶ Layout Analyzer (spatial OCR clustering, ~0ms, CPU)  ← fast mode fallback
-    │         │
-    │         └── Organized text with [SECTION] headers
+    ├──▶ RapidOCR (CPU), only when the a11y text is not real content
     │
-    └──▶ MiniLM-L6-v2 (semantic embedding, ~50ms, CPU)
-              │
-              └── 384-dim vector for similarity search
-              
-    All results → SQLite + FTS5
+    ├──▶ Sensitive-data filter on text and OCR boxes
+    │
+    ├──▶ Gemma 4 via llama-server (skipped on a "minor" cache hit)
+    │         ├── JSON: app, category, summary, details, scene, mood
+    │         └── Layout regions (merged mode only)
+    │
+    └──▶ Layout analyzer: OCR boxes grouped by screen region
+              (Gemma's regions in merged mode, OCR clustering otherwise)
+
+    All results → SQLite + FTS5. The row gets status='ok'.
 ```
 
-Four AI models working in concert:
-1. **EasyOCR** — extracts raw screen text (what's written)
-2. **Gemma 4** — understands what you're doing (the brain)
-3. **Layout Analyzer** — organizes text by screen region (spatial intelligence)
-4. **MiniLM-L6-v2** — enables "search by meaning" (semantic vectors)
+Two models:
+
+1. **RapidOCR**: reads text from pixels (PP-OCR models on ONNX Runtime, CPU).
+2. **Gemma 4**: labels the frame. It sees the image plus the text as a hint.
 
 ---
 
@@ -91,294 +88,183 @@ Four AI models working in concert:
 
 ### 3.1 Capture Worker
 
+`workers/capture_worker.py`. Details per OS are in [capture.md, section 4.1](docs/architecture/capture.md#41-screenshots).
+
 | Property | Detail |
 |---|---|
-| **Method** | `mss` — fastest cross-platform screen capture |
-| **Smart Polling** | 5s check interval, 10s minimum between saves, 40s max forced capture |
-| **Deduplication** | Perceptual hash (pHash), threshold: 8 hamming distance |
-| **Idle Detection** | 3+ consecutive skips → extends poll to 40s (screen unchanged) |
-| **A11y Extraction** | Windows UI Automation text captured at screenshot time (correct window) |
-| **Privacy Zones** | Blocked apps silently skipped. Heavy apps auto-pause capture. |
-| **Output** | JPEG @ 70% quality → `~/.screenmind/screenshots/{date}/{time}.jpg` |
-| **Encryption** | Optional Fernet AES encryption in-place after save |
+| **Method** | macOS: ScreenCaptureKit, then `screencapture`, then mss. Windows: mss. Linux: mss on X11, grim or XDG Portal on Wayland |
+| **Displays** | One grab per display per tick (`CAPTURE_ALL_MONITORS`, on by default) |
+| **Timing** | Acts about every 5 s. A change grab if 10 s passed since the last saved frame. A periodic grab every `CAPTURE_INTERVAL` (default 40 s) |
+| **Event-driven** | With UI events on: a grab right after an app switch, click, Enter in a text field or page change |
+| **Deduplication** | pHash per display (`capture/dedup.py`). Hamming distance 8 or less is a duplicate: the JPEG is deleted, no row is written |
+| **Window info** | App name and window title per display |
+| **A11y text and URL** | Focused display only, read right after the grab. Dropped if the focused window changed in between |
+| **Privacy** | Blocked apps are not grabbed. Heavy apps pause the tick. Window titles go through the sensitive-data filter |
+| **Output** | JPEG (`SCREENSHOT_QUALITY`, default 70) → `~/.screenmind/screenshots/{date}/{time}.jpg`, plus an `activities` row with `status='pending'` |
+| **Encryption** | Optional Fernet encryption in place after save |
 
 ```
-Capture Loop:
-┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────────┐
-│ mss grab  │──▶│ pHash    │──▶│ A11y text│──▶│ Queue + DB   │
-│ (5s poll) │   │ dedup    │   │ extract  │   │ insert       │
-│ (40s max) │   │          │   │          │   │              │
-└──────────┘    └──────────┘   └──────────┘   └──────────────┘
-                    │ duplicate?
-                    └──▶ skip + delete file
+Capture tick (per display):
+┌──────────┐   ┌──────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────┐
+│ app +    │──▶│ grab +   │──▶│ pHash dedup  │──▶│ a11y text +  │──▶│ DB row + │
+│ title    │   │ JPEG     │   │              │   │ URL (focused)│   │ queue    │
+└──────────┘   └──────────┘   └──────┬───────┘   └──────────────┘   └──────────┘
+                                     │ duplicate?
+                                     └──▶ delete file, stop
 ```
 
-### 3.2 Analysis Worker — Per-App pHash Cache (3-Tier)
+### 3.2 Analysis Worker: Per-App Cache (3 Tiers)
 
-The key optimization: ~80% of screenshots are near-identical to the previous frame for the same app. The cache avoids redundant Gemma calls.
+`workers/analysis_worker.py`. Most frames look like the last frame of the same app. The cache avoids repeat Gemma calls. It is keyed by `(app_name, window_title[:100])` and compares pHash with the last analyzed frame for that key.
 
-```
-New screenshot → compute pHash → compare with cache[(app, title)]
-                                        │
-              ┌─────────────────────────┼─────────────────────────┐
-              ▼                         ▼                         ▼
-         Diff 0-2                  Diff 3-7                  Diff 8+
-      "IDENTICAL"               "MINOR"                   "FULL"
-                                                          
-    Copy everything           Re-run OCR only          Full pipeline:
-    from cache                Reuse Gemma analysis     OCR → Gemma → Layout
-    ~0ms                      Reuse layout regions     → Embed → Store
-                              ~3-10s                   ~12-76s
-```
+| Tier | When | What runs |
+|---|---|---|
+| Identical | Distance 3 or less | Nothing. Copy the cached analysis. |
+| Minor | Distance 4-10, cache younger than 240 s (chat apps) or 420 s (others) | OCR and layout text. Reuse Gemma's analysis and layout regions. |
+| Full | Anything else | Everything |
 
-| Tier | When | What Runs | Time |
-|---|---|---|---|
-| Identical (≤2) | Cursor blink, clock tick | Nothing — copy cache | ~0ms |
-| Minor (3-7) | Typing, scrolling | OCR + text organization | ~3-10s |
-| Full (8+) | App switch, new page | Everything | 12-76s |
+Cache: LRU `OrderedDict`, at most 30 entries.
 
-Cache: LRU OrderedDict, max 30 entries, keyed by `(app_name, window_title[:100])`.
+Other rules (see [capture.md, section 4.9](docs/architecture/capture.md#49-analysis)):
 
-### 3.3 Gemma 4 — Three Analysis Modes
+- A frame with no app, no title and under 20 chars of real text is stored as `idle` without Gemma.
+- A frame older than 180 s when its turn comes is marked `skipped`. Its a11y text and URL are kept. The idle backfill analyzes `pending`, `skipped` and `failed` rows from today later.
+- GPU out-of-memory errors are retried after a delay. On repeated failure the frame is re-queued.
 
-| Mode | Method | Time | Layout Source |
-|---|---|---|---|
-| **Accurate** (merged) | Single call WITH thinking | ~76s | Gemma detects regions |
-| **Balanced** | Analysis-only WITH thinking | ~40s | OCR bounding box clustering |
-| **Fast** | No-thinking prefill trick | ~12s | OCR bounding box clustering |
+### 3.3 Gemma 4: Three Analysis Modes
 
-**Accurate mode:** One prompt asks for both layout regions (coordinates) and activity analysis. Gemma uses its thinking budget to reason about spatial boundaries.
+`engine/analyzer.py`. Times are from a GTX 1650 (4GB VRAM).
 
-**Balanced mode:** Same analysis-only prompt as fast, but allows Gemma to think naturally. Produces richer `scene_description` and `activity_summary` than fast, without the layout overhead. Layout computed from OCR box positions.
+| Mode | `ANALYSIS_MODE` | Method | Time | Layout source |
+|---|---|---|---|---|
+| **Fast** (default) | `fast` | No thinking (prefilled empty think block) | ~12s | OCR box clustering |
+| **Balanced** | `balanced` | Analysis-only prompt with thinking | ~40s | OCR box clustering |
+| **Accurate** | `merged` | One call with thinking for layout and analysis | ~76s | Gemma's regions |
 
-**Fast mode:** Pre-fills the `<think>\n</think>\n` block in the assistant message, forcing Gemma to skip reasoning and output immediately. Layout computed from OCR box positions.
+What goes into one call: the screenshot (at most 768 px on the long side), the OS app name, the window title, the URLs, the screen text as a hint, and the recorded user actions before the frame.
 
-### 3.4 Layout Analyzer — Spatial OCR Organization
+`analyzer.py` also reconciles the app name. It combines the OS app name, the window title and Gemma's guess into one `app_name` and category.
 
-Transforms raw OCR boxes into structured, section-labeled text:
+### 3.4 Layout Analyzer
+
+`engine/layout_analyzer.py` turns raw OCR boxes into text grouped by screen region:
 
 ```
-Input: 200 OCR boxes with (x, y, width, height, text, confidence)
-       + Layout regions [{"name": "nav_sidebar", "x_start": 0.0, "x_end": 0.15, ...}]
+Input: OCR boxes with (x, y, width, height, text, confidence)
+       + layout regions [{"name": "nav_sidebar", "x_start": 0.0, "x_end": 0.15, ...}]
 
 Process:
   1. Sort regions narrow-first (sidebar before main content)
-  2. Classify each OCR box into a region by center-point
-  3. Within chat regions: detect timestamps → attribute messages to senders
-  4. Within other regions: group by Y-proximity (25px) into visual lines
+  2. Put each OCR box into a region by its center point
+  3. In chat-like regions: detect timestamps and attribute messages to senders
+  4. In other regions: group by Y position (25px) into lines
 
-Output:
+Output (organized_text):
   [NAV SIDEBAR]
   Home | Messages | Settings
 
   [CHAT MESSAGES]
   Alice: Hey, did you push the fix? | What's the status?
   Bob: Just merged it | Tests passing now
-
-  [PROFILE PANEL]
-  Alice | Online | Member since 2024
 ```
 
-This organized text is what gets sent to chat as context — not raw OCR dumps.
+### 3.5 UI Events
 
-### 3.5 Chat — Text-First RAG with Vision Fallback
+`capture/ui_events/`. macOS and Windows only. Clicks and app switches are on by default. Typed text, clipboard and window focus are opt-in. Password fields are never read.
 
 ```
-User question
+OS hook thread → queue → enricher thread → ui_events table
+                                  └──▶ CaptureWorker.request_capture()
+```
+
+Events before a frame are linked to it in `activities.user_actions` and sent to Gemma. Details: [capture.md, section 4.7](docs/architecture/capture.md#47-ui-events).
+
+### 3.6 Audio Worker: Calls
+
+`workers/audio_worker.py` and `workers/call_detection.py`. Calls are always tracked. Transcription is off by default (`MEETING_TRANSCRIPTION=false`).
+
+```
+Detection (own thread, every 5 s, also while capture is paused):
+  visible windows + apps using the mic (CoreAudio, macOS)
       │
       ▼
-┌─────────────────────┐
-│ 1. Extract keywords │  Remove stopwords, keep meaningful terms
-│ 2. Check intent     │  Timeline signals? (screen, discord, yesterday...)
-└──────────┬──────────┘
-           │
-     Has timeline intent?
-     ┌─────┴─────┐
-     NO          YES
-     │            │
-     ▼            ▼
-  Casual      ┌──────────────┐
-  chatbot     │ FTS5 probe   │  Keywords match any activity?
-  mode        └──────┬───────┘
-                     │
-               ┌─────┴─────┐
-               NO          YES
-               │            │
-               ▼            ▼
-            Casual     ┌──────────────────┐
-            mode       │ Score & rank     │  OCR hits, scene hits, app hits
-                       │ top 5 activities │
-                       └──────┬───────────┘
-                              │
-                              ▼
-                       ┌──────────────────┐
-                       │ Has text?        │
-                       ├─ YES: text mode  │  Send organized_text as context
-                       └─ NO: vision mode │  Send screenshot image to Gemma
-                       
-GPU Priority: Chat cancels in-flight analysis → GPU freed in <1s → analysis re-queued at front
-```
-
-### 3.6 Audio Worker — Meeting Transcription
-
-```
-Meeting Detection:
-  CaptureWorker (every 5s) → check foreground app → meeting app keyword match?
+  match_call() rules for MEETING_APPS (zoom, teams, meet, webex, slack, discord)
       │
-      YES → Audio probe (1s sample) → voice detected? (RMS > 0.015)
-      │         │
-      │    2 consecutive probes confirm → START RECORDING
+      ├── 2 detections in a row → meetings row (app, title, room URL)
+      └── not seen for 120 s    → call ends
+
+Transcription (optional, needs a model with audio):
+  sounddevice: mic + loopback device if found, 16 kHz, 15 s chunks
       │
-  Recording Loop (15s chunks):
-      │
-      ├── Chunk → WAV bytes → llm_client.transcribe_audio() → transcript text
-      │
-      └── Stop signals:
-            • 3 consecutive silent chunks (45s silence)
-            • Meeting process no longer alive (30s debounce)
-            • 5-min hard timeout (browser-based meetings)
+      └── each chunk → llm_client.transcribe_audio() → transcript
 
-  On Stop:
-      │
-      ▼
-  Map-Reduce Summarization:
-      Short (≤4000 chars): Single Gemma call → structured summary
-      Long (>4000 chars):  Split into ~3000 char chunks
-                           → Summarize each chunk
-                           → Combine into final summary
-                           (TOPICS / DECISIONS / ACTION ITEMS)
+On call end (with a transcript):
+  Short (≤4000 chars): one Gemma call → summary
+  Long (>4000 chars):  ~3000-char chunks → summary per chunk → combined summary
 ```
 
-Gemma 4's encoder-free architecture handles audio natively across all model sizes (E2B, E4B, 12B). No Whisper dependency. Voice memos are always saved to DB even if transcription fails — audio preserved for playback.
+Gemma 4 handles audio with its own encoder. There is no Whisper dependency. Details: [capture.md, section 4.8](docs/architecture/capture.md#48-calls-and-meetings).
 
-### 3.7 Agent System
+### 3.7 Inference
 
-```
-~/.screenmind/agents/
-├── daily-journal.md       ← Markdown Agent (Gemma-powered)
-├── focus-report.md        ← Markdown Agent
-├── meeting-actions.md     ← Markdown Agent
-├── code-changelog.md      ← Markdown Agent
-└── my-tracker.py          ← Python Plugin (SDK)
-```
+llama-server runs with one slot (`--parallel 1`). Analysis, call transcription and call summaries share it and run one after another. `engine/model_manager.py` starts and stops the server, downloads models and switches between them. It also adopts a llama-server that is already running.
 
-**Markdown Agents:**
-```
-Frontmatter → parse schedule, data selectors, output destinations
-    │
-    ▼
-Data injection → fetch timeline/apps/urls/meetings/mood from DB
-    │
-    ▼
-Build prompt → agent prompt + injected data (auto-scaled to context window)
-    │
-    ▼
-Gemma 4 → generate response
-    │
-    ▼
-Route output → local file / Obsidian vault / webhook (Slack, Discord)
-```
+### 3.8 Export
 
-**Python Plugins:**
-```python
-# Full SDK: get_activities(), get_urls_visited(), get_meetings(),
-#           save_state(), load_state(), ask_gemma()
-# GPU-safe: ask_gemma() polls is_inference_active() with 60s timeout
-# State isolation: per-agent JSON file in agents/state/
-```
+`screenmind/export/` and `api/routes/export.py`. `GET /api/export` builds a zip for a user and a date range: one folder per day, one text file per work session (split by idle gaps), JSONL copies and the screenshots. Only `status='ok'` rows go out. URLs and text are filtered again on the way. The route accepts only local clients. The dashboard has a Data Export card in Settings → Storage.
 
-### 3.8 Inference Priority & Cancellation
-
-```
-                    ┌─────────────────────┐
-                    │   llama-server      │
-                    │   (single slot)     │
-                    │   --parallel 1      │
-                    └──────────┬──────────┘
-                               │
-              ┌────────────────┼────────────────┐
-              │                │                │
-         Analysis          Chat            Audio
-         (background)      (user-facing)   (meeting)
-              │                │
-              │    User sends chat message
-              │         │
-              │         ▼
-              │    cancel_current_inference()
-              │         │
-              │         ├── Set _cancel_event flag
-              │         └── Close httpx.Client → llama-server frees slot
-              │
-              ▼
-         InferenceCancelled raised
-              │
-              └── Re-queue at FRONT of priority deque
-                  (processed before new queue items)
-```
+Format: [docs/export-format.md](docs/export-format.md).
 
 ---
 
 ## 4. Storage Layer
 
-### SQLite Schema (WAL mode, FTS5)
+### SQLite schema (WAL mode, FTS5), version v11
+
+Migrations live in `Database._init_db()` (`storage/database.py`). Version = list index + 1. The latest is **v11**. It dropped `activities.embedding`, `activities.bookmarked`, `dev_contexts` and `daily_summaries`.
 
 ```sql
 activities (
     id, timestamp, screenshot_path, window_title, detected_app,
-    bookmarked, app_name, category, summary, details, visible_text,
-    mood, confidence, embedding (BLOB), ocr_text, ocr_boxes (JSON),
+    app_name, category, summary, details, visible_text,
+    mood, confidence, ocr_text, ocr_boxes (JSON),
     scene_description, organized_text, analyzed, analysis_error,
-    analysis_method, active_url, created_at
+    analysis_method, active_url, status, user_actions, created_at
 )
 
-dev_contexts (
-    id, activity_id → activities(id), repo_name, branch,
-    last_commit, changed_files (JSON), insertions, deletions
+ui_events (
+    id, timestamp, type, app_name, window_title, element_role,
+    element_name, element_value, text, x, y,
+    activity_id → activities(id) ON DELETE SET NULL, url
 )
 
 meetings (
     id, start_time, end_time, app_name, duration_minutes,
-    transcript, summary, created_at
-)
-
-daily_summaries (
-    id, date (UNIQUE), summary, standup, total_activities,
-    category_breakdown (JSON), top_repos (JSON), productive_hours,
-    created_at
+    transcript, summary, window_title, url, created_at
 )
 
 -- FTS5 virtual table for keyword search
-activities_fts (summary, details, ocr_text, app_name, scene_description, organized_text)
+activities_fts (summary, details, ocr_text, app_name, scene_description,
+                organized_text, user_actions)
 
--- Indexes
-idx_activities_timestamp, idx_activities_category, idx_activities_app,
-idx_activities_bookmarked, idx_activities_analyzed,
-idx_dev_repo, idx_dev_branch, idx_dev_activity
+schema_version (version)
 ```
 
-### Embedding Storage
+`activities.status` is one of `pending`, `ok`, `skipped`, `failed`, `dead`. Column-by-migration details are in [capture.md, section 5](docs/architecture/capture.md#5-storage).
 
-| Property | Detail |
-|---|---|
-| **Model** | all-MiniLM-L6-v2 (80MB, CPU) |
-| **Dimensions** | 384 floats |
-| **Storage** | BLOB column in activities table (`struct.pack`) |
-| **Search** | Load top 500 embeddings → numpy cosine similarity |
-| **What's embedded** | summary + scene_description + details + app_name + category + visible_text |
-
-### Search: Hybrid (Semantic + Keyword)
+### Search: keyword only
 
 ```
-User query: "debugging auth"
+User query: "auth error"
       │
-      ├──▶ MiniLM embed → cosine similarity vs stored vectors → ranked results
+      ├──▶ FTS5 MATCH on activities_fts (status='ok' rows) → ranked matches
       │
-      ├──▶ FTS5 MATCH "debugging OR auth" → keyword matches
-      │
-      └──▶ Meeting transcript LIKE search → meeting results
-      
-      Merge + deduplicate → sort by relevance score → return top N
+      └──▶ LIKE search on meetings.transcript and meetings.summary
+
+      Merge → return top N
 ```
+
+The dashboard highlights matching OCR boxes on the screenshot (`/api/screenshot/{id}/highlight`).
 
 ---
 
@@ -386,36 +272,40 @@ User query: "debugging auth"
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Privacy Pipeline                       │
+│                    Privacy Pipeline                     │
 │                                                         │
-│  Capture Time:                                          │
-│    • App blocklist check (skip entirely)                │
+│  Capture time:                                          │
+│    • Blocked apps (not grabbed, no UI events)           │
 │    • Heavy app auto-pause (games, video editors)        │
-│    • Incognito mode (manual pause, no trace)            │
+│    • Incognito mode (manual pause)                      │
+│    • Password fields never read                         │
+│    • URLs cleaned by sanitize_url()                     │
 │                                                         │
-│  Before AI + Storage:                                   │
-│    • Sensitive data filter (regex-based redaction)       │
+│  Before Gemma and storage:                              │
+│    • Sensitive-data filter (regex redaction)            │
 │      - Credit cards → [REDACTED:card]                   │
 │      - SSNs → [REDACTED:ssn]                            │
-│      - API keys (OpenAI, GitHub, AWS, Slack, Google)    │
-│      - Passwords (key=value patterns)                   │
+│      - API keys, JWTs                                   │
+│      - Passwords (key=value and similar patterns)       │
+│    • The image itself is not redacted                   │
 │                                                         │
-│  At Rest:                                               │
-│    • Optional Fernet AES encryption (screenshots)       │
-│    • Key stored in OS keyring (Windows Credential Mgr)  │
-│    • Magic header identifies encrypted files            │
-│    • Transparent read: encrypted/unencrypted handled    │
+│  At rest:                                               │
+│    • Optional Fernet encryption (screenshots only)      │
+│    • Key in the OS keyring, plus a 0600 file copy       │
+│    • The SQLite DB is not encrypted                     │
 │                                                         │
-│  Access Control:                                        │
-│    • Dashboard PIN lock (SHA-256 hashed)                │
-│    • Session cookie with configurable timeout           │
-│    • Auth middleware blocks all API without session      │
+│  Access:                                                │
+│    • API binds to 127.0.0.1 only (0.0.0.0 falls back)   │
+│    • No auth on the API                                 │
+│    • Export and shutdown accept only local clients      │
 │                                                         │
-│  Data Retention:                                        │
-│    • Auto-delete activities + screenshots older than N  │
-│    • Configurable: 1-365 days (default: 7)             │
+│  Retention:                                             │
+│    • Delete data older than RETENTION_DAYS at startup   │
+│    • 0-365 days (default 7, 0 = keep forever)           │
 └─────────────────────────────────────────────────────────┘
 ```
+
+Filter details: [capture.md, section 7](docs/architecture/capture.md#7-privacy-filters).
 
 ---
 
@@ -425,70 +315,37 @@ User query: "debugging auth"
 platform_support/
 ├── base.py          ← PlatformAdapter ABC
 ├── windows.py       ← Win32 ctypes + UI Automation
-├── macos.py         ← AppKit + AXUIElement (pyobjc)
+├── macos.py         ← Quartz + AXUIElement (pyobjc)
+├── macos_audio.py   ← apps using the mic (CoreAudio)
 └── linux.py         ← xdotool/xprop + AT-SPI
 
-Capabilities per platform:
-┌──────────────┬─────────────────┬──────────────────┬─────────────────┐
-│ Feature      │ Windows         │ macOS            │ Linux           │
-├──────────────┼─────────────────┼──────────────────┼─────────────────┤
-│ Window title │ ctypes user32   │ AppKit+osascript │ xdotool+xprop   │
-│ App name     │ ctypes kernel32 │ NSWorkspace      │ xdotool+/proc   │
-│ A11y text    │ UI Automation   │ AXUIElement      │ AT-SPI          │
-│ Screenshot   │ mss             │ mss              │ mss             │
-│ Hotkeys      │ keyboard lib    │ keyboard lib     │ keyboard lib    │
-└──────────────┴─────────────────┴──────────────────┴─────────────────┘
+┌──────────────┬──────────────────────┬──────────────────────┬─────────────────┐
+│ Feature      │ Windows              │ macOS                │ Linux           │
+├──────────────┼──────────────────────┼──────────────────────┼─────────────────┤
+│ Window title │ GetWindowTextW       │ Quartz kCGWindowName │ xdotool+xprop   │
+│ App name     │ process image name   │ kCGWindowOwnerName   │ xdotool+/proc   │
+│ A11y text    │ UI Automation        │ AXUIElement          │ AT-SPI          │
+│ Browser URL  │ UIA Document value   │ AXURL                │ none            │
+│ Screenshot   │ mss                  │ SCK / screencapture  │ mss / grim /    │
+│              │                      │ / mss                │ XDG Portal      │
+│ UI events    │ low-level hooks+UIA  │ CGEventTap + AX      │ none            │
+│ Mic users    │ none                 │ CoreAudio            │ none            │
+└──────────────┴──────────────────────┴──────────────────────┴─────────────────┘
 ```
+
+Wayland: window info comes from compositor IPC (Sway, Hyprland, Niri). Permissions per OS are in [capture.md, section 6](docs/architecture/capture.md#6-permissions).
 
 ---
 
-## 7. Integrations & Extensibility
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Output Channels                           │
-│                                                                 │
-│  ┌─────────┐  ┌─────────┐  ┌──────────┐  ┌────────────────┐  │
-│  │Obsidian │  │ Notion  │  │ Webhooks │  │ MCP Server     │  │
-│  │ Export  │  │ Export  │  │ (HTTP)   │  │ (stdio)        │  │
-│  │         │  │         │  │          │  │                │  │
-│  │ .md to  │  │ API push│  │ Slack    │  │ Claude Desktop │  │
-│  │ vault   │  │ to DB   │  │ Discord  │  │ Cursor         │  │
-│  │         │  │         │  │ IFTTT    │  │ VS Code        │  │
-│  └─────────┘  └─────────┘  │ Zapier   │  │                │  │
-│                             │ Custom   │  │ 8 tools:       │  │
-│                             │          │  │ search, recent │  │
-│                             │ HMAC sig │  │ by_time, stats │  │
-│                             │ Retry x1 │  │ summary, audio │  │
-│                             │ Log last │  │ capture, image │  │
-│                             │ 20       │  │                │  │
-│                             └──────────┘  └────────────────┘  │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │                       Auto-bookmark                       │  │
-│  │  • Auto-bookmark (keyword triggers: git push, deploy)    │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 8. Performance Characteristics
+## 7. Performance Characteristics
 
 | Metric | Value | Notes |
 |---|---|---|
-| Screenshot capture | ~50ms | mss grab + JPEG compress |
-| pHash computation | ~15ms | imagehash.phash() |
-| OCR extraction | 3-10s | EasyOCR on CPU (GPU available but not needed) |
-| Gemma 4 (accurate) | ~76s | Single call with thinking, GTX 1650 4GB |
+| Gemma 4 (accurate) | ~76s | Thinking + layout, GTX 1650 4GB |
 | Gemma 4 (balanced) | ~40s | Thinking, layout via OCR clustering |
-| Gemma 4 (fast) | ~12s | No-thinking prefill, same GPU |
-| Embedding generation | ~50ms | MiniLM on CPU |
+| Gemma 4 (fast) | ~12s | No thinking, same GPU |
 | Cache hit (identical) | ~0ms | Copy from memory |
-| Cache hit (minor) | ~3-10s | OCR only, skip Gemma |
-| Chat response | ~5-15s | Text mode. Vision mode: ~15-30s |
-| Disk per day | ~80-150MB | Screenshots + DB (8hr active use, 40s interval) |
-| RAM usage | ~1.5-2GB | Python + EasyOCR + MiniLM (Gemma in llama-server) |
+| Cache hit (minor) | OCR time only | Gemma skipped |
 | VRAM usage | ~3-4GB | Gemma 4 E2B Q4_0 (default). E4B ~6GB, 12B ~10GB |
 
 ### Resource Management
@@ -498,90 +355,75 @@ Capabilities per platform:
 | Performance Mode: minimal | 0 GPU layers (CPU inference, slow but frees VRAM) |
 | Performance Mode: balanced | 15 GPU layers (default) |
 | Performance Mode: maximum | 99 GPU layers (all on GPU) |
-| Deferred Analysis | Queue captures, analyze only when 60s idle |
-| Auto-Pause Heavy Apps | Skip capture when games/editors in foreground |
+| Deferred Analysis | Queue captures, analyze only when idle (60s with no new captures) |
+| Auto-Pause Heavy Apps | Skip capture when games or editors are in front |
 | KV Cache Quantization | Saves ~200MB VRAM, adds ~10s per inference |
-| Flash Attention | Faster + less VRAM (enabled by default) |
+| Flash Attention | Faster and less VRAM (on by default) |
 
 ---
 
-## 9. End-to-End Data Flow
+## 8. End-to-End Data Flow
 
 ```
-┌─────────┐     ┌─────────┐     ┌──────────────────────────────────────┐
-│  User   │     │ Screen  │     │         Analysis Pipeline            │
-│  works  │────▶│ changes │────▶│                                      │
-└─────────┘     └─────────┘     │  1. A11y text (at capture time)      │
-                                │  2. pHash cache check                │
-                                │     ├─ identical → done (0ms)        │
-                                │     ├─ minor → OCR only (3-10s)      │
-                                │     └─ full → continue               │
-                                │  3. EasyOCR extraction               │
-                                │  4. Sensitive data redaction          │
-                                │  5. URL extraction                   │
-                                │  6. Gemma 4 analysis + layout        │
-                                │  7. Organize text by regions         │
-                                │  8. Git context (if coding)          │
-                                │  9. MiniLM embedding                 │
-                                │ 10. Store all to SQLite              │
-                                │ 11. Auto-bookmark check              │
-                                └──────────────────────────────────────┘
-                                                 │
-                                                 ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                         User Queries                                  │
-│                                                                      │
-│  Timeline → browse by date                                           │
-│  Search → semantic + keyword hybrid                                  │
-│  Chat → RAG (text-first, vision fallback, conversation history)      │
-│  Analytics → category/app/hour aggregations                          │
-│  Rewind → timelapse playback                                         │
-│  Summary → Gemma deep reasoning over day's activities                │
-│  Agents → scheduled automations on screen data                       │
-│  MCP → external AI tools query screen history                        │
-└──────────────────────────────────────────────────────────────────────┘
+┌─────────┐   ┌──────────────────┐   ┌──────────────────────────────────────┐
+│  User   │──▶│ Capture tick     │──▶│         Analysis Pipeline            │
+│  works  │   │ (timer, change,  │   │                                      │
+└────┬────┘   │  or UI event)    │   │  1. a11y text + URL (at grab time)   │
+     │        └──────────────────┘   │  2. Per-app cache check              │
+     │                               │     ├─ identical → done              │
+     │                               │     ├─ minor → OCR only              │
+     │                               │     └─ full → continue               │
+     │                               │  3. RapidOCR (if a11y is not enough) │
+     │                               │  4. Sensitive-data redaction         │
+     │                               │  5. Gemma 4 labels (+ layout)        │
+     │                               │  6. Organize text by regions         │
+     │                               │  7. Store to SQLite, status='ok'     │
+     │                               └──────────────────────────────────────┘
+     │
+     ├──▶ UI event recorder → ui_events (+ user_actions on the next frame)
+     └──▶ Audio Worker → meetings (+ transcript and summary if on)
+                                                  │
+                                                  ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                               Readers                                    │
+│                                                                          │
+│  Timeline  → browse by date                                              │
+│  Search    → FTS5 keyword search + meeting transcripts                   │
+│  Analytics → category / app / hour aggregations                          │
+│  Meetings  → calls, transcripts, summaries                               │
+│  Export    → per-day zip for the workflows app                           │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 10. Why Gemma 4
-
-### Supported Models
+## 9. Models
 
 | Model | Variants | VRAM | Audio |
 |---|---|---|---|
-| **Gemma 4 E2B** (2B) — *default* | Q4_0 · Q8_0 · BF16 | ~4 GB | ✅ |
-| **Gemma 4 E4B** (4B) | Q4_0 · Q8_0 · BF16 | ~6 GB | ✅ |
-| **Gemma 4 12B** | IQ3_M · Q4_K_M · Q5_K_M · Q6_K · Q8_0 | ~10 GB | ❌ |
+| **Gemma 4 E2B** (2B), *default* | Q4_0 · Q8_0 · BF16 | ~4 GB | yes |
+| **Gemma 4 E4B** (4B) | Q4_0 · Q8_0 · BF16 | ~6 GB | yes |
+| **Gemma 4 12B** | IQ3_M · Q4_K_M · Q5_K_M · Q6_K · Q8_0 | ~10 GB | yes |
 
-Models are sourced from [ggml-org](https://huggingface.co/ggml-org) (official llama.cpp-compatible GGUFs) and stored in `~/.screenmind/models/`.
+GGUF files are stored in `~/.screenmind/models/`. The Model Hub downloads, switches and deletes variants from the dashboard. RapidOCR models (~15 MB) download to `~/.screenmind/models/ocr` on first use.
 
-E2B is the recommended default — it checks all the boxes:
-
-| Constraint | Why It Rules Out Alternatives |
-|---|---|
-| Must run **continuously in background** | Rules out 12B+ models on low-VRAM GPUs |
-| Must understand **screenshots natively** | Rules out text-only models |
-| Must stay **100% local** for privacy | Rules out cloud APIs (Gemini, GPT-4V) |
-| Must handle **audio natively** | Rules out models without audio encoder |
-| Must be **fast enough** for 40s cycle | E2B: 12s (fast) to 76s (accurate) |
-
-If you have more VRAM, E4B offers richer analysis. The 12B model gives the best text reasoning but lacks audio input. The Model Hub lets you download, switch, and delete variants from the dashboard.
+E2B is the default. It reads images and audio, stays local, and is small enough to run all the time on a 4GB GPU.
 
 ---
 
-## 11. Tech Stack
+## 10. Tech Stack
 
-| Layer | Technology | Why |
-|---|---|---|
-| **Vision + Audio AI** | Gemma 4 (E2B / E4B / 12B) via llama.cpp | Vision + audio + reasoning, runs locally on 4GB+ VRAM |
-| **Inference Server** | llama-server (llama.cpp) | Direct GGUF, OpenAI-compatible API, 8-12% faster than Ollama |
-| **OCR** | EasyOCR | Extracts screen text fed to Gemma as context |
-| **Embeddings** | all-MiniLM-L6-v2 | 80MB, CPU, 384-dim vectors |
-| **Backend** | FastAPI + Uvicorn | Async, auto-docs, serves dashboard |
-| **Database** | SQLite (WAL) + FTS5 | Zero-config, concurrent reads, full-text search |
-| **Capture** | mss + ctypes + UI Automation | Native capture + accessibility text |
-| **Frontend** | Vanilla JS + CSS | No build step, instant load |
-| **Platform** | Windows / macOS / Linux | Abstraction layer with OS-specific adapters |
-| **Agents** | Custom scheduler + SDK | Markdown (Gemma) + Python (code) |
-| **MCP** | mcp[cli] (stdio transport) | Claude Desktop / Cursor / VS Code |
+| Layer | Technology |
+|---|---|
+| **Labels and audio** | Gemma 4 (E2B / E4B / 12B) via llama.cpp |
+| **Inference server** | llama-server (llama.cpp), OpenAI-compatible API |
+| **OCR** | RapidOCR (PP-OCR on ONNX Runtime, CPU) |
+| **Dedup** | imagehash (pHash) |
+| **Backend** | FastAPI + Uvicorn |
+| **Database** | SQLite (WAL) + FTS5 |
+| **Capture** | ScreenCaptureKit / `screencapture` (macOS), mss, grim / XDG Portal (Wayland) |
+| **Accessibility and UI events** | AXUIElement + CGEventTap (macOS), UI Automation + low-level hooks (Windows), AT-SPI (Linux) |
+| **Audio** | sounddevice |
+| **Encryption** | cryptography (Fernet) + keyring |
+| **Frontend** | Vanilla JS + CSS, no build step |
+| **Platform** | Windows / macOS / Linux (X11 + Wayland) |
