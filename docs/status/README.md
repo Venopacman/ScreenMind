@@ -14,7 +14,7 @@ Each machine writes only its own file. So two machines never edit the same file,
 
 ## How to run
 
-Run from the repo root, with the main venv's Python. Use a normal terminal.
+Run from the repo root, with the repo's venv (`uv sync` creates it; run it after a pull that changed dependencies). Use a normal terminal. `uv run python scripts/e2e_collect.py --write-status` works too, on both OSes.
 
 macOS, from Terminal.app (not from a Claude session, see below):
 

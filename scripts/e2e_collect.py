@@ -72,8 +72,8 @@ else:
 # docs/architecture/capture.md section 8). Browser URL rows are added per
 # browser at run time with the "browser_url" gaps.
 CHECKS = [
-    ("screenshots", "Screenshots, every display", {"macos": ["G1", "G30"], "windows": []}),
-    ("grab_backend", "Screen grab backend", {"macos": ["G1", "G2", "G30"], "windows": []}),
+    ("screenshots", "Screenshots, every display", {"macos": ["G1"], "windows": []}),
+    ("grab_backend", "Screen grab backend", {"macos": ["G1", "G2"], "windows": []}),
     ("app_name", "App name", {"macos": [], "windows": []}),
     ("window_title", "Window title", {"macos": [], "windows": []}),
     ("a11y_text", "Screen text from accessibility", {"macos": ["G7", "G12"], "windows": ["G7", "G12"]}),
@@ -96,7 +96,7 @@ CHECK_ORDER = [cid for cid, _, _ in CHECKS]
 
 
 def log(msg=""):
-    print(msg, flush=True)
+    print(msg, flush=True)  # noqa: T201 (CLI output)
 
 
 def step(msg):
@@ -293,6 +293,14 @@ class Driver:
                 return True
             time.sleep(0.3)
         return False
+
+    def browser_names(self):
+        """Lowercased app names the adapter treats as browsers."""
+        if OS_KEY == "macos":
+            from screenmind.platform_support.macos import BROWSER_APPS
+            return set(BROWSER_APPS)
+        from screenmind.platform_support.windows import _BROWSER_EXES
+        return set(_BROWSER_EXES)
 
     def display_count(self):
         try:
@@ -525,19 +533,19 @@ class Scenario:
         self.file.write_text(para + "\n\n", encoding="utf-8")
 
     def _open_browser(self, browser):
-        """Open the test URL; return the app that came to the front, or None."""
+        """Open the test URL; return the browser that came to the front, or None.
+        Only known browser apps count, so a person switching apps is not taken
+        for the browser."""
+        known = self.d.browser_names()
         before = self.d.front()[0]
         self.d.open_url(TEST_URL, browser=browser)
         deadline = time.time() + 15
         while time.time() < deadline:
             time.sleep(0.5)
             app = self.d.front()[0]
-            if app and app != before:
+            if app in known and (app != before or time.time() > deadline - 12):
                 time.sleep(2)  # let the page load
                 return app
-        # Already in front before (the browser was the front app)
-        if browser and before and browser.lower().startswith(before[:4]):
-            return before
         return None
 
     def _manual_ok(self):
@@ -561,7 +569,7 @@ class Scenario:
         log("Hands off the mouse and keyboard until it says 'You can use the computer again'.")
         log("The check switches apps itself; a click of yours changes what gets captured.")
         for n in (5, 4, 3, 2, 1):
-            print(f"  starting in {n}...", end="\r", flush=True)
+            print(f"  starting in {n}...", end="\r", flush=True)  # noqa: T201
             time.sleep(1)
         log("")
 
@@ -730,6 +738,12 @@ TEXT_COLUMNS = {
 GEMMA_COLUMNS = {"summary", "details", "visible_text", "scene_description"}
 
 
+def _ui_status_text(st):
+    keys = ("backend", "running", "hook_running", "keys_tapped", "input_events",
+            "events_recorded", "skipped", "permissions", "last_error")
+    return ", ".join(f"{k}={st.get(k)}" for k in keys if k in st)
+
+
 def _rows(conn, sql, args=()):
     return [dict(r) for r in conn.execute(sql, args).fetchall()]
 
@@ -761,14 +775,13 @@ def _short(text, n=80):
     return text if len(text) <= n else text[: n - 3] + "..."
 
 
-def wait_for_editor_frame(db_path, editor_app, timeout):
-    """Wait until a frame of the scratch editor is saved. True if one is."""
+def wait_for_rows(db_path, count_sql, args, timeout):
+    """Wait until count_sql returns more than 0. True if it did."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
-            n = conn.execute("SELECT COUNT(*) FROM activities WHERE lower(detected_app) = ?",
-                             (editor_app.lower(),)).fetchone()[0]
+            n = conn.execute(count_sql, args).fetchone()[0]
             conn.close()
             if n:
                 return True
@@ -776,6 +789,12 @@ def wait_for_editor_frame(db_path, editor_app, timeout):
             pass
         time.sleep(2)
     return False
+
+
+def wait_for_editor_frame(db_path, editor_app, timeout):
+    """Wait until a frame of the scratch editor is saved. True if one is."""
+    return wait_for_rows(db_path, "SELECT COUNT(*) FROM activities WHERE lower(detected_app) = ?",
+                         (editor_app.lower(),), timeout)
 
 
 def wait_for_analysis(db_path, timeout):
@@ -815,8 +834,7 @@ def run_checks(rep: Report, sc: Scenario, inst: Instance, ui_status: dict, displ
     meetings = _rows(conn, "SELECT * FROM meetings WHERE app_name IS NOT ?", (SEED_APP,))
     editor_rows = [a for a in acts if (a["detected_app"] or "").lower() == editor]
     ui_running = bool(ui_status.get("running"))
-    ui_why = (f"recorder running={ui_status.get('running')}, permissions={ui_status.get('permissions')}, "
-              f"last_error={ui_status.get('last_error')}")
+    ui_why = _ui_status_text(ui_status)
 
     # Screenshots per display
     shots = [p for p in (inst.data_dir / "screenshots").rglob("*.jpg") if p != seed_shot]
@@ -1187,8 +1205,9 @@ def write_placeholder(os_key: str):
             "state": "not run yet", "date": "", "command": cmd}
     notes = [
         "Nobody has run the check on this machine yet.",
-        "First `git pull origin custom`. Then run the command above from the repo root, in a normal "
-        "terminal. It takes 3 to 5 minutes.",
+        "First `git pull origin custom` and `uv sync` (the project moved from pip to uv). Then run "
+        "the command above from the repo root, in a normal terminal. It takes 3 to 5 minutes. "
+        "Hands off the mouse and keyboard until it says you can use the computer again.",
         "Gemma analysis needs llama-server. If it is not running, ScreenMind starts its own and "
         "stops it at the end. Without llama-server the Analysis row is a FAIL; the rest still works.",
         "Then commit this file and `summary.md` (`git add docs/status`), and push to `custom`.",
@@ -1218,7 +1237,8 @@ def parse_args():
     ap.add_argument("--manual", action="store_true", help="do the click and typing by hand (macOS)")
     ap.add_argument("--no-input", action="store_true", help="skip all click, typing and password steps")
     ap.add_argument("--manual-seconds", type=int, default=30, help="time for the by-hand typing step")
-    ap.add_argument("--dwell", type=float, default=6, help="seconds to stay on each app")
+    ap.add_argument("--dwell", type=float, default=12,
+                    help="seconds to stay on each app (more than the 10s capture interval)")
     ap.add_argument("--settle", type=float, default=12, help="seconds to wait after the scenario")
     ap.add_argument("--analysis-timeout", type=float, default=240,
                     help="max seconds to wait for analysis of the captured frames")
@@ -1291,8 +1311,13 @@ def _run(args, started, data_dir):
         step("Starting ScreenMind")
         inst.start()
         inst.wait_ready()
-        step("ScreenMind is up")
-        time.sleep(3)
+        step("ScreenMind is up; waiting for its first frame")
+        # Startup grabs (and a possible SCK timeout) must finish first, or the
+        # browser's app switch is merged into them and never gets its own frame
+        if not wait_for_rows(data_dir / "screenmind.db", "SELECT COUNT(*) FROM activities "
+                             "WHERE detected_app IS NOT ?", (SEED_APP,), 45):
+            log("  No frame after 45s. Screen capture may be broken; going on anyway.")
+        time.sleep(4)
         try:
             ui_status = inst.api("/api/ui-events/status")
         except Exception as e:
@@ -1368,8 +1393,7 @@ def _run(args, started, data_dir):
             "permissions": perm_txt,
             "displays": str(displays),
             "input_mode": sc.input_mode,
-            "ui_events": f"backend={ui_status.get('backend')}, running={ui_status.get('running')}, "
-                         f"last_error={ui_status.get('last_error')}",
+            "ui_events": _ui_status_text(ui_status),
             "duration": f"{time.time() - started:.0f}s",
             "command": " ".join(["python", "scripts/e2e_collect.py"] + sys.argv[1:]),
         }

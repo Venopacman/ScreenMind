@@ -260,7 +260,7 @@ Read by `A11yExtractor.extract_text()` → `adapter().extract_a11y_text()`, at g
 
 **Linux:** AT-SPI via `pyatspi`.
 
-**How analysis uses it** (`_a11y_is_content()`): a11y text counts as real content when it has at least 200 chars after removing the title and the app name, and is not mostly repeats. On macOS and Linux it also drops English chrome markers and menu-word lines. Windows skips that check, because its walker already left chrome out by element type, in any UI language. Then it replaces OCR. If it is chrome only, OCR runs and a11y text up to 500 chars is put in front of the OCR text. `analysis_method` records the path (`a11y`, `ocr`, `a11y+ocr`, plus `+layout`).
+**How analysis uses it** (`_a11y_is_content()`): a11y text counts as real content when it has at least 200 chars after removing the title and the app name, and is not mostly repeats. On macOS and Linux it also drops English chrome markers and menu-word lines. Windows skips that check, because its walker already left chrome out by element type, in any UI language. Then it replaces OCR. If it is chrome only, OCR runs and a11y text up to 500 chars is put in front of the OCR text. The path (`a11y`, `ocr`, `a11y+ocr`, plus `+layout`) is only logged (`[text: N chars via ...]`). `analysis_method` stores the analysis tier instead (`full:fast`, `cache:minor`, `cache:identical`, `backfill:...`, `skipped`, `rule:empty_screen`). Only OCR writes `ocr_boxes`, so a row with `ocr_boxes` set went through OCR.
 
 The a11y text has no column of its own. It ends up in `activities.ocr_text` (G12).
 
@@ -463,7 +463,7 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G7 | a11y text and the browser URL are read only for the focused display. Other displays get OCR only and no URL, even though macOS `get_window_url()` could read it. | both | new |
 | G8 | Chrome ignores `AXManualAccessibility`. After a reboot, no page tree: no URL and no a11y page text from Chrome. | macOS | [ui-events.md](../backlog/ui-events.md) "Chrome shows its page tree only after..." |
 | G9 | Firefox URL and page text are untested. | macOS | [ui-events.md](../backlog/ui-events.md) "Firefox: probably no URL on macOS" |
-| G12 | a11y text has no column. It is merged into `ocr_text`; only `analysis_method` tells the source. | both | new |
+| G12 | a11y text has no column. It is merged into `ocr_text`, and the source is not stored: `analysis_method` holds the analysis tier (`full:fast`), not `a11y`/`ocr`. Only `ocr_boxes` being set shows that OCR ran. | both | new |
 | G14 | OCR reads one script per frame. With `en,es,de,fr,ru` the Cyrillic model reads all Latin text, and accents may suffer. | both | new |
 | G15 | Gemma gets the screen text as an alphabetically sorted bag of unique words (8,000 chars) and a 768 px image. Line order and structure are lost. | both | [questionnaire-data-source.md](../backlog/questionnaire-data-source.md) "Slack summaries are generic" (related) |
 | G16 | No `get_window_url()` on Windows, so `meetings.url` is always NULL there. | Windows | new |
