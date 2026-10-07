@@ -5,21 +5,46 @@ How to read it: [README.md](README.md).
 
 | | |
 |---|---|
-| State | not run yet |
-| Command | `uv run python scripts\e2e_collect.py --write-status` |
+| State | ran from a Claude session |
+| Date | 2026-10-07 18:21 |
+| Machine | DESKTOP-5RD9NNJ |
+| OS | Windows 11 build 10.0.26200 (AMD64) |
+| Git | claude/win-data-quality-03db0d 49f56cd |
+| Python | 3.14.8 |
+| Started from | Claude Code session |
+| Permissions | no_prompts_needed=yes, running_as_admin=no; ScreenMind sees: input_monitoring=yes, accessibility=yes |
+| Displays | 1 |
+| Input | none |
+| UI event recorder | backend=windows, running=True, hook_running=True, keys_tapped=None, input_events=0, events_recorded=10, skipped={}, permissions={'input_monitoring': True, 'accessibility': True, 'all_granted': True}, last_error=None |
+| Run time | 307s |
+| Command | `python scripts/e2e_collect.py --write-status --no-input --browsers chrome,msedge,firefox --analysis-timeout 480` |
 
 ## Results
 
-No results yet.
+| Data point | Result | Evidence | Known gaps |
+|---|---|---|---|
+| Screenshots, every display | **PASS** | 1 display(s); frames saved: display 1: 7; 7 activity rows |  |
+| Screen grab backend | **PASS** | used: mss; expected mss |  |
+| App name | **PASS** | detected_app=Notepad on 1 rows |  |
+| Window title | **PASS** | window_title='screenmind-e2e-ru4k0n.txt - Notepad' on 1 rows |  |
+| Screen text from accessibility | **PASS** | marker found without OCR on 1 editor rows; text length 718 chars | [G7](../architecture/capture.md#8-gaps), [G12](../architecture/capture.md#8-gaps) |
+| OCR text | **PASS** | OCR boxes on 1 of 7 analyzed rows (longest text 106 chars) | [G14](../architecture/capture.md#8-gaps) |
+| Browser URL (chrome) | **PASS** | active_url=https://example.com/ on 2 rows; ui_events.url on 3 events | [G7](../architecture/capture.md#8-gaps) |
+| Browser URL (msedge) | **PASS** | active_url=https://example.com/ on 1 rows; ui_events.url on 1 events | [G7](../architecture/capture.md#8-gaps) |
+| Browser URL (firefox) | **PASS** | active_url=https://example.com/ on 1 rows; ui_events.url on 1 events | [G7](../architecture/capture.md#8-gaps) |
+| UI event: click with element role/name | **SKIP** | input step did not run (mode: none) | [G20](../architecture/capture.md#8-gaps), [G25](../architecture/capture.md#8-gaps) |
+| UI event: app switch | **PASS** | 4 app switches, 1 to notepad | [G20](../architecture/capture.md#8-gaps) |
+| UI event: typed text | **SKIP** | input step did not run (mode: none) | [G20](../architecture/capture.md#8-gaps) |
+| UI event: clipboard | **PASS** | clipboard text='e2e clipboard ru4k0n' in Notepad | [G20](../architecture/capture.md#8-gaps) |
+| UI events linked to frames | **PASS** | user_actions set on 6 of 7 rows; 1 mention the test | [G21](../architecture/capture.md#8-gaps) |
+| Typed secret is redacted | **SKIP** | input step did not run (mode: none) |  |
+| Password field is not stored | **SKIP** | password box step did not run |  |
+| Call detection | **SKIP** | no call was active during the run | [G16](../architecture/capture.md#8-gaps), [G17](../architecture/capture.md#8-gaps) |
+| Analysis (Gemma) | **PASS** | status ok: 7; sample (chrome): category=browsing, summary 66 chars; summary set on 7 of 7 ok rows | [G15](../architecture/capture.md#8-gaps) |
+| Retention cleanup at startup | **PASS** | 30-day-old activity, ui_event, meeting and JPEG were deleted at startup | [G24](../architecture/capture.md#8-gaps) |
 
 ## Notes
 
-- Nobody has run the check on this machine yet.
-- Once per machine: install uv (https://docs.astral.sh/uv/). It installs Python 3.14 itself (`uv python install 3.14` if you want it up front).
-- Then `git pull origin custom` and `uv sync` in the repo root. Run the command above from there, in a normal terminal. It takes 3 to 5 minutes. Hands off the mouse and keyboard until it says you can use the computer again.
-- Gemma analysis needs llama-server. If it is not running, ScreenMind starts its own and stops it at the end. Without llama-server the Analysis row is a FAIL; the rest still works.
-- Then commit this file and `summary.md` (`git add docs/status`), and push to `custom`.
-- Windows ignores injected input, so the script stops twice and asks you to click and type: once in Notepad, once in a small password box. It prints what to type. Read it, press Enter, then do it.
-- Optional: `--browsers chrome,msedge,firefox` also tests those browsers.
+- Input steps were skipped (--no-input).
 
-<!-- e2e-results {"meta": {"os_label": "Windows", "state": "not run yet", "date": "", "command": "uv run python scripts\\e2e_collect.py --write-status"}, "results": []} -->
+<!-- e2e-results {"meta": {"os_label": "Windows", "state": "ran from a Claude session", "date": "2026-10-07 18:21", "machine": "DESKTOP-5RD9NNJ", "os": "Windows 11 build 10.0.26200 (AMD64)", "git": "claude/win-data-quality-03db0d 49f56cd", "python": "3.14.8", "host_app": "Claude Code session", "permissions": "no_prompts_needed=yes, running_as_admin=no; ScreenMind sees: input_monitoring=yes, accessibility=yes", "displays": "1", "input_mode": "none", "ui_events": "backend=windows, running=True, hook_running=True, keys_tapped=None, input_events=0, events_recorded=10, skipped={}, permissions={'input_monitoring': True, 'accessibility': True, 'all_granted': True}, last_error=None", "duration": "307s", "command": "python scripts/e2e_collect.py --write-status --no-input --browsers chrome,msedge,firefox --analysis-timeout 480"}, "results": [{"id": "screenshots", "label": "Screenshots, every display", "result": "PASS"}, {"id": "grab_backend", "label": "Screen grab backend", "result": "PASS"}, {"id": "app_name", "label": "App name", "result": "PASS"}, {"id": "window_title", "label": "Window title", "result": "PASS"}, {"id": "a11y_text", "label": "Screen text from accessibility", "result": "PASS"}, {"id": "ocr", "label": "OCR text", "result": "PASS"}, {"id": "browser_url:chrome", "label": "Browser URL (chrome)", "result": "PASS"}, {"id": "browser_url:msedge", "label": "Browser URL (msedge)", "result": "PASS"}, {"id": "browser_url:firefox", "label": "Browser URL (firefox)", "result": "PASS"}, {"id": "ui_click", "label": "UI event: click with element role/name", "result": "SKIP"}, {"id": "ui_app_switch", "label": "UI event: app switch", "result": "PASS"}, {"id": "ui_text", "label": "UI event: typed text", "result": "SKIP"}, {"id": "ui_clipboard", "label": "UI event: clipboard", "result": "PASS"}, {"id": "ui_linked", "label": "UI events linked to frames", "result": "PASS"}, {"id": "redact_typed", "label": "Typed secret is redacted", "result": "SKIP"}, {"id": "password_field", "label": "Password field is not stored", "result": "SKIP"}, {"id": "calls", "label": "Call detection", "result": "SKIP"}, {"id": "analysis", "label": "Analysis (Gemma)", "result": "PASS"}, {"id": "retention", "label": "Retention cleanup at startup", "result": "PASS"}]} -->
