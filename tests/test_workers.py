@@ -608,3 +608,55 @@ class TestUiEventLinkGuard:
         await worker._link_ui_events(3, datetime.now())
         assert len(flushes) == 2
         assert worker._stuck_link is None
+
+
+class TestOcrBoxRedaction:
+    """Stored OCR boxes and organized_text get the same filter as ocr_text."""
+
+    async def test_secrets_redacted_in_boxes_and_organized_text(self, db, tmp_path, monkeypatch):
+        import json
+        from PIL import Image
+        from screenmind.storage.models import ActivityRecord, ScreenshotEntry
+        from screenmind.workers.analysis_worker import AnalysisWorker
+
+        monkeypatch.setattr(settings_mod.settings, "analysis_mode", "fast")
+        shot = tmp_path / "shot.jpg"
+        Image.new("RGB", (400, 200), "white").save(shot)
+        activity_id = db.insert_activity(ScreenshotEntry(
+            timestamp=datetime.now(), screenshot_path=str(shot), window_title="notes.txt - Notepad",
+            detected_app_name="notepad", bookmarked=False, analyzed=False,
+        ))
+
+        def box(x, y, text):
+            return {"box": [[x, y], [x + 120, y], [x + 120, y + 20], [x, y + 20]], "text": text, "conf": 0.9}
+        boxes = [
+            box(10, 10, "Server login notes"),
+            box(10, 40, "pwd"), box(140, 40, "- Tr0ub4dor&3"),  # label and value split by OCR
+            box(10, 70, "password: hunter2x9"),
+        ]
+        raw = "\n".join(b["text"] for b in boxes)
+
+        worker = AnalysisWorker(queue=asyncio.Queue(maxsize=10), database=db)
+        worker._ocr = MagicMock(is_available=True)
+        worker._ocr.extract_text_with_boxes.return_value = (raw, boxes)
+        worker._analyzer = MagicMock()
+        worker._analyzer.analyze_screenshot_fast.return_value = (
+            ActivityRecord(app_name="Notepad", activity_category="writing",
+                           activity_summary="Editing notes", scene_description="A text file"),
+            [],
+        )
+        capture = CaptureResult(
+            filepath=shot, timestamp=datetime.now(), window_title="notes.txt - Notepad",
+            app_name="notepad", image=Image.open(shot), activity_id=activity_id,
+        )
+        await worker._process(capture)
+
+        row = db.get_activity_by_id(activity_id)
+        stored_boxes = row["ocr_boxes"] if isinstance(row["ocr_boxes"], str) else json.dumps(row["ocr_boxes"])
+        assert row["organized_text"]
+        for secret in ("Tr0ub4dor&3", "hunter2x9"):
+            assert secret not in stored_boxes
+            assert secret not in row["organized_text"]
+            assert secret not in row["ocr_text"]
+            assert secret not in worker._analyzer.analyze_screenshot_fast.call_args.kwargs["ocr_text"]
+        assert "Server login notes" in row["organized_text"]

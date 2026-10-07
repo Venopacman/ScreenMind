@@ -390,9 +390,6 @@ class AnalysisWorker:
                 ocr_raw, ocr_boxes = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: self._ocr.extract_text_with_boxes(capture.image)
                 )
-                if ocr_boxes:
-                    import json
-                    ocr_boxes_json = json.dumps(ocr_boxes)
 
                 if ocr_raw:
                     if a11y_is_content and ocr_text:
@@ -416,8 +413,18 @@ class AnalysisWorker:
                             ocr_text = ocr_raw
                             text_method = "ocr"
 
-            # 3c. Sensitive data filter — redact before AI + storage
+            # 3c. Sensitive data filter — redact before AI + storage. The boxes
+            #     too: they are stored and organized_text is built from them.
             ocr_text = filter_sensitive(ocr_text)
+            if ocr_boxes and settings.sensitive_filter_enabled:
+                try:
+                    from screenmind.privacy.data_filter import filter_ocr_boxes, parse_enabled_types
+                    filter_ocr_boxes(ocr_boxes, parse_enabled_types(settings.sensitive_filter_types))
+                except Exception as e:
+                    logger.warning(f"Sensitive filter error (OCR boxes): {e}")
+            if ocr_boxes:
+                import json
+                ocr_boxes_json = json.dumps(ocr_boxes)
 
             # 3c'. Nothing on screen: no window label and almost no text (e.g. a
             #      display showing only the wallpaper). Skip Gemma. Without hints
