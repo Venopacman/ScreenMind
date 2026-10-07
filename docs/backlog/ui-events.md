@@ -53,6 +53,13 @@ Chrome ignores `AXManualAccessibility`, which `enable_full_a11y_tree()` sets. It
 
 Refs: `MacOSAdapter.enable_full_a11y_tree()`.
 
+### Capture side should mark "no app window on this display" explicitly
+Status: open, after the ScreenCaptureKit merge
+
+The empty-display rule in `analysis_worker` skips Gemma only when a frame has no app, no title and under 20 chars of text (menu bar and clock not counted). A desktop with widgets and file icons has more text than that, so it still goes to Gemma. Activity 690 (macOS desktop, weather and calendar widgets, file names) came back as "File Explorer/Desktop". The capture side knows when it found no app window on a display (`_label_monitor` returns `None, None, False` when `can_find_top_window()` is true). It should pass that on as a flag, and the analysis worker should store such frames as idle. Don't use app=None alone as the signal: on Linux, an unfocused display also has app=None, and it can show real content.
+
+Refs: `CaptureWorker._label_monitor()`, `_capture_monitor()`, `analysis_worker._screen_text_len()`, activity 690.
+
 ### Events go to the first frame of a tick, not the matching display
 Status: idea
 
