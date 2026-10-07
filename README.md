@@ -269,6 +269,8 @@ uv run screenmind            # or: uv run python -m screenmind
 
 Dependencies live in `pyproject.toml` and are pinned in `uv.lock`. Add or change one with `uv add <package>` (or edit `pyproject.toml` and run `uv lock`), then commit both files.
 
+**Windows checkouts set up with pip:** since `c68311a` the project needs Python 3.14 and uv. Install uv before the next pull (PowerShell: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`). Then pull and run `uv sync`. uv downloads Python 3.14 and replaces the old `.venv`.
+
 </details>
 
 <details>
