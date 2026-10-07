@@ -8,28 +8,28 @@ Build files: [`packaging/screenmind.spec`](../../packaging/screenmind.spec) and 
 
 | | macOS (arm64) | Windows (x64) |
 |---|---|---|
-| Date, commit | 2026-10-07, `custom` 70e5611 (before the strip) | not run yet |
+| Date, commit | 2026-10-07, `custom` cd95561 (after the strip) | not run yet |
 | OS | macOS 26 (Darwin 25.6) | |
 | PyInstaller | 6.22.3, Python 3.14.6 | |
-| Build time | 2 min 21 s | |
+| Build time | 2 min 21 s cold, 25 s warm | |
 | Build result | OK. Only harmless warnings (pyobjc lazy names, Windows DLLs on macOS, `scipy.special._cdflib`) | |
-| App size on disk | 363 MB (`ScreenMind.app`) | |
-| Compressed | DMG 169 MB (zlib), 130 MB (LZMA) | |
-| Largest parts | cv2 118 MB, onnxruntime 70 MB, scipy 32 MB, libpython 17 MB | |
+| App size on disk | 343 MB (`ScreenMind.app`); 363 MB before the strip | |
+| Compressed | DMG 157 MB (zlib), 122 MB (LZMA) | |
+| Largest parts | onnxruntime 70 MB, cv2 40 MB + its ffmpeg/X11 libs, scipy 32 MB, libpython 17 MB | |
 | Signature | ad-hoc (PyInstaller default), bundle id `com.screenmind.app` | |
 | Dashboard up after | 2 s | |
 | `/`, `/css/styles.css`, `/js/core.js` | 200 | |
-| `/api/status`, `/api/timeline`, `/api/settings`, `/api/models`, `/api/search?q=test` | 200 | |
-| onnxruntime loads | yes (embedder model loaded, 384 dims) | |
+| `/api/status`, `/api/timeline`, `/api/settings`, `/api/models`, `/api/search?q=test`, `/api/stats` | 200 | |
+| onnxruntime loads | yes, before the strip (the embedder loaded). After the strip only OCR uses it, and OCR was not run | |
 | OCR, capture, UI events | not tested (no screen grabs from Claude sessions on macOS) | |
-| Memory after start | 317 MB RSS | |
-| Clean stop | `kill -INT`, stopped in 2 s | |
+| Memory after start | 123 MB RSS (317 MB before the strip, with the embedder) | |
+| Clean stop | `POST /api/shutdown`, stopped in 2 s | |
 
 ## macOS notes (2026-10-07)
 
 - Ran the binary inside the bundle (`Contents/MacOS/ScreenMind`) from a scratch folder, so no `.env` loaded. Env: temp `DATA_DIR`, `API_PORT=7790`, `CAPTURE_ON_START=false`, `UI_EVENTS_ENABLED=false`, `MEETING_TRANSCRIPTION=false`, a dead llama port, and a `PATH` without Homebrew. It started in degraded mode ("llama-server not found"), as expected.
 - Not tested: launching from Finder, permission prompts, screen grabs, OCR on a real frame, model download (fails by design until fix F2 in the plan).
-- The bundle holds rapidocr's own default models (`PP-OCRv6_*_small`), which ScreenMind never uses (fix F7).
+- The bundle holds rapidocr's own default models (`PP-OCRv6_*_small`), which ScreenMind never uses (fix F6).
 
 ## Windows: how to run the same spike
 

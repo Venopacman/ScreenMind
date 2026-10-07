@@ -4,7 +4,7 @@ Status: research and recommendation, 2026-10-07. Nothing here is built or signed
 
 ## Short answer
 
-- **Both OS: freeze with PyInstaller (onedir).** It supports Python 3.14 and has hooks for onnxruntime, sounddevice and keyring. The macOS spike built a working `ScreenMind.app` in 2.5 minutes. The dashboard answered 2 s after start.
+- **Both OS: freeze with PyInstaller (onedir).** It supports Python 3.14 and has hooks for onnxruntime, sounddevice and keyring. The macOS spike built a working `ScreenMind.app` (343 MB, 122 MB as a DMG). The dashboard answered 2 s after start.
 - **macOS: a signed, notarized `.app` in a DMG.** The first-run wizard is a page in the existing dashboard. It walks through the permissions and the model download. Start at login uses `SMAppService`, not a LaunchAgent plist. Add a menu bar icon.
 - **Windows: an Inno Setup wizard, per-user install.** It needs no admin rights. It adds an optional "Start at login" checkbox (HKCU Run) and asks on uninstall whether to delete `%USERPROFILE%\.screenmind`. Add a tray icon.
 - **Heavy parts:** bundle a pinned CPU/Metal (macOS) or CPU/Vulkan (Windows) `llama-server`, about 10-30 MB. Download Gemma (1.5-3 GB) on first run, with progress in the wizard.
@@ -14,18 +14,18 @@ Status: research and recommendation, 2026-10-07. Nothing here is built or signed
 
 ## What we ship
 
-Measured on the user's Mac (2026-10-07, branch `custom` before the strip):
+Measured on the user's Mac (2026-10-07, branch `custom` after the strip, `cd95561`):
 
 | Part | Size | Where it comes from today |
 |---|---|---|
-| Python 3.14 + all packages, frozen (`.app`) | 363 MB on disk | PyInstaller spike |
-| Same, as a compressed DMG | 169 MB (zlib), 130 MB (LZMA, `ULMO`) | `hdiutil create` |
+| Python 3.14 + all packages, frozen (`.app`) | 343 MB on disk (363 MB before the strip) | PyInstaller spike |
+| Same, as a compressed DMG | 157 MB (zlib), 122 MB (LZMA, `ULMO`) | `hdiutil create` |
 | `llama-server` (llama.cpp) | 10-31 MB per OS (CPU, Metal, Vulkan builds). CUDA builds are 150-400 MB plus runtime | Homebrew or PATH, or `setup_llama.py` downloads it into the checkout |
 | Gemma 4 E2B GGUF + mmproj | 1.5 GB (Q4_0) to 5 GB; 3.2 GB on this Mac | `huggingface_hub` into `~/.screenmind/models/<model>` |
 | RapidOCR models | 25 MB | downloaded on first use into `~/.screenmind/models/ocr` |
-| Embedder | 87 MB | goes away with the strip ([strip-to-actions.md](strip-to-actions.md)) |
+| Embedder | 87 MB in `~/.screenmind/models/embedder` | removed by the strip ([strip-to-actions.md](strip-to-actions.md)); the folder can be deleted |
 
-The biggest parts of the frozen app are `cv2` (118 MB, from `opencv-python`, pulled in by `rapidocr`), onnxruntime (70 MB) and scipy (32 MB, pulled in by `imagehash`). Ways to make it smaller are in [Size](#size).
+The biggest parts of the frozen app are onnxruntime (70 MB), `cv2` (40 MB plus the ffmpeg/X11 libraries it bundles, from `opencv-python`, pulled in by `rapidocr`) and scipy (32 MB, pulled in by `imagehash`). Ways to make it smaller are in [Size](#size).
 
 ## Things in the code that break inside an app
 
@@ -38,11 +38,10 @@ These need fixing before any installer is useful. They are small. Most of them a
 | F3 | `setup_llama.py` (`PROJECT_ROOT`) and `model_manager.start_server()` | They decide "pip install vs checkout" with `is_relative_to(site-packages)`. A frozen app looks like a checkout, so `llama/` resolves to a folder inside the app bundle. Installing there breaks the signature, and `/Applications` may not be writable. | Add a `sys.frozen` branch: use the bundled binary first, then `~/.screenmind/llama/`, then PATH. Never write inside the bundle. |
 | F4 | `startup.py` `_get_startup_command()`, `main.run()` `--background`, `launcher.py`, `_install_desktop_shortcut()` | They build commands from `sys.executable -m screenmind`, `pythonw.exe` or `launcher.py`. None of these exist in an app. | In app mode the start command is the app itself. macOS: `SMAppService.mainApp` instead of the plist. Windows: HKCU Run with the path to `ScreenMind.exe` (the installer can write it). Drop the shortcut and splash code from the app path. |
 | F5 | `config._setup_logging()` | A windowed build has no console. Logs go nowhere unless `SCREENMIND_LOG_FILE` is set. | In app mode, always log to `~/.screenmind/screenmind.log` (rotating). |
-| F6 | `ui/overlay.py` (`[sys.executable, "-c", script]`) | Same as F2: would start a second ScreenMind. | Removed by the strip. |
-| F7 | `engine/ocr.py` (`Global.model_root_dir`) | The app ships rapidocr's own default models (31 MB) but never uses them. It downloads other models into `~/.screenmind/models/ocr` on first use. | Ship the 5 models we use inside the app (works offline) and exclude rapidocr's defaults. |
-| F8 | `capture_worker`, `ui_events` permission requests | Screen Recording is never requested explicitly. macOS asks on the first grab, at a random moment. | The onboarding page requests each permission on a button press (see [macOS onboarding](#first-run-wizard-onboarding)). |
+| F6 | `engine/ocr.py` (`Global.model_root_dir`) | The app ships rapidocr's own default models (31 MB) but never uses them. It downloads other models into `~/.screenmind/models/ocr` on first use. | Ship the 5 models we use inside the app (works offline) and exclude rapidocr's defaults. |
+| F7 | `capture_worker`, `ui_events` permission requests | Screen Recording is never requested explicitly. macOS asks on the first grab, at a random moment. | The onboarding page requests each permission on a button press (see [macOS onboarding](#first-run-wizard-onboarding)). |
 
-The spike ran with F1-F8 still in place. The dashboard worked because the test needed none of these paths.
+The spike ran with F1-F7 still in place. The dashboard worked because the test needed none of these paths.
 
 ## 1. Freezing options
 
@@ -185,7 +184,7 @@ Download on first run, in the onboarding page, with progress and resume (`hf_hub
 
 ### OCR models
 
-Ship the 5 RapidOCR models we use (25 MB) inside the app. Exclude rapidocr's own defaults (F7).
+Ship the 5 RapidOCR models we use (25 MB) inside the app. Exclude rapidocr's own defaults (F6).
 
 ### Architectures
 
@@ -198,10 +197,9 @@ Ship the 5 RapidOCR models we use (25 MB) inside the app. Exclude rapidocr's own
 
 ### Size
 
-The app is 363 MB unpacked, 130-170 MB as a DMG. Ways to shrink it, none tested:
+The app is 343 MB unpacked, 122-157 MB as a DMG. Ways to shrink it, none tested:
 
-- The strip removes `tokenizers`, `gitpython`, `keyboard` and the embedder: about 10 MB.
-- `cv2` is 118 MB because `opencv-python` bundles ffmpeg, X11 and more. Try forcing `opencv-python-headless` with a uv override.
+- `cv2` with its libraries is about 118 MB because `opencv-python` bundles ffmpeg, X11 and more. Try forcing `opencv-python-headless` with a uv override.
 - `scipy` (32 MB) and `pywavelets` come only from `imagehash`. A numpy pHash of ~15 lines could replace it. `test_phash_distances` must still pass with identical hashes.
 
 ## 6. Auto-update
@@ -243,7 +241,7 @@ The unsigned milestone needs no secrets.
 
 | Milestone | What | Effort (rough) | Main risk |
 |---|---|---|---|
-| **M0: internal testers** | Fix F1-F5 and F7. Bundle `llama-server`. Unsigned `.app` + DMG. Unsigned Inno Setup wizard (per-user, Run key, uninstall data question). CI builds both on a tag. Short tester guide ("Open Anyway", SmartScreen "Run anyway"). | ~1 week | Unsigned macOS builds lose permission grants on every update (try the self-signed certificate trick). |
+| **M0: internal testers** | Fix F1-F6. Bundle `llama-server`. Unsigned `.app` + DMG. Unsigned Inno Setup wizard (per-user, Run key, uninstall data question). CI builds both on a tag. Short tester guide ("Open Anyway", SmartScreen "Run anyway"). | ~1 week | Unsigned macOS builds lose permission grants on every update (try the self-signed certificate trick). |
 | **M1: app feel** | Onboarding page (permissions, model download, start at login). Menu bar / tray icon. `SMAppService` login item. "New version" banner. Check by hand that a Finder-launched app gets "ScreenMind" prompts and SCK grabs work (G1, G22). | ~1-1.5 weeks | Main thread change for the menu bar. SMAppService via pyobjc untested. |
 | **M2: signed public release** | Apple Developer enrollment, Developer ID signing, entitlements, notarization in CI. Azure Artifact Signing (or OV cert) for Windows. | 3-5 days of work, plus waiting: Apple org enrollment and Azure identity checks take days to weeks | Notarization fails on some nested binary. SmartScreen warnings for the first weeks anyway. |
 | **M3: auto-update** | Sparkle + WinSparkle, or Velopack | ~1 week | Integration with a frozen Python app is untested for all three. |
