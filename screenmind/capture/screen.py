@@ -7,7 +7,10 @@ Saves as JPEG with configurable quality to date-organized directories.
 
 import logging
 import io
+import subprocess
 import sys
+import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
@@ -21,6 +24,30 @@ from screenmind.platform_support import is_wayland
 
 logger = logging.getLogger("screenmind.capture.screen")
 
+# macOS: a CoreGraphics grab (what mss uses) can hang for 30 s. We saw it in
+# every process started from a Claude session, with Screen Recording granted.
+# The system serializes screen capture, so one hung grab also stalls other apps
+# that capture (the main instance). After one slow grab, this process uses the
+# `screencapture` tool instead, which takes about 0.2 s there.
+_SLOW_GRAB_SECONDS = 5.0
+
+
+def _grab_screencapture(monitor: dict) -> Optional[Image.Image]:
+    """macOS: grab a display rect (global points) with the screencapture tool.
+    None on any failure, so the caller can fall back to mss."""
+    rect = f"{monitor['left']},{monitor['top']},{monitor['width']},{monitor['height']}"
+    with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+        try:
+            subprocess.run(
+                ["screencapture", "-x", "-t", "png", "-R", rect, tmp.name],
+                check=True, capture_output=True, timeout=10,
+            )
+            with Image.open(tmp.name) as img:
+                return img.convert("RGB")
+        except Exception as e:
+            logger.debug(f"screencapture failed: {e}")
+            return None
+
 
 class ScreenCapture:
     """Handles screenshot capture, compression, and storage.
@@ -32,6 +59,7 @@ class ScreenCapture:
     def __init__(self):
         self._backend = None
         self._sct = None
+        self._use_screencapture = False
 
         if sys.platform == "linux" and is_wayland():
             try:
@@ -226,10 +254,7 @@ class ScreenCapture:
                     self._last_monitor_key = f"{monitor['left']},{monitor['top']}"
                     # Displays grabbed in one tick can share a millisecond
                     suffix = f"_m{self._sct.monitors.index(monitor)}"
-                raw = self._sct.grab(monitor)
-
-                # Convert to PIL Image (mss returns BGRA, PIL expects RGB)
-                img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+                img = self._grab(monitor)
 
                 # Save to date-organized directory
                 now = datetime.now()
@@ -261,6 +286,23 @@ class ScreenCapture:
 
         return None  # both _backend and _sct are None (init failure)
 
+    def _grab(self, monitor: dict) -> Image.Image:
+        """One display as an RGB image."""
+        if self._use_screencapture:
+            img = _grab_screencapture(monitor)
+            if img is not None:
+                return img
+        start = time.monotonic()
+        raw = self._sct.grab(monitor)
+        if sys.platform == "darwin" and time.monotonic() - start > _SLOW_GRAB_SECONDS:
+            logger.warning(
+                "Screen grab took %.0fs; using the screencapture tool from now on",
+                time.monotonic() - start,
+            )
+            self._use_screencapture = True
+        # mss returns BGRA, PIL expects RGB
+        return Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+
     def capture_to_bytes(self) -> Optional[Tuple[bytes, Image.Image]]:
         """
         Capture screenshot and return as JPEG bytes (for immediate processing
@@ -275,8 +317,7 @@ class ScreenCapture:
         if self._sct:
             try:
                 monitor = self._select_monitor()
-                raw = self._sct.grab(monitor)
-                img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+                img = self._grab(monitor)
 
                 buffer = io.BytesIO()
                 img.save(

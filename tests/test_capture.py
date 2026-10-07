@@ -57,3 +57,45 @@ def test_dedup_threshold_sensitivity():
     # (exact behavior depends on phash, but the principle holds)
     loose_result = loose.is_duplicate(img2)
     assert isinstance(loose_result, bool)  # Just verify it runs
+
+
+def _fake_capture(monkeypatch, slow_seconds):
+    """ScreenCapture with a fake mss and a fake screencapture tool."""
+    from screenmind.capture import screen
+
+    class Raw:
+        size = (2, 2)
+        bgra = b"\0" * 16
+
+    class Sct:
+        grabs = 0
+
+        def grab(self, monitor):
+            Sct.grabs += 1
+            return Raw()
+
+    tool_calls = []
+    monkeypatch.setattr(screen.sys, "platform", "darwin")
+    monkeypatch.setattr(screen, "_SLOW_GRAB_SECONDS", slow_seconds)
+    monkeypatch.setattr(screen, "_grab_screencapture",
+                        lambda m: tool_calls.append(m) or Image.new("RGB", (2, 2)))
+    cap = screen.ScreenCapture.__new__(screen.ScreenCapture)
+    cap._backend, cap._sct, cap._use_screencapture = None, Sct(), False
+    return cap, Sct, tool_calls
+
+
+def test_slow_grab_switches_to_screencapture(monkeypatch):
+    cap, sct, tool_calls = _fake_capture(monkeypatch, slow_seconds=-1)
+    mon = {"left": 0, "top": 0, "width": 2, "height": 2}
+    cap._grab(mon)
+    assert cap._use_screencapture and tool_calls == []
+    cap._grab(mon)
+    assert tool_calls == [mon] and sct.grabs == 1
+
+
+def test_fast_grab_keeps_mss(monkeypatch):
+    cap, sct, tool_calls = _fake_capture(monkeypatch, slow_seconds=1e9)
+    mon = {"left": 0, "top": 0, "width": 2, "height": 2}
+    cap._grab(mon)
+    cap._grab(mon)
+    assert not cap._use_screencapture and tool_calls == [] and sct.grabs == 2
