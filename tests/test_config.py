@@ -7,7 +7,6 @@ def test_default_settings():
     s = Settings(data_dir="/tmp/screenmind_test")
     assert s.capture_interval == 40
     assert s.screenshot_quality == 70
-    assert s.ollama_model == "gemma4:e2b"
     assert s.api_port == 7777
 
 
@@ -21,10 +20,14 @@ def test_blocked_apps_list_parsing():
     assert s.blocked_apps_list == ["1password", "banking", "keychain"]
 
 
-def test_workspace_dirs_list():
-    s = Settings(data_dir="/tmp/test", workspace_dirs="~/Projects, ~/Code")
-    dirs = s.workspace_dirs_list
-    assert len(dirs) == 2
+def test_env_file_keys_of_removed_settings_are_ignored(tmp_path, monkeypatch):
+    """An old .env can still name removed settings. Startup must not fail."""
+    env = tmp_path / ".env"
+    env.write_text("BOOKMARK_HOTKEY=ctrl+shift+b\nWORKSPACE_DIRS=~/Projects\n"
+                   "GEMMA_MODE=local\nCAPTURE_INTERVAL=25\n")
+    s = Settings(_env_file=str(env), data_dir="/tmp/test")
+    assert s.capture_interval == 25
+    assert not hasattr(s, "bookmark_hotkey")
 
 
 def test_heavy_apps_list():

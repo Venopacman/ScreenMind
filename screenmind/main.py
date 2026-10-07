@@ -119,16 +119,9 @@ async def main():
 
     logger.info(f"Data directory: {settings.data_path}")
     logger.info(f"Capture interval: {settings.capture_interval}s")
-    logger.info(f"Model: {settings.active_model} ({settings.gemma_mode} mode)")
+    logger.info(f"Model: {settings.active_model}")
     if settings.blocked_apps_list:
         logger.info(f"Privacy zones: {', '.join(settings.blocked_apps_list)}")
-    if settings.gemma_mode == "api":
-        _safe_print("")
-        _safe_print("=" * 70)
-        _safe_print("WARNING: gemma_mode=api — screenshots are sent to Google AI Studio!")
-        _safe_print("   This disables the local-only privacy guarantee.")
-        _safe_print("   Set GEMMA_MODE=local to keep all data on your machine.")
-        _safe_print("=" * 70)
     _safe_print()
 
     # ── llama-server setup ─────────────────────────────────────────────

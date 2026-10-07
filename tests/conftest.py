@@ -42,21 +42,11 @@ def mock_settings(tmp_path):
         mock.screenshots_dir.mkdir(parents=True, exist_ok=True)
         mock.capture_interval = 30
         mock.screenshot_quality = 70
-        mock.ollama_model = "gemma4:e2b"
-        mock.ollama_host = "http://localhost:11434"
         mock.blocked_apps_list = []
         mock.heavy_apps_list = []
         mock.auto_pause_heavy_apps = False
-        mock.bookmark_hotkey = "ctrl+shift+b"
-        mock.pause_hotkey = "ctrl+shift+p"
         mock.sensitive_filter_enabled = False
         mock.retention_days = 7
-        mock.agents_enabled = False
-        mock.webhook_enabled = False
-        mock.webhook_url = ""
-        mock.webhook_secret = ""
-        mock.webhook_events = ""
-        mock.webhook_headers = ""
         mock.encryption_enabled = False
         mock.api_host = "127.0.0.1"
         mock.api_port = 7777

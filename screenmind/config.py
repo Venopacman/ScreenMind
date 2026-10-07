@@ -11,7 +11,7 @@ import os
 import sys
 import threading
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import List, Literal
 
 from pydantic_settings import BaseSettings
 from pydantic import Field, ValidationError
@@ -75,15 +75,8 @@ _ALLOWED_OVERRIDES = {
     "defer_analysis", "meeting_transcription",
     "meeting_apps",
     "active_model", "model_variants", "retention_days",
-    "obsidian_enabled", "obsidian_vault_path",
-    "notion_enabled", "notion_token", "notion_database_id",
-    "webhook_enabled", "webhook_url", "webhook_events", "webhook_secret", "webhook_headers",
-    "webhook_extra",
-    "auto_bookmark", "auto_bookmark_keywords",
-    "agents_enabled", "agents_auto_run_python",
     "sensitive_filter_enabled", "sensitive_filter_types",
     "encryption_enabled",
-    "bookmark_hotkey", "pause_hotkey", "voice_hotkey",
     "capture_active_monitor",
     "setup_complete",
     "capture_paused",
@@ -131,14 +124,6 @@ class Settings(BaseSettings):
     )
 
     # ── Model ────────────────────────────────────────────────────────────
-    gemma_mode: Literal["local", "api"] = Field(
-        default="local",
-        description="'local' for llama-server, 'api' for Google AI Studio (sends data to Google)",
-    )
-    ollama_model: str = Field(
-        default="gemma4:e2b",
-        description="Model identifier (legacy field, kept for settings.json compat)",
-    )
     active_model: str = Field(
         default="gemma-4-e2b",
         description="Active model key for llama-server",
@@ -146,10 +131,6 @@ class Settings(BaseSettings):
     model_variants: dict = Field(
         default_factory=dict,
         description="Per-model variant selection, e.g. {'gemma-4-e2b': 'Q8_0'}",
-    )
-    ollama_host: str = Field(
-        default="http://localhost:11434",
-        description="Legacy Ollama host (unused, kept for compat)",
     )
     llama_server_host: str = Field(
         default="http://127.0.0.1:5809",
@@ -159,35 +140,10 @@ class Settings(BaseSettings):
         default=5809,
         description="llama-server port",
     )
-    google_api_key: Optional[str] = Field(
-        default=None,
-        description="Google AI Studio API key (for api mode)",
-    )
-
-    # ── Developer Context ────────────────────────────────────────────────
-    workspace_dirs: str = Field(
-        default="~/Projects,~/Desktop",
-        description="Comma-separated directories to scan for git repos",
-    )
-
     # ── Privacy ──────────────────────────────────────────────────────────
     blocked_apps: str = Field(
         default="",
         description="Comma-separated app names to skip (privacy zones)",
-    )
-
-    # ── Hotkey ───────────────────────────────────────────────────────────
-    bookmark_hotkey: str = Field(
-        default="ctrl+shift+b",
-        description="Hotkey combo to bookmark current moment",
-    )
-    pause_hotkey: str = Field(
-        default="ctrl+shift+p",
-        description="Hotkey combo to pause/resume capture",
-    )
-    voice_hotkey: str = Field(
-        default="ctrl+shift+v",
-        description="Hotkey combo for voice memo (hold to record)",
     )
 
     # ── Resource Management ──────────────────────────────────────────────
@@ -236,25 +192,6 @@ class Settings(BaseSettings):
         description="Call apps to detect. Built-in rules for zoom, teams, meet, webex, slack, "
                     "discord; any other entry matches a window owner or title containing it",
     )
-    # ── Integrations ─────────────────────────────────────────────────────
-    obsidian_enabled: bool = Field(default=False, description="Auto-export summaries to Obsidian vault")
-    obsidian_vault_path: str = Field(default="", description="Absolute path to Obsidian vault folder")
-
-    notion_enabled: bool = Field(default=False, description="Auto-export summaries to Notion")
-    notion_token: str = Field(default="", description="Notion internal integration token")
-    notion_database_id: str = Field(default="", description="Notion database ID for summaries")
-
-    webhook_enabled: bool = Field(default=False, description="Fire HTTP POST on events")
-    webhook_url: str = Field(default="", description="Comma-separated webhook target URLs")
-    webhook_events: str = Field(default="daily_summary,bookmark,meeting_end", description="Comma-separated event types")
-    webhook_secret: str = Field(default="", description="Optional HMAC secret for webhook signing")
-    webhook_headers: str = Field(default="", description="Custom headers as Key: Value lines")
-    webhook_extra: str = Field(default="[]", description="JSON array of extra named webhook profiles")
-
-    # ── Auto-Tagging ─────────────────────────────────────────────────────
-    auto_bookmark: bool = Field(default=True, description="Auto-bookmark important moments")
-    auto_bookmark_keywords: str = Field(default="git push,deploy,npm run build,docker,merge,pull request", description="Keywords that trigger auto-bookmark")
-
     # ── UI Events (accessibility) ───────────────────────────────────────
     ui_events_enabled: bool = Field(
         default=True,
@@ -281,10 +218,6 @@ class Settings(BaseSettings):
                     "es/de/fr...: Latin). Every script model also reads English.",
     )
 
-    # ── Agents ────────────────────────────────────────────────────────────
-    agents_enabled: bool = Field(default=False, description="Enable the agent/plugin system")
-    agents_auto_run_python: bool = Field(default=False, description="Run Python plugins without confirmation (default: ask)")
-
     # ── Privacy & Security ────────────────────────────────────────────────
     sensitive_filter_enabled: bool = Field(default=True, description="Filter sensitive data (credit cards, SSNs, API keys) from captured text")
     sensitive_filter_types: str = Field(default="credit_card,ssn,api_key,jwt,password", description="Comma-separated filter types")
@@ -309,6 +242,9 @@ class Settings(BaseSettings):
         "env_file": ".env",
         "env_file_encoding": "utf-8",
         "case_sensitive": False,
+        # A .env can still hold keys of removed features (BOOKMARK_HOTKEY,
+        # WORKSPACE_DIRS, GEMMA_MODE...). Ignore them instead of failing.
+        "extra": "ignore",
         "validate_assignment": True,
     }
 
@@ -333,17 +269,6 @@ class Settings(BaseSettings):
     def settings_json_path(self) -> Path:
         """Path to runtime settings override file."""
         return self.data_path / "settings.json"
-
-    @property
-    def workspace_dirs_list(self) -> List[str]:
-        """Parsed list of workspace directories."""
-        if not self.workspace_dirs:
-            return []
-        return [
-            os.path.expanduser(d.strip())
-            for d in self.workspace_dirs.split(",")
-            if d.strip()
-        ]
 
     @property
     def ocr_languages_list(self) -> List[str]:
@@ -395,13 +320,15 @@ class Settings(BaseSettings):
             try:
                 with _settings_lock:
                     overrides = json.loads(path.read_text())
+                applied = []
                 for k, v in overrides.items():
                     if k in _ALLOWED_OVERRIDES and hasattr(self, k):
                         try:
                             setattr(self, k, v)
+                            applied.append(k)
                         except (ValueError, ValidationError):
                             logger.warning("Invalid override ignored: %s=%r", k, v)
-                logger.info(f"Loaded runtime overrides: {list(overrides.keys())}")
+                logger.info(f"Loaded runtime overrides: {applied}")
             except Exception as e:
                 logger.error(f"Failed to load settings.json: {e}")
 
