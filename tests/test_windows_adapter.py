@@ -207,7 +207,8 @@ class TestA11yWalk:
         editor = FakeControl("PaneControl", "x" * 50_000)  # Scintilla: name = document
         assert len(walk(adapter, editor)[0]) == pw._A11Y_VISIBLE_ONLY_CHARS
 
-    def test_total_budget(self, adapter):
+    def test_total_budget(self, adapter, monkeypatch):
+        monkeypatch.setattr(pw, "_A11Y_MAX_TOTAL_CHARS", 20000)
         kids = [FakeControl("TextControl", f"{i}" + "z" * 999) for i in range(40)]
         out = walk(adapter, FakeControl("PaneControl", "", kids))
         assert sum(len(t) for t in out) == pw._A11Y_MAX_TOTAL_CHARS

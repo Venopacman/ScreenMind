@@ -66,3 +66,13 @@ def test_normalize_confidence_clamping():
     record = ActivityRecord(confidence=0.0)
     normalized = analyzer._normalize(record)
     assert normalized.confidence == 0.0
+
+
+def test_gemma_text_hint_trimmed_in_screen_order():
+    from screenmind.engine import analyzer
+    top = "zebra crossing report"
+    text = top + "\n" + "\n".join(f"word{i:05d}" for i in range(5000))
+    hint = analyzer._text_hint(text)
+    assert len(hint) <= analyzer._GEMMA_TEXT_HINT_CHARS
+    assert "zebra" in hint  # top of the screen survives the trim, despite sorting last
+    assert "word04999" not in hint

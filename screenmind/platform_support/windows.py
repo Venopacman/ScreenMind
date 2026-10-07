@@ -293,7 +293,8 @@ _A11Y_SKIP_TYPES = {"MenuBarControl", "MenuControl", "MenuItemControl",
                     "TitleBarControl", "ScrollBarControl"}
 # Text areas give at most this much: their visible part, or the end of the value.
 _A11Y_VISIBLE_ONLY_CHARS = 4000
-_A11Y_MAX_TOTAL_CHARS = 20000
+# Generous: analysis trims its own prompt (see engine/analyzer.py).
+_A11Y_MAX_TOTAL_CHARS = 300000
 
 
 # ── Top window per display ───────────────────────────────────────────

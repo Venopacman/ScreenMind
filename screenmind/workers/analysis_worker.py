@@ -69,8 +69,6 @@ _A11Y_MAX_PREFIX_CHARS = 500
 
 # Below this much screen text, an unlabeled frame counts as an empty display
 _EMPTY_SCREEN_MAX_TEXT = 20
-# Cap on stored screen text, a11y plus OCR extras (the a11y walk alone stops at 20k)
-_MAX_TEXT_CHARS = 20000
 # The menu bar clock, e.g. "Oct 7., Wed 13:30"
 _CLOCK_RE = re.compile(r'\b\d{1,2}:\d{2}\b')
 
@@ -422,9 +420,6 @@ class AnalysisWorker:
                         else:
                             ocr_text = ocr_raw
                             text_method = "ocr"
-
-            if ocr_text and len(ocr_text) > _MAX_TEXT_CHARS:
-                ocr_text = ocr_text[:_MAX_TEXT_CHARS]
 
             # 3c. Sensitive data filter — redact before AI + storage
             if settings.sensitive_filter_enabled and ocr_text:

@@ -105,8 +105,15 @@ class TestWalk:
     def test_total_size_capped(self, mac):
         kids = [FakeEl("AXStaticText", value=f"{i} " + "x" * 3000) for i in range(30)]
         texts = []
-        mac._walk_ax_tree(FakeEl("AXWindow", children=kids), texts, 0)
+        mac._walk_ax_tree(FakeEl("AXWindow", children=kids), texts, 0, budget=[20000, 4000])
         assert sum(len(t) for t in texts) <= 20000
+
+    def test_long_page_not_cut_at_20k(self, mac):
+        """Screen text is kept in full; only the Gemma prompt is trimmed."""
+        kids = [FakeEl("AXStaticText", value=f"{i} " + "x" * 3000) for i in range(30)]
+        texts = []
+        mac._walk_ax_tree(FakeEl("AXWindow", children=kids), texts, 0)
+        assert len(texts) == 30
 
     def test_skips_password_fields(self, mac):
         win = FakeEl("AXWindow", children=[

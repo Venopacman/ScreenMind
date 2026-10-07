@@ -267,6 +267,27 @@ def _lookup_known_category(app_name: str) -> Optional[str]:
 
     return None
 
+# Stub for the current local model. Gemma 4 E2B runs with a 6,144-token
+# context, so the screen-text hint is trimmed to about 2.5k tokens here. The
+# screen text itself is kept in full (a11y walk cap: 300k chars). This limit
+# goes away when analysis moves to a bigger model.
+_GEMMA_TEXT_HINT_CHARS = 8000
+
+
+def _text_hint(ocr_text: str) -> str:
+    """Unique words (noise removed) for the prompt: fewer tokens, same
+    vocabulary for Gemma to identify the app and content. Words are taken in
+    screen order before trimming, so the trim drops the bottom of the screen."""
+    words = dict.fromkeys(w for w in ocr_text.lower().split() if len(w) > 2)
+    kept, size = [], 0
+    for w in words:
+        size += len(w) + 1
+        if size > _GEMMA_TEXT_HINT_CHARS:
+            break
+        kept.append(w)
+    return ' '.join(sorted(kept))
+
+
 ANALYSIS_PROMPT = """You are given two tasks. Divide your attention 40% on analysis and 60% on layout accuracy. Do layout FIRST.
 
 TASK 1 (60% — DO FIRST) — LAYOUT (HIGH ACCURACY REQUIRED):
@@ -356,12 +377,7 @@ class GemmaAnalyzer:
         if active_urls:
             hints.append(f"URLs visible in screenshot: {', '.join(active_urls)}")
         if ocr_text:
-            # Strategy B: unique words, noise removed — reduces token count
-            # while preserving vocabulary for Gemma to identify app/content
-            words = ocr_text.lower().split()
-            words = [w for w in words if len(w) > 2]
-            filtered_ocr = ' '.join(sorted(set(words)))
-            hints.append(f"Extracted text (accurate):\n{filtered_ocr}")
+            hints.append(f"Extracted text (accurate):\n{_text_hint(ocr_text)}")
         if user_actions:
             hints.append(f"{USER_ACTIONS_HINT}\n{user_actions}")
         if hints:
@@ -436,10 +452,7 @@ class GemmaAnalyzer:
         if active_urls:
             hints.append(f"URLs visible in screenshot: {', '.join(active_urls)}")
         if ocr_text:
-            words = ocr_text.lower().split()
-            words = [w for w in words if len(w) > 2]
-            filtered_ocr = ' '.join(sorted(set(words)))
-            hints.append(f"Extracted text (accurate):\n{filtered_ocr}")
+            hints.append(f"Extracted text (accurate):\n{_text_hint(ocr_text)}")
         if user_actions:
             hints.append(f"{USER_ACTIONS_HINT}\n{user_actions}")
         context_str = f"\n\nContext: {chr(10).join(hints)}" if hints else ""
@@ -500,10 +513,7 @@ class GemmaAnalyzer:
         if active_urls:
             hints.append(f"URLs visible in screenshot: {', '.join(active_urls)}")
         if ocr_text:
-            words = ocr_text.lower().split()
-            words = [w for w in words if len(w) > 2]
-            filtered_ocr = ' '.join(sorted(set(words)))
-            hints.append(f"Extracted text (accurate):\n{filtered_ocr}")
+            hints.append(f"Extracted text (accurate):\n{_text_hint(ocr_text)}")
         if user_actions:
             hints.append(f"{USER_ACTIONS_HINT}\n{user_actions}")
         context_str = f"\n\nContext: {chr(10).join(hints)}" if hints else ""

@@ -27,7 +27,8 @@ _A11Y_SKIP_SUBROLES = {"AXLandmarkNavigation", "AXLandmarkComplementary"}
 # Text areas (Terminal, editors) hold the whole buffer in AXValue. Above this
 # size we read only the visible part.
 _A11Y_VISIBLE_ONLY_CHARS = 4000
-_A11Y_MAX_TOTAL_CHARS = 20000
+# Generous: analysis trims its own prompt (see engine/analyzer.py).
+_A11Y_MAX_TOTAL_CHARS = 300000
 # Web content (Electron apps, browsers) starts 7-8 levels down, and its text
 # sits up to ~40 levels deeper. Depth starts again at each web area.
 _A11Y_MAX_DEPTH = 8
@@ -398,7 +399,7 @@ class MacOSAdapter(PlatformAdapter):
         """
         seen = set() if seen is None else seen
         budget = [_A11Y_MAX_TOTAL_CHARS, _A11Y_MAX_NODES] if budget is None else budget
-        if depth > max_depth or len(texts) > 500 or budget[0] <= 0 or budget[1] <= 0:
+        if depth > max_depth or budget[0] <= 0 or budget[1] <= 0:
             return
         budget[1] -= 1
 
