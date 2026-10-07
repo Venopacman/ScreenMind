@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from screenmind.config import settings
-from screenmind.storage.models import ActivityRecord, DevContext, ScreenshotEntry, DailySummary
+from screenmind.storage.models import ActivityRecord, ScreenshotEntry
 
 logger = logging.getLogger("screenmind.storage.database")
 
@@ -303,17 +303,16 @@ class Database:
             """
             INSERT INTO activities (
                 timestamp, screenshot_path, window_title, detected_app,
-                bookmarked, app_name, category, summary, details,
-                visible_text, mood, confidence, embedding, scene_description,
+                app_name, category, summary, details,
+                visible_text, mood, confidence, scene_description,
                 analyzed, analysis_error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entry.timestamp.isoformat(),
                 entry.screenshot_path,
                 entry.window_title,
                 entry.detected_app_name,
-                entry.bookmarked,
                 analysis.app_name if analysis else None,
                 analysis.activity_category if analysis else None,
                 analysis.activity_summary if analysis else None,
@@ -321,7 +320,6 @@ class Database:
                 json.dumps(analysis.visible_text_snippets) if analysis else None,
                 analysis.mood if analysis else None,
                 analysis.confidence if analysis else None,
-                self._encode_embedding(entry.embedding),
                 analysis.scene_description if analysis else None,
                 entry.analyzed,
                 entry.analysis_error,
@@ -334,7 +332,6 @@ class Database:
         self,
         activity_id: int,
         analysis: ActivityRecord,
-        embedding: Optional[List[float]] = None,
         ocr_text: Optional[str] = None,
         ocr_boxes: Optional[str] = None,
         organized_text: Optional[str] = None,
@@ -349,7 +346,7 @@ class Database:
             UPDATE activities SET
                 app_name = ?, category = ?, summary = ?, details = ?,
                 visible_text = ?, mood = ?, confidence = ?,
-                embedding = ?, ocr_text = ?, ocr_boxes = ?,
+                ocr_text = ?, ocr_boxes = ?,
                 scene_description = ?, organized_text = ?,
                 analysis_method = ?, active_url = ?,
                 analyzed = 1, status = ?, analysis_error = NULL
@@ -363,7 +360,6 @@ class Database:
                 json.dumps(analysis.visible_text_snippets),
                 analysis.mood,
                 analysis.confidence,
-                self._encode_embedding(embedding),
                 ocr_text,
                 ocr_boxes,
                 analysis.scene_description,
@@ -397,7 +393,7 @@ class Database:
                 app_name = COALESCE(app_name, detected_app),
                 category = NULL, summary = NULL, details = NULL,
                 visible_text = NULL, mood = NULL, confidence = NULL,
-                embedding = NULL, scene_description = NULL, organized_text = NULL,
+                scene_description = NULL, organized_text = NULL,
                 ocr_text = ?, ocr_boxes = NULL, active_url = ?,
                 analysis_method = 'skipped',
                 analyzed = 1, status = 'skipped', analysis_error = NULL
@@ -414,10 +410,8 @@ class Database:
         conn = self._get_conn()
         rows = conn.execute(
             """
-            SELECT a.*, d.repo_name, d.branch, d.last_commit,
-                   d.changed_files, d.insertions, d.deletions
+            SELECT a.*
             FROM activities a
-            LEFT JOIN dev_contexts d ON d.activity_id = a.id
             WHERE DATE(a.timestamp) = ?
             ORDER BY a.timestamp DESC
             LIMIT ? OFFSET ?
@@ -431,10 +425,8 @@ class Database:
         conn = self._get_conn()
         row = conn.execute(
             """
-            SELECT a.*, d.repo_name, d.branch, d.last_commit,
-                   d.changed_files, d.insertions, d.deletions
+            SELECT a.*
             FROM activities a
-            LEFT JOIN dev_contexts d ON d.activity_id = a.id
             WHERE a.id = ?
             """,
             (activity_id,),
@@ -454,60 +446,6 @@ class Database:
             (limit,),
         ).fetchall()
         return [self._row_to_dict(row) for row in rows]
-
-    def toggle_bookmark(self, activity_id: int) -> bool:
-        """Toggle the bookmark status of an activity. Returns new status."""
-        conn = self._get_conn()
-        conn.execute(
-            "UPDATE activities SET bookmarked = NOT bookmarked WHERE id = ?",
-            (activity_id,),
-        )
-        conn.commit()
-        row = conn.execute(
-            "SELECT bookmarked FROM activities WHERE id = ?", (activity_id,)
-        ).fetchone()
-        return bool(row["bookmarked"]) if row else False
-
-    def get_bookmarks(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get all bookmarked activities."""
-        conn = self._get_conn()
-        rows = conn.execute(
-            """
-            SELECT a.*, d.repo_name, d.branch, d.last_commit,
-                   d.changed_files, d.insertions, d.deletions
-            FROM activities a
-            LEFT JOIN dev_contexts d ON d.activity_id = a.id
-            WHERE a.bookmarked = 1
-            ORDER BY a.timestamp DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-        return [self._row_to_dict(row) for row in rows]
-
-    # ── Dev Context ──────────────────────────────────────────────────────
-
-    def insert_dev_context(self, activity_id: int, ctx: DevContext):
-        """Insert developer context for a coding activity."""
-        conn = self._get_conn()
-        conn.execute(
-            """
-            INSERT INTO dev_contexts (
-                activity_id, repo_name, branch, last_commit,
-                changed_files, insertions, deletions
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                activity_id,
-                ctx.repo_name,
-                ctx.branch,
-                ctx.last_commit,
-                json.dumps(ctx.changed_files),
-                ctx.insertions,
-                ctx.deletions,
-            ),
-        )
-        conn.commit()
 
     # ── Statistics ───────────────────────────────────────────────────────
 
@@ -546,21 +484,6 @@ class Database:
             (date_from, date_to),
         ).fetchall()
 
-        # Top repos
-        repos = conn.execute(
-            """
-            SELECT d.repo_name, COUNT(*) as cnt
-            FROM dev_contexts d
-            JOIN activities a ON a.id = d.activity_id
-            WHERE DATE(a.timestamp) BETWEEN ? AND ?
-            AND d.repo_name IS NOT NULL AND d.repo_name != ''
-            GROUP BY d.repo_name
-            ORDER BY cnt DESC
-            LIMIT 10
-            """,
-            (date_from, date_to),
-        ).fetchall()
-
         # Meetings stats
         try:
             meetings_row = conn.execute(
@@ -590,7 +513,6 @@ class Database:
             "total_activities": total,
             "category_breakdown": {r["category"]: r["cnt"] for r in categories},
             "top_apps": {r["app_name"]: r["cnt"] for r in apps},
-            "top_repos": {r["repo_name"]: r["cnt"] for r in repos},
             "meetings_count": meetings_count,
             "meetings_minutes": meetings_minutes,
             "status_breakdown": {r["status"]: r["cnt"] for r in status_rows},
@@ -612,71 +534,6 @@ class Database:
             (date_from, date_to),
         ).fetchall()
         return [dict(row) for row in rows]
-
-    # ── Rewind ───────────────────────────────────────────────────────────
-
-    def get_rewind_data(self, target_date: str) -> List[Dict[str, Any]]:
-        """Get screenshots + summaries for day rewind timelapse."""
-        conn = self._get_conn()
-        rows = conn.execute(
-            """
-            SELECT id, timestamp, screenshot_path, app_name, category, summary, bookmarked
-            FROM activities
-            WHERE DATE(timestamp) = ? AND status = 'ok'
-            ORDER BY timestamp ASC
-            """,
-            (target_date,),
-        ).fetchall()
-        return [dict(row) for row in rows]
-
-    # ── Daily Summary ────────────────────────────────────────────────────
-
-    def upsert_daily_summary(self, summary: DailySummary, standup: str = ""):
-        """Insert or update a daily summary."""
-        conn = self._get_conn()
-        # Migrate: add standup column if missing
-        try:
-            conn.execute("ALTER TABLE daily_summaries ADD COLUMN standup TEXT")
-        except Exception:
-            logger.debug("standup column already exists")
-        conn.execute(
-            """
-            INSERT INTO daily_summaries (date, summary, standup, total_activities, category_breakdown, top_repos, productive_hours)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(date) DO UPDATE SET
-                summary = COALESCE(NULLIF(excluded.summary, ''), daily_summaries.summary),
-                standup = COALESCE(NULLIF(excluded.standup, ''), daily_summaries.standup),
-                total_activities = excluded.total_activities,
-                category_breakdown = excluded.category_breakdown,
-                top_repos = excluded.top_repos,
-                productive_hours = excluded.productive_hours
-            """,
-            (
-                summary.date,
-                summary.summary,
-                standup,
-                summary.total_activities,
-                json.dumps(summary.category_breakdown),
-                json.dumps(summary.top_repos),
-                summary.productive_hours,
-            ),
-        )
-        conn.commit()
-
-    def get_daily_summary(self, target_date: str) -> Optional[Dict[str, Any]]:
-        """Get daily summary for a date."""
-        conn = self._get_conn()
-        row = conn.execute(
-            "SELECT * FROM daily_summaries WHERE date = ?", (target_date,)
-        ).fetchone()
-        if row:
-            result = dict(row)
-            result["category_breakdown"] = json.loads(
-                result.get("category_breakdown") or "{}"
-            )
-            result["top_repos"] = json.loads(result.get("top_repos") or "[]")
-            return result
-        return None
 
     # ── Cleanup ──────────────────────────────────────────────────────────
 
@@ -853,29 +710,7 @@ class Database:
                 d["visible_text"] = json.loads(d["visible_text"])
             except (json.JSONDecodeError, TypeError):
                 d["visible_text"] = []
-        if d.get("changed_files"):
-            try:
-                d["changed_files"] = json.loads(d["changed_files"])
-            except (json.JSONDecodeError, TypeError):
-                d["changed_files"] = []
         return d
-
-    @staticmethod
-    def _encode_embedding(embedding: Optional[List[float]]) -> Optional[bytes]:
-        """Encode embedding list as bytes for BLOB storage."""
-        if embedding is None:
-            return None
-        import struct
-        return struct.pack(f"{len(embedding)}f", *embedding)
-
-    @staticmethod
-    def _decode_embedding(blob: Optional[bytes]) -> Optional[List[float]]:
-        """Decode BLOB back to embedding list."""
-        if blob is None:
-            return None
-        import struct
-        count = len(blob) // 4
-        return list(struct.unpack(f"{count}f", blob))
 
     # ── Meetings ─────────────────────────────────────────────────────────
 

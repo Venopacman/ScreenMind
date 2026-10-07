@@ -2,7 +2,6 @@
 Capture Worker
 Background loop that captures screenshots at regular intervals,
 deduplicates them, and enqueues them for Gemma 4 analysis.
-Also handles hotkey-triggered instant bookmarked captures.
 """
 
 import asyncio
@@ -44,7 +43,6 @@ class CaptureResult:
     timestamp: datetime
     window_title: Optional[str] = None
     app_name: Optional[str] = None
-    bookmarked: bool = False
     image: Optional[Image.Image] = None
     activity_id: Optional[int] = None
     a11y_text: Optional[str] = None  # Pre-captured at screenshot time (correct window)
@@ -56,7 +54,7 @@ class CaptureResult:
 class CaptureWorker:
     """
     Background worker that captures screenshots at configurable intervals.
-    Skips duplicate frames. Supports hotkey-triggered instant captures.
+    Skips duplicate frames. UI events can trigger an extra capture.
     """
 
     def __init__(self, queue: asyncio.Queue, database=None):
@@ -75,7 +73,6 @@ class CaptureWorker:
         self._running = False
         self._capture_count = 0
         self._skip_count = 0
-        self._pending_bookmark = False
         self._last_save_time = 0.0
         self._consecutive_skips = 0  # Track idle state
         # UI events (set by main when the recorder exists)
@@ -97,14 +94,9 @@ class CaptureWorker:
             f"{settings.capture_interval}s max), "
             f"Saving to: {settings.screenshots_dir}"
         )
-        logger.info("Press Ctrl+Shift+P or click 'Start Capturing' in the dashboard to begin.")
+        logger.info("Click 'Start Capturing' in the dashboard to begin.")
 
         while self._running:
-            # Handle pending bookmark captures
-            if hasattr(self, '_pending_bookmark') and self._pending_bookmark:
-                self._pending_bookmark = False
-                await self._do_bookmark_capture()
-
             # Event-driven capture (app switch, click, typing pause)
             reason = self._take_due_trigger()
             if reason and not self._paused:
@@ -263,7 +255,6 @@ class CaptureWorker:
                 screenshot_path=str(filepath),
                 window_title=window_title,
                 detected_app_name=app_name,
-                bookmarked=False,
                 analyzed=False,
             )
             activity_id = self._db.insert_activity(entry)
@@ -277,7 +268,6 @@ class CaptureWorker:
             timestamp=now,
             window_title=window_title,
             app_name=app_name,
-            bookmarked=False,
             image=image,
             activity_id=activity_id,
             a11y_text=a11y_text,
@@ -296,80 +286,6 @@ class CaptureWorker:
             f"[skipped: {self._skip_count}]"
         )
         return True
-
-    def trigger_bookmark(self):
-        """
-        Called by the hotkey listener. Triggers an immediate capture
-        with the bookmarked flag set. Thread-safe via asyncio.
-        """
-        try:
-            self._pending_bookmark = True
-            logger.info("Bookmark capture queued.")
-        except Exception as e:
-            logger.error(f"Bookmark error: {e}")
-
-    async def _do_bookmark_capture(self):
-        """Perform an immediate bookmarked capture of each display."""
-        window_title = get_active_window_title()
-        app_name = get_active_app_name()
-
-        monitors = self._screen.monitors_to_capture()
-        active = self._screen.active_monitor() if len(monitors) > 1 else None
-        for monitor in monitors:
-            mon_app, mon_title, focused = self._label_monitor(
-                monitor, active, app_name, window_title
-            )
-            await self._bookmark_monitor(monitor, mon_app, mon_title, focused,
-                                         active_title=window_title)
-
-    async def _bookmark_monitor(self, monitor, app_name, window_title, focused, active_title):
-        result = self._screen.capture(monitor)
-        if result is None:
-            return
-
-        filepath, image = result
-
-        # Always process bookmarked captures — never dedup
-        now = datetime.now()
-        window_title = filter_sensitive(window_title)
-        a11y_text, browser_url = self._read_focused(focused, active_title)
-
-        # Insert to DB immediately
-        activity_id = None
-        if self._db:
-            entry = ScreenshotEntry(
-                timestamp=now,
-                screenshot_path=str(filepath),
-                window_title=window_title,
-                detected_app_name=app_name,
-                bookmarked=True,
-                analyzed=False,
-            )
-            activity_id = self._db.insert_activity(entry)
-
-        user_actions = await self._link_ui_events(activity_id, now)
-
-        # Compute pHash for bookmark captures (dedup doesn't run for bookmarks)
-        import imagehash
-        bookmark_phash = imagehash.phash(image)
-
-        capture_result = CaptureResult(
-            filepath=filepath,
-            timestamp=now,
-            window_title=window_title,
-            app_name=app_name,
-            bookmarked=True,
-            image=image,
-            activity_id=activity_id,
-            a11y_text=a11y_text,
-            phash=bookmark_phash,
-            user_actions=user_actions,
-            browser_url=browser_url,
-        )
-
-        await self._queue.put(capture_result)
-        self._capture_count += 1
-        logger.info(f"[*] Bookmarked capture #{self._capture_count}")
 
     def _read_focused(self, focused, active_title):
         """A11y text and browser URL of the focused window, read just after the grab.

@@ -52,21 +52,10 @@ class ActivityRecord(BaseModel):
     )
 
 
-class DevContext(BaseModel):
-    """Git context for coding activities."""
-
-    repo_name: str = ""
-    branch: str = ""
-    last_commit: str = ""
-    changed_files: List[str] = Field(default_factory=list)
-    insertions: int = 0
-    deletions: int = 0
-
-
 class ScreenshotEntry(BaseModel):
     """
     Complete entry for a single captured & analyzed screenshot.
-    Combines capture metadata, Gemma 4 analysis, and optional dev context.
+    Combines capture metadata and Gemma 4 analysis.
     """
 
     id: Optional[int] = None
@@ -77,39 +66,10 @@ class ScreenshotEntry(BaseModel):
     screenshot_path: str
     window_title: Optional[str] = None
     detected_app_name: Optional[str] = None  # From OS-level window detection
-    bookmarked: bool = False
 
     # Gemma 4 analysis results
     analysis: Optional[ActivityRecord] = None
 
-    # Developer context (populated for coding activities)
-    dev_context: Optional[DevContext] = None
-
-    # Embedding vector (stored as list of floats for JSON serialization)
-    embedding: Optional[List[float]] = None
-
     # Processing status
     analyzed: bool = False
     analysis_error: Optional[str] = None
-
-
-class DailySummary(BaseModel):
-    """AI-generated daily activity summary."""
-
-    id: Optional[int] = None
-    date: str  # YYYY-MM-DD
-    summary: str = ""
-    total_activities: int = 0
-    category_breakdown: dict = Field(default_factory=dict)
-    top_repos: List[str] = Field(default_factory=list)
-    productive_hours: float = 0.0
-
-
-class StandupNotes(BaseModel):
-    """Auto-generated standup meeting notes."""
-
-    date: str
-    yesterday: List[str] = Field(default_factory=list)
-    today: List[str] = Field(default_factory=list)
-    blockers: List[str] = Field(default_factory=list)
-    raw_text: str = ""

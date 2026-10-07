@@ -238,18 +238,6 @@ class AudioWorker:
         if not self._recording:
             return
 
-        # System-wide overlay notification
-        try:
-            from screenmind.ui.overlay import show_overlay_notification
-            show_overlay_notification(
-                title="ScreenMind is Transcribing",
-                message=f"Meeting detected in {match.app} — recording audio...",
-                duration=4.0,
-                color="#ec4899",
-            )
-        except Exception:
-            pass  # Notification is best-effort
-
         # Start recording in background thread
         self._stop_recording.clear()
         self._recording_thread = threading.Thread(
@@ -306,19 +294,6 @@ class AudioWorker:
 
         full_transcript = "\n".join(self._session_transcript)
         logger.info(f"Meeting ended ({duration:.1f} min, {len(self._session_transcript)} chunks)")
-
-        # System-wide overlay notification
-        try:
-            from screenmind.ui.overlay import show_overlay_notification
-            chunks = len(self._session_transcript)
-            show_overlay_notification(
-                title="✅ Meeting Recording Complete",
-                message=f"{duration:.0f} min recorded • {chunks} audio chunks • Generating summary...",
-                duration=5.0,
-                color="#10b981",
-            )
-        except Exception:
-            pass
 
         if meeting_id and full_transcript.strip():
             # Update with transcript (summary comes async)

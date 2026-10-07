@@ -2,14 +2,10 @@
 Unified LLM Client for ScreenMind
 Communicates with llama-server (llama.cpp) via OpenAI-compatible API.
 Supports text, vision (images), and audio input.
-
-Inference priority: chat can cancel in-flight analysis via cancel_current_inference().
-llama-server frees the GPU slot when the HTTP client disconnects.
 """
 
 import base64
 import logging
-import threading
 import time
 from typing import Optional, List
 
@@ -23,47 +19,6 @@ logger = logging.getLogger("screenmind.engine.llm_client")
 # Timeout for inference calls (screenshots can take 30-60s on slow hardware)
 INFERENCE_TIMEOUT = 300.0
 HEALTH_TIMEOUT = 5.0
-
-
-class InferenceCancelled(Exception):
-    """Raised when an in-flight inference is cancelled (e.g., chat pre-emption)."""
-    pass
-
-
-# ── Cancellation state ──────────────────────────────────────────────────────
-# _cancel_event: set by cancel_current_inference(), cleared at start of chat()
-# _active_client: the httpx.Client for the in-flight request (closed to abort)
-# _client_lock: protects only _active_client reference, never blocks requests
-_cancel_event = threading.Event()
-_active_client: Optional[httpx.Client] = None
-_client_lock = threading.Lock()
-
-
-def cancel_current_inference():
-    """
-    Cancel any in-flight inference request. Safe to call anytime.
-
-    Sets the cancel flag and closes the active HTTP client, which causes
-    llama-server to free the GPU slot immediately. The caller (analysis worker)
-    will receive an InferenceCancelled or httpx exception and should re-queue.
-
-    Mainly beneficial for merged/accurate mode (~76s). In fast mode (~12s),
-    the analysis may finish before cancellation propagates.
-    """
-    _cancel_event.set()
-    with _client_lock:
-        if _active_client:
-            try:
-                _active_client.close()
-            except Exception:
-                pass  # Already closed or errored — fine
-    logger.info("Inference cancelled (chat priority)")
-
-
-def is_inference_active() -> bool:
-    """Check if an inference request is currently in-flight."""
-    with _client_lock:
-        return _active_client is not None
 
 
 def _base_url() -> str:
@@ -87,15 +42,8 @@ def chat(
         {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}},
     ]}]
 
-    Raises InferenceCancelled if cancel_current_inference() is called during request.
     Returns the assistant's response text.
     """
-    global _active_client
-
-    # Clear cancel flag at start of every request — prevents stale cancellation
-    # from a previous cancel_current_inference() call that had nothing to cancel
-    _cancel_event.clear()
-
     url = f"{_base_url()}/v1/chat/completions"
     payload = {
         "messages": messages,
@@ -103,25 +51,13 @@ def chat(
         "max_tokens": max_tokens,
     }
 
-    # Create a dedicated client for this request so it can be closed independently
     client = httpx.Client(timeout=timeout)
-    with _client_lock:
-        _active_client = client
-
     try:
         response = client.post(url, json=payload)
         response.raise_for_status()
         data = response.json()
         return data["choices"][0]["message"]["content"]
-    except Exception as e:
-        # Check if this was a cancellation (flag set + connection error)
-        if _cancel_event.is_set():
-            raise InferenceCancelled("Inference cancelled for chat priority") from e
-        raise
     finally:
-        with _client_lock:
-            if _active_client is client:
-                _active_client = None
         try:
             client.close()
         except Exception:

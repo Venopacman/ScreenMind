@@ -16,15 +16,12 @@ def _isolate_data_dir(tmp_path_factory):
 
     Without this, tests write into the user's live data: CaptureWorker.pause()
     persists capture_paused=true to settings.json (so the next app start is
-    paused), and agent/webhook tests leave output and webhook_log.db behind.
+    paused).
     Session-scoped because some modules cache connections to files there.
     """
     data_dir = tmp_path_factory.mktemp("screenmind-data")
     mp = pytest.MonkeyPatch()
     mp.setattr(settings, "data_dir", str(data_dir))
-    # Computed from data_path at import time, so it needs its own patch
-    from screenmind.engine import agent_runner
-    mp.setattr(agent_runner, "_LOG_FILE", data_dir / "agents" / "run_log.json")
     yield data_dir
     mp.undo()
 

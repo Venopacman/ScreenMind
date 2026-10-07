@@ -36,12 +36,6 @@ class TestCaptureWorker:
         assert "captures" in stats
         assert "skipped" in stats
 
-    def test_trigger_bookmark(self):
-        worker, _ = self._make_worker()
-        assert worker._pending_bookmark is False
-        worker.trigger_bookmark()
-        assert worker._pending_bookmark is True
-
     def test_stop_sets_running_false(self):
         worker, _ = self._make_worker()
         worker._running = True
@@ -74,19 +68,9 @@ class TestCaptureResult:
             app_name="TestApp",
         )
         assert result.app_name == "TestApp"
-        assert result.bookmarked is False
         assert result.activity_id is None
         assert result.a11y_text is None
         assert result.phash is None
-
-    def test_create_bookmarked(self, tmp_path):
-        result = CaptureResult(
-            filepath=tmp_path / "test.jpg",
-            timestamp=datetime.now(),
-            bookmarked=True,
-        )
-        assert result.bookmarked is True
-
 
 class TestAnalysisWorkerStats:
     """Tests for analysis worker state management."""
@@ -133,7 +117,6 @@ class TestAnalysisWorkerStats:
         assert worker._errors == 0
         assert worker._cache_hits == 0
         assert len(worker._app_cache) == 0
-        assert len(worker._priority_items) == 0
 
     def test_stop(self):
         from screenmind.workers.analysis_worker import AnalysisWorker
@@ -193,7 +176,6 @@ class TestAnalysisWorkerBackfill:
             screenshot_path=str(shot),
             window_title="Chats",
             detected_app_name="Telegram",
-            bookmarked=False,
             analyzed=False,
         ))
 
@@ -219,7 +201,7 @@ class TestEmptyScreenRule:
         Image.new("RGB", (64, 64), "teal").save(shot)
         activity_id = db.insert_activity(ScreenshotEntry(
             timestamp=datetime.now(), screenshot_path=str(shot),
-            window_title=title, detected_app_name=app, bookmarked=False, analyzed=False,
+            window_title=title, detected_app_name=app, analyzed=False,
         ))
         worker = AnalysisWorker(queue=asyncio.Queue(maxsize=100), database=db)
         worker._ocr = MagicMock(is_available=True)
@@ -417,7 +399,7 @@ class TestBacklogSkip:
         ts = datetime.now() - timedelta(seconds=600)
         activity_id = db.insert_activity(ScreenshotEntry(
             timestamp=ts, screenshot_path=str(shot), window_title="Twitch — Mozilla Firefox",
-            detected_app_name="firefox", bookmarked=False, analyzed=False,
+            detected_app_name="firefox", analyzed=False,
         ))
         db.set_user_actions(activity_id, "- clicked 'Browse'")
         return CaptureResult(
@@ -431,7 +413,6 @@ class TestBacklogSkip:
 
         queue = asyncio.Queue(maxsize=10)
         worker = AnalysisWorker(queue=queue, database=db)
-        worker._ensure_embedder = lambda: None
         worker._backfill_skipped = AsyncMock()
         worker._ocr = MagicMock(is_available=True)
         worker._analyzer = MagicMock()
@@ -624,7 +605,7 @@ class TestOcrBoxRedaction:
         Image.new("RGB", (400, 200), "white").save(shot)
         activity_id = db.insert_activity(ScreenshotEntry(
             timestamp=datetime.now(), screenshot_path=str(shot), window_title="notes.txt - Notepad",
-            detected_app_name="notepad", bookmarked=False, analyzed=False,
+            detected_app_name="notepad", analyzed=False,
         ))
 
         def box(x, y, text):

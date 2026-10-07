@@ -22,7 +22,6 @@ from screenmind.storage.database import Database
 from screenmind.workers.capture_worker import CaptureWorker
 from screenmind.workers.analysis_worker import AnalysisWorker
 from screenmind.workers.audio_worker import AudioWorker
-from screenmind.capture.hotkey import HotkeyListener
 from screenmind.api.server import create_app
 
 logger = logging.getLogger("screenmind.main")
@@ -68,7 +67,6 @@ def print_first_run_help():
         _safe_print("  |  Screenshots will be saved to:           |")
         _safe_print(f"  |    {str(settings.screenshots_dir)[:38]:<38} |")
         _safe_print("  |                                          |")
-        _safe_print("  |  Press Ctrl+Shift+B to bookmark a moment |")
         _safe_print("  |  Open the dashboard to see your timeline |")
         _safe_print("  +==========================================+")
         _safe_print()
@@ -178,9 +176,6 @@ async def main():
             logger.info(f"Retention cleanup: removed {cleaned['activities']} activities, "
                   f"{cleaned['meetings']} meetings older than {settings.retention_days} days")
 
-    # Thread-safe shutdown flag (checked by voice transcription thread before DB writes)
-    _shutdown = threading.Event()
-
     # ── Processing queue ─────────────────────────────────────────────
     processing_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
 
@@ -205,123 +200,6 @@ async def main():
     ui_recorder = UiEventRecorder(database=db, capture_worker=capture_worker, backend=create_backend())
     capture_worker._ui_recorder = ui_recorder
 
-    # ── Hotkey Listener ──────────────────────────────────────────────
-    from screenmind.ui.overlay import show_overlay_notification
-    from screenmind.capture.voice_recorder import VoiceRecorder
-    from screenmind.engine import llm_client
-
-    voice_recorder = VoiceRecorder()
-
-    def _on_bookmark():
-        capture_worker.trigger_bookmark()
-        show_overlay_notification("📌 Bookmarked", "Screenshot captured and bookmarked", duration=2.5, color="#10b981")
-
-    def _toggle_pause():
-        if capture_worker.is_paused:
-            capture_worker.resume(source="hotkey")
-            show_overlay_notification("▶ Capturing Resumed", "Screen recording is active", duration=2.5, color="#8b5cf6")
-        else:
-            capture_worker.pause(source="hotkey")
-            show_overlay_notification("⏸ Capturing Paused", "Screen recording is paused", duration=2.5, color="#f59e0b")
-
-    def _on_voice_start():
-        voice_recorder.start()
-        show_overlay_notification("🎙️ Recording", "Speak now... release to stop", duration=1.0, color="#ec4899")
-
-    def _on_voice_stop():
-        import threading
-
-        result = voice_recorder.stop()
-        if result is None:
-            show_overlay_notification("⚠️ Too Short", "Recording discarded", duration=1.5, color="#f59e0b")
-            return
-
-        wav_bytes, screenshot_path, wav_path = result
-        show_overlay_notification("✨ Transcribing...", "Processing voice memo", duration=2.0, color="#8b5cf6")
-
-        # Transcribe in background thread (don't block hotkey handler)
-        def _transcribe():
-            try:
-                transcript = llm_client.transcribe_audio(wav_bytes)
-                # Guard: don't write to DB if shutdown is in progress
-                if _shutdown.is_set():
-                    logger.info("Shutdown in progress — discarding memo")
-                    return
-                # Determine if transcription succeeded or fell back
-                has_transcript = transcript and len(transcript.strip()) >= 3
-                if not has_transcript:
-                    logger.warning("Voice memo transcription empty — saving with fallback summary")
-                    transcript = ""
-                # Always save to DB — even without transcription, user can
-                # play back the audio and see the screenshot
-                from screenmind.storage.models import ScreenshotEntry
-                from datetime import datetime
-                entry = ScreenshotEntry(
-                    timestamp=datetime.now(),
-                    screenshot_path=str(screenshot_path) if screenshot_path else "",
-                    window_title="Voice Memo",
-                    detected_app_name="Voice Memo",
-                    bookmarked=True,
-                    analyzed=False,
-                )
-                activity_id = db.insert_activity(entry)
-                # Update with transcription (or fallback)
-                from screenmind.storage.models import ActivityRecord
-                summary = transcript[:200] if has_transcript else "Voice memo (transcription unavailable)"
-                analysis = ActivityRecord(
-                    app_name="Voice Memo",
-                    activity_category="other",
-                    activity_summary=summary,
-                    detailed_context=str(wav_path),
-                    mood="neutral",
-                    confidence=0.9 if has_transcript else 0.1,
-                )
-                db.update_activity_analysis(activity_id, analysis)
-                if has_transcript:
-                    logger.info(f"Saved: {transcript[:60]}...")
-                    show_overlay_notification("✅ Memo Saved", transcript[:50], duration=2.0, color="#10b981")
-                else:
-                    logger.info("Saved voice memo (no transcription)")
-                    show_overlay_notification("✅ Memo Saved", "Audio saved — transcription unavailable", duration=2.5, color="#f59e0b")
-            except Exception as e:
-                logger.error(f"Transcription failed: {e}")
-                # Still save to DB — user can play back audio, screenshot is preserved
-                try:
-                    if not _shutdown.is_set():
-                        from screenmind.storage.models import ScreenshotEntry, ActivityRecord
-                        from datetime import datetime
-                        entry = ScreenshotEntry(
-                            timestamp=datetime.now(),
-                            screenshot_path=str(screenshot_path) if screenshot_path else "",
-                            window_title="Voice Memo",
-                            detected_app_name="Voice Memo",
-                            bookmarked=True,
-                            analyzed=False,
-                        )
-                        activity_id = db.insert_activity(entry)
-                        analysis = ActivityRecord(
-                            app_name="Voice Memo",
-                            activity_category="other",
-                            activity_summary="Voice memo (transcription failed)",
-                            detailed_context=str(wav_path),
-                            mood="neutral",
-                            confidence=0.1,
-                        )
-                        db.update_activity_analysis(activity_id, analysis)
-                        logger.info("Saved voice memo despite transcription failure")
-                except Exception as db_err:
-                    logger.error(f"Failed to save voice memo fallback: {db_err}")
-                show_overlay_notification("❌ Transcription Failed", "Audio saved — transcription failed", duration=2.5, color="#ef4444")
-
-        threading.Thread(target=_transcribe, daemon=True).start()
-
-    hotkey_listener = HotkeyListener(
-        bookmark_callback=_on_bookmark,
-        pause_callback=_toggle_pause,
-        voice_start_callback=_on_voice_start,
-        voice_stop_callback=_on_voice_stop,
-    )
-
     # ── API Server ───────────────────────────────────────────────────
     app = create_app(
         database=db,
@@ -337,7 +215,6 @@ async def main():
 
     def handle_signal(*_):
         _safe_print("\n[Main] Shutdown signal received...")
-        _shutdown.set()  # Signal voice transcription thread
         shutdown_event.set()
 
     signal.signal(signal.SIGINT, handle_signal)
@@ -376,38 +253,13 @@ async def main():
     server_thread.start()
 
     # ── Start Workers ────────────────────────────────────────────────
-    hotkey_listener.start()
     ui_recorder.sync_with_settings()
 
     capture_task = asyncio.create_task(capture_worker.run())
     analysis_task = asyncio.create_task(analysis_worker.run())
 
-    # ── Agent System ─────────────────────────────────────────────────
-    agent_scheduler = None
-    try:
-        from screenmind.engine.agent_runner import AgentScheduler, get_agents_dir
-        import shutil as _shutil
-        from pathlib import Path as _Path
-        # Copy default agents on first run
-        agents_dir = get_agents_dir()
-        defaults_dir = _Path(__file__).parent / "default_agents"
-        if defaults_dir.exists():
-            for f in defaults_dir.iterdir():
-                dest = agents_dir / f.name
-                if not dest.exists():
-                    _shutil.copy2(f, dest)
-                    logger.info(f"Installed default agent: {f.name}")
-
-        if settings.agents_enabled:
-            agent_scheduler = AgentScheduler()
-            agent_scheduler.start()
-            logger.info(f"Scheduler started — scanning {agents_dir}")
-    except Exception as e:
-        logger.info(f"Could not start scheduler: {e}")
-
     logger.info(f"Dashboard: http://{settings.api_host}:{settings.api_port}")
     logger.info(f"API docs:  http://{settings.api_host}:{settings.api_port}/docs")
-    logger.info(f"Bookmark:  {settings.bookmark_hotkey}")
     _safe_print()
     logger.info("ScreenMind is running! Press Ctrl+C to stop.")
     _safe_print()
@@ -420,10 +272,7 @@ async def main():
     capture_worker.stop()
     analysis_worker.stop()
     audio_worker.stop()
-    hotkey_listener.stop()
     ui_recorder.stop()
-    if agent_scheduler:
-        agent_scheduler.stop()
     server.should_exit = True
 
     capture_task.cancel()

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from screenmind.storage.models import ScreenshotEntry, ActivityRecord, DailySummary
+from screenmind.storage.models import ScreenshotEntry, ActivityRecord
 
 
 def test_insert_and_get_activity(db):
@@ -11,7 +11,6 @@ def test_insert_and_get_activity(db):
         screenshot_path="/tmp/test.jpg",
         window_title="VS Code",
         detected_app_name="Code",
-        bookmarked=False,
         analyzed=False,
     )
     activity_id = db.insert_activity(entry)
@@ -43,38 +42,6 @@ def test_get_activities_empty_date(db):
     assert activities == []
 
 
-def test_toggle_bookmark(db):
-    entry = ScreenshotEntry(
-        timestamp=datetime(2026, 5, 16, 12, 0, 0),
-        screenshot_path="/tmp/bm.jpg",
-        bookmarked=False,
-        analyzed=False,
-    )
-    aid = db.insert_activity(entry)
-
-    # Toggle on
-    new_state = db.toggle_bookmark(aid)
-    assert new_state is True
-
-    # Toggle off
-    new_state = db.toggle_bookmark(aid)
-    assert new_state is False
-
-
-def test_get_bookmarks(db):
-    for i in range(3):
-        entry = ScreenshotEntry(
-            timestamp=datetime(2026, 5, 16, 10 + i, 0, 0),
-            screenshot_path=f"/tmp/bm_{i}.jpg",
-            bookmarked=(i == 1),  # Only middle one bookmarked
-            analyzed=False,
-        )
-        db.insert_activity(entry)
-
-    bookmarks = db.get_bookmarks()
-    assert len(bookmarks) == 1
-
-
 def test_update_activity_analysis(db):
     entry = ScreenshotEntry(
         timestamp=datetime(2026, 5, 16, 14, 0, 0),
@@ -97,25 +64,6 @@ def test_update_activity_analysis(db):
     assert activity["category"] == "browsing"
     assert activity["summary"] == "Reading docs"
     assert activity["analyzed"] == 1
-
-
-def test_upsert_daily_summary(db):
-    summary = DailySummary(
-        date="2026-05-16",
-        summary="Great day",
-        total_activities=10,
-    )
-    db.upsert_daily_summary(summary)
-
-    result = db.get_daily_summary("2026-05-16")
-    assert result is not None
-    assert result["summary"] == "Great day"
-
-    # Upsert again (update)
-    summary.summary = "Updated summary"
-    db.upsert_daily_summary(summary)
-    result = db.get_daily_summary("2026-05-16")
-    assert result["summary"] == "Updated summary"
 
 
 def test_delete_by_date(db):

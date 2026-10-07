@@ -4,7 +4,7 @@ import os
 import re
 
 
-# All source files that should use logging (excludes tests, overlay, setup scripts)
+# All source files that should use logging (excludes tests, setup scripts)
 def _source_files():
     """Yield all .py source files in the project."""
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -25,8 +25,8 @@ def _source_files():
 
 def test_no_bare_print_in_source():
     """No bare print() calls in source (all output via logging)."""
-    # Allowed files: overlay.py (subprocess GUI), setup scripts
-    EXCLUDED = {'overlay.py', 'setup_llama.py', 'setup_wizard.py'}
+    # Allowed files: setup scripts
+    EXCLUDED = {'setup_llama.py', 'setup_wizard.py'}
     bare_prints = []
     for filepath in _source_files():
         basename = os.path.basename(filepath)
@@ -48,11 +48,8 @@ def test_no_bare_print_in_source():
 def test_no_emoji_in_logger_calls():
     """Emoji in logger messages crash on Windows cp1252 terminals."""
     emoji_re = re.compile(r'[\U0001F300-\U0001FAFF\u2600-\u27BF\u2300-\u23FF\uFE0F]')
-    EXCLUDED = {'overlay.py'}
     hits = []
     for filepath in _source_files():
-        if os.path.basename(filepath) in EXCLUDED:
-            continue
         with open(filepath, 'r', encoding='utf-8') as f:
             for lineno, line in enumerate(f, 1):
                 if 'logger.' in line and emoji_re.search(line):

@@ -1,7 +1,7 @@
 """
 Analysis Worker
-Consumes screenshots from the capture queue, sends them to Gemma 4,
-enriches with developer context and semantic embeddings, then stores everything.
+Consumes screenshots from the capture queue, extracts text (a11y/OCR),
+labels them with Gemma 4, then stores everything.
 
 Two analysis modes (configurable via settings.analysis_mode):
   - "merged" (Accurate): Single LLM call with thinking (~76s). Gemma detects
@@ -20,7 +20,7 @@ import logging
 import re
 import sys
 import time
-from collections import OrderedDict, deque
+from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -29,9 +29,6 @@ from PIL import Image
 
 from screenmind.config import settings
 from screenmind.engine.analyzer import GemmaAnalyzer
-from screenmind.engine.dev_context import DevContextDetector
-from screenmind.engine.embedder import Embedder
-from screenmind.engine.llm_client import InferenceCancelled
 from screenmind.engine.ocr import OCRExtractor
 from screenmind.storage.database import Database
 from screenmind.storage.models import ScreenshotEntry, ActivityRecord
@@ -166,10 +163,8 @@ class AnalysisWorker:
     """
     Background worker that processes queued screenshots through the full pipeline:
     1. OCR text extraction (fast, feeds into Gemma as context)
-    2. Gemma 4 analysis (merged or fast mode) + Layout detection (Gemma or OCR clustering)
-    3. Developer context enrichment (git integration)
-    4. Semantic embedding generation
-    5. Database storage
+    2. Gemma 4 analysis (merged, balanced or fast mode) + Layout detection (Gemma or OCR clustering)
+    3. Database storage
     """
 
     _APP_CACHE_MAX = 30  # Max entries in per-app LRU cache
@@ -178,16 +173,11 @@ class AnalysisWorker:
         self._queue = queue
         self._db = database
         self._analyzer = GemmaAnalyzer()
-        self._dev_context = DevContextDetector()
         self._ocr = OCRExtractor()
-        self._embedder: Optional[Embedder] = None
         self._running = False
         self._processed = 0
         self._errors = 0
         self._is_backfill = False  # Set by _backfill_skipped for method labeling
-
-        # Lazy-init embedder (large model download on first use)
-        self._embedder_available = True
 
         # Per-app analysis cache: (app_name, title) -> cached results
         # Avoids redundant Gemma calls for identical/similar screens
@@ -195,26 +185,9 @@ class AnalysisWorker:
         self._cache_hits = 0
         self._cache_skips = 0
 
-        # Priority re-queue: items cancelled by chat pre-emption go here
-        # and are processed BEFORE new queue items (front-of-queue behavior)
-        self._priority_items: deque = deque()
-
-    def _ensure_embedder(self):
-        """Lazy-load the embedding model."""
-        if self._embedder is None and self._embedder_available:
-            try:
-                self._embedder = Embedder()
-                self._embedder._ensure_model()  # Pre-load
-            except Exception as e:
-                logger.warning(f"Embedder unavailable: {e}")
-                self._embedder_available = False
-
     async def run(self):
         """Main processing loop."""
         self._running = True
-
-        # Pre-load embedder in background
-        await asyncio.get_event_loop().run_in_executor(None, self._ensure_embedder)
 
         logger.info("Started. Waiting for screenshots...")
         self._last_queue_log = 0  # Track periodic queue depth logging
@@ -232,17 +205,10 @@ class AnalysisWorker:
 
         while self._running:
             try:
-                from_priority = False
                 try:
-                    # Priority items first (re-queued after chat pre-emption)
-                    if self._priority_items:
-                        capture: CaptureResult = self._priority_items.popleft()
-                        from_priority = True
-                        logger.info(f"Resuming priority item ({len(self._priority_items)} remaining)")
-                    else:
-                        capture: CaptureResult = await asyncio.wait_for(
-                            self._queue.get(), timeout=2.0
-                        )
+                    capture: CaptureResult = await asyncio.wait_for(
+                        self._queue.get(), timeout=2.0
+                    )
                 except asyncio.TimeoutError:
                     # Queue empty — check for skipped entries to backfill
                     if self._queue.qsize() == 0:
@@ -269,10 +235,9 @@ class AnalysisWorker:
                             break
 
                 # Time-based staleness skip: don't analyze captures > 3 min old
-                # (they're stale — user has moved on). Bookmarks always analyzed.
-                # Priority items bypass this — they were mid-analysis before chat pre-empted.
+                # (they're stale — user has moved on).
                 age_seconds = (datetime.now() - capture.timestamp).total_seconds()
-                if age_seconds > 180 and not capture.bookmarked and not from_priority:
+                if age_seconds > 180:
                     if capture.activity_id:
                         # Keep what was read at capture time; no OCR, no Gemma.
                         self._db.mark_skipped(
@@ -286,8 +251,7 @@ class AnalysisWorker:
                     continue
 
                 await self._process(capture)
-                if not from_priority:
-                    self._queue.task_done()
+                self._queue.task_done()
 
             except asyncio.CancelledError:
                 break
@@ -323,7 +287,6 @@ class AnalysisWorker:
                 screenshot_path=str(capture.filepath),
                 window_title=capture.window_title,
                 detected_app_name=capture.app_name,
-                bookmarked=capture.bookmarked,
                 analyzed=False,
             )
             activity_id = self._db.insert_activity(entry)
@@ -337,7 +300,7 @@ class AnalysisWorker:
             cached = self._app_cache.get(cache_key)
             tier = "full"  # default: full Gemma call
 
-            if cached and capture.phash and not capture.bookmarked:
+            if cached and capture.phash:
                 phash_diff = capture.phash - cached["phash"]
                 cache_age = time.time() - cached["timestamp"]
 
@@ -359,7 +322,6 @@ class AnalysisWorker:
                 self._db.update_activity_analysis(
                     activity_id=activity_id,
                     analysis=cached["analysis"],
-                    embedding=cached.get("embedding"),
                     ocr_text=cached.get("ocr_text"),
                     ocr_boxes=cached.get("ocr_boxes_json"),
                     organized_text=cached.get("organized_text"),
@@ -490,7 +452,7 @@ class AnalysisWorker:
                 self._cache_hits += 1
                 tier_label = "cache: minor"
                 logger.info(f"Processing #{activity_id} [{tier_label}] ...")
-                # Falls through to: dev_context -> embedding -> DB update -> auto-bookmark
+                # Falls through to: DB update
             else:
                 # --- Tier "full": run Gemma analysis + layout detection ---
                 tier_label = "full"
@@ -518,8 +480,6 @@ class AnalysisWorker:
                                     user_actions=capture.user_actions,
                                 ),
                             )
-                        except InferenceCancelled:
-                            raise  # Don't retry — bubble up for re-queue
                         except Exception as e:
                             err_msg = str(e).lower()
                             is_oom = any(kw in err_msg for kw in OOM_KEYWORDS)
@@ -587,55 +547,13 @@ class AnalysisWorker:
                     except Exception as e:
                         logger.debug(f"Text organization failed (non-fatal): {e}")
 
-            # 4+5. Developer context + Semantic embedding — run in parallel
-            #       Both are independent CPU tasks, no shared state.
-            loop = asyncio.get_event_loop()
-
-            async def _get_dev_context():
-                if self._dev_context.is_coding_activity(
-                    category=analysis.activity_category,
-                    app_name=capture.app_name,
-                    window_title=capture.window_title,
-                ):
-                    return await loop.run_in_executor(
-                        None,
-                        lambda: self._dev_context.get_context(
-                            window_title=capture.window_title,
-                            visible_text=analysis.visible_text_snippets,
-                        ),
-                    )
-                return None
-
-            async def _get_embedding():
-                if self._embedder and self._embedder_available:
-                    try:
-                        return await loop.run_in_executor(
-                            None,
-                            lambda: self._embedder.embed_activity(
-                                summary=analysis.activity_summary,
-                                details=analysis.detailed_context,
-                                visible_text=analysis.visible_text_snippets,
-                                app_name=analysis.app_name,
-                                category=analysis.activity_category,
-                                scene_description=analysis.scene_description,
-                            ),
-                        )
-                    except Exception as e:
-                        logger.debug(f"Embedding failed: {e}")
-                return None
-
-            dev_ctx, embedding = await asyncio.gather(
-                _get_dev_context(), _get_embedding()
-            )
-
-            # 6. Update DB with all results
+            # 4. Update DB with all results
             analysis_label = f"cache:minor" if tier == "minor" else f"full:{settings.analysis_mode}"
             if self._is_backfill:
                 analysis_label = f"backfill:{analysis_label}"
             self._db.update_activity_analysis(
                 activity_id=activity_id,
                 analysis=analysis,
-                embedding=embedding,
                 ocr_text=ocr_text,
                 ocr_boxes=ocr_boxes_json,
                 organized_text=organized_text,
@@ -643,7 +561,7 @@ class AnalysisWorker:
                 active_url=active_url,
             )
 
-            # 7. Update per-app cache (for both "full" and "minor" tiers)
+            # 5. Update per-app cache (for both "full" and "minor" tiers)
             if capture.phash:
                 self._app_cache[cache_key] = {
                     "phash": capture.phash,
@@ -652,47 +570,12 @@ class AnalysisWorker:
                     "ocr_text": ocr_text,
                     "ocr_boxes_json": ocr_boxes_json,
                     "organized_text": organized_text,
-                    "embedding": embedding,
                     "active_url": active_url,
                     "timestamp": cached["timestamp"] if tier == "minor" else time.time(),
                 }
                 # LRU eviction
                 if len(self._app_cache) > self._APP_CACHE_MAX:
                     self._app_cache.popitem(last=False)
-
-            # 8. Store dev context if present
-            if dev_ctx:
-                self._db.insert_dev_context(activity_id, dev_ctx)
-
-            # 9. Auto-bookmark important moments
-            if settings.auto_bookmark and not capture.bookmarked:
-                keywords = [k.strip().lower() for k in settings.auto_bookmark_keywords.split(",") if k.strip()]
-                searchable = (
-                    (organized_text or "") + " " +
-                    (analysis.activity_summary or "") + " " +
-                    (analysis.detailed_context or "")
-                ).lower()
-                for kw in keywords:
-                    if kw in searchable:
-                        self._db._get_conn().execute(
-                            "UPDATE activities SET bookmarked = 1 WHERE id = ?", (activity_id,)
-                        )
-                        self._db._get_conn().commit()
-                        logger.info(f"Bookmarked #{activity_id} (matched: '{kw}')")
-                        # Fire webhook
-                        try:
-                            from screenmind.integrations.webhooks import fire_all
-                            fire_all("bookmark", {
-                                "activity_id": activity_id,
-                                "timestamp": str(capture.timestamp),
-                                "app_name": analysis.app_name,
-                                "summary": analysis.activity_summary,
-                                "keyword": kw,
-                                "auto": True,
-                            })
-                        except Exception:
-                            pass
-                        break
 
             elapsed = time.time() - start
             self._processed += 1
@@ -706,20 +589,10 @@ class AnalysisWorker:
                 f"[text: {text_len} chars via {text_method}]",
                 f"[{tier_label}]",
             ]
-            if dev_ctx:
-                parts.append(f"[git] {dev_ctx.repo_name}/{dev_ctx.branch}")
             if capture.user_actions:
                 parts.append(f"[actions: {capture.user_actions.count(chr(10)) + 1}]")
-            if capture.bookmarked:
-                parts.append("[*]")
 
             logger.info(" ".join(parts))
-
-        except InferenceCancelled:
-            # Chat pre-empted this analysis — re-queue at front, not an error
-            elapsed = time.time() - start
-            self._priority_items.append(capture)
-            logger.info(f"Yielded to chat after {elapsed:.1f}s, re-queued at front (priority: {len(self._priority_items)})")
 
         except Exception as e:
             elapsed = time.time() - start
@@ -797,7 +670,6 @@ class AnalysisWorker:
                 timestamp=datetime.now(),  # Use now — it's no longer stale
                 window_title=window_title,
                 app_name=app_name,
-                bookmarked=False,
                 image=img,
                 activity_id=activity_id,
                 # A skipped frame kept its capture-time a11y text and URL
@@ -847,7 +719,6 @@ class AnalysisWorker:
             "processed": self._processed,
             "errors": self._errors,
             "queue_size": self._queue.qsize(),
-            "embedder_available": self._embedder_available,
             "cache_hits": self._cache_hits,
             "cache_skips": self._cache_skips,
             "cache_size": len(self._app_cache),

@@ -5,72 +5,9 @@ from unittest.mock import patch, MagicMock, PropertyMock
 import httpx
 
 from screenmind.engine.llm_client import (
-    InferenceCancelled, cancel_current_inference, is_inference_active,
     chat, chat_with_images, transcribe_audio, generate, is_available,
-    get_server_status, _cancel_event, _client_lock,
+    get_server_status,
 )
-
-
-class TestInferenceCancellation:
-    """Tests for the GPU priority / cancellation system."""
-
-    def test_inference_cancelled_is_exception(self):
-        with pytest.raises(InferenceCancelled):
-            raise InferenceCancelled("test")
-
-    def test_is_inference_active_default_false(self):
-        assert is_inference_active() is False
-
-    def test_cancel_no_active_client(self):
-        """Cancel when nothing is running doesn't crash."""
-        cancel_current_inference()
-
-    def test_cancel_sets_event(self):
-        """Cancel sets the cancel event flag."""
-        _cancel_event.clear()
-        cancel_current_inference()
-        assert _cancel_event.is_set()
-        _cancel_event.clear()
-
-    @patch("screenmind.engine.llm_client.httpx.Client")
-    def test_chat_clears_cancel_event_on_start(self, mock_client_cls):
-        """Each chat() call clears stale cancel flags."""
-        _cancel_event.set()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"choices": [{"message": {"content": "hi"}}]}
-        mock_resp.raise_for_status = MagicMock()
-        mock_client_cls.return_value.post.return_value = mock_resp
-        chat([{"role": "user", "content": "test"}])
-        # Flag should be cleared at start of chat()
-        assert not _cancel_event.is_set()
-
-    @patch("screenmind.engine.llm_client.httpx.Client")
-    def test_chat_raises_cancelled_when_flag_set(self, mock_client_cls):
-        """If cancel flag is set during request, InferenceCancelled is raised."""
-        def side_effect(*args, **kwargs):
-            _cancel_event.set()
-            raise httpx.ConnectError("closed")
-        mock_client_cls.return_value.post.side_effect = side_effect
-        with pytest.raises(InferenceCancelled):
-            chat([{"role": "user", "content": "test"}])
-        _cancel_event.clear()
-
-    @patch("screenmind.engine.llm_client.httpx.Client")
-    def test_active_client_set_during_request(self, mock_client_cls):
-        """_active_client is set during request and cleared after."""
-        active_during = []
-
-        def capture_post(*args, **kwargs):
-            active_during.append(is_inference_active())
-            resp = MagicMock()
-            resp.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
-            resp.raise_for_status = MagicMock()
-            return resp
-
-        mock_client_cls.return_value.post.side_effect = capture_post
-        chat([{"role": "user", "content": "test"}])
-        assert active_during[0] is True
-        assert is_inference_active() is False
 
 
 class TestChat:
