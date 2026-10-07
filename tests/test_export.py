@@ -312,17 +312,6 @@ async def test_api_export_refuses_remote_clients(app):
         assert resp.status_code == 403
 
 
-async def test_api_export_needs_pin_session(app, db):
-    from httpx import ASGITransport, AsyncClient
-    settings.dashboard_pin_hash = "set"
-    try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            resp = await c.get("/api/export", params={"date": "2026-10-06", "user": "u"})
-            assert resp.status_code == 401
-    finally:
-        settings.dashboard_pin_hash = ""
-
-
 async def test_api_export_deletes_temp_file(client, db, tmp_path, monkeypatch):
     import tempfile
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))

@@ -5,12 +5,10 @@ Creates the FastAPI app, mounts static files, and includes all route modules.
 
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
 
-from screenmind.config import settings
 from screenmind.engine.embedder import Embedder
 from screenmind.storage.database import Database
 
@@ -20,49 +18,10 @@ import screenmind.api.dependencies as deps
 logger = logging.getLogger("screenmind.api.server")
 
 
-class AuthMiddleware(BaseHTTPMiddleware):
-    """PIN lock middleware — blocks API access if PIN is set and no valid session."""
-
-    OPEN_PATHS = {"/", "/api/auth/verify", "/api/auth/status", "/api/auth/setup-complete", "/api/status"}
-    OPEN_PREFIXES = ("/css/", "/js/", "/api/auth/")
-    # Internal paths — only accessible from localhost (agents, MCP, SDK)
-    LOCALHOST_ONLY_PREFIXES = ("/api/agents/sdk/", "/api/timeline")
-    LOCALHOST_ONLY_PATHS = {"/api/capture/bookmark"}
-
-    async def dispatch(self, request: Request, call_next):
-        # No PIN set — everything is open
-        if not settings.dashboard_pin_hash:
-            return await call_next(request)
-
-        path = request.url.path
-
-        # Allow open paths (no auth required from anywhere)
-        if path in self.OPEN_PATHS or any(path.startswith(p) for p in self.OPEN_PREFIXES):
-            return await call_next(request)
-
-        # Localhost-only paths — SDK, timeline, bookmark (agents/MCP use these internally)
-        if path in self.LOCALHOST_ONLY_PATHS or any(path.startswith(p) for p in self.LOCALHOST_ONLY_PREFIXES):
-            client_host = request.client.host if request.client else None
-            if client_host in ("127.0.0.1", "::1"):
-                return await call_next(request)
-            return JSONResponse({"error": "unauthorized", "locked": True}, status_code=401)
-
-        # Check session cookie
-        token = request.cookies.get("screenmind_session")
-        if deps.verify_session(token):
-            return await call_next(request)
-
-        # Blocked
-        return JSONResponse({"error": "unauthorized", "locked": True}, status_code=401)
-
-
 def create_app(database: Database, capture_worker=None, analysis_worker=None, embedder=None, audio_worker=None):
     """Create and configure the FastAPI application."""
 
     app = FastAPI(title="ScreenMind", version="0.1.1")
-
-    # Add auth middleware
-    app.add_middleware(AuthMiddleware)
 
     # Use provided embedder or create one
     if embedder is None:

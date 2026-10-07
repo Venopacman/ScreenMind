@@ -60,8 +60,6 @@ def mock_settings(tmp_path):
         mock.webhook_secret = ""
         mock.webhook_events = ""
         mock.webhook_headers = ""
-        mock.dashboard_pin_hash = ""
-        mock.dashboard_lock_timeout = 30
         mock.encryption_enabled = False
         mock.api_host = "127.0.0.1"
         mock.api_port = 7777
@@ -87,13 +85,9 @@ def sample_image():
 
 @pytest.fixture
 def app(db):
-    """Create a test FastAPI app with PIN auth disabled."""
+    """Create a test FastAPI app."""
     import screenmind.api.dependencies as deps
     from screenmind.api.server import create_app
-
-    # Directly clear PIN so auth middleware passes all requests during tests
-    original_pin = settings.dashboard_pin_hash
-    settings.dashboard_pin_hash = ''
 
     application = create_app(database=db)
 
@@ -115,9 +109,6 @@ def app(db):
         mod.db = db
 
     yield application
-
-    # Restore
-    settings.dashboard_pin_hash = original_pin
 
 
 @pytest.fixture

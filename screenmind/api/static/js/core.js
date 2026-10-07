@@ -9,116 +9,27 @@ const _now = new Date();
 let currentDate = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-${String(_now.getDate()).padStart(2,'0')}`;
 let currentView = 'timeline';
 
-// ── Lock Screen Check ──────────────────────────────────────
-var _dashboardLocked = false;
-
+// ── First-Run Check ────────────────────────────────────────
 async function _checkAuth() {
   try {
     var r = await fetch('/api/auth/status');
     var data = await r.json();
-    // First-run: show welcome screen
     if (data.first_run) {
-      _dashboardLocked = true;
       document.getElementById('welcome-screen').style.display = 'flex';
       document.getElementById('app').style.display = 'none';
-      setTimeout(function() { document.getElementById('setup-pin').focus(); }, 100);
-      return;
-    }
-    if (data.has_pin && !data.authenticated) {
-      _dashboardLocked = true;
-      document.getElementById('lock-screen').style.display = 'flex';
-      document.getElementById('app').style.display = 'none';
-      // Delay focus to ensure element is visible and painted
-      setTimeout(function() { document.getElementById('pin-input').focus(); }, 100);
+      return true;
     }
   } catch(e) {}
+  return false;
 }
 
-window.completeSetup = async function(withPin) {
-  var pin = '';
-  if (withPin) {
-    pin = document.getElementById('setup-pin').value;
-    if (pin.length < 4) {
-      document.getElementById('setup-pin').style.borderColor = '#ef4444';
-      document.getElementById('setup-pin').setAttribute('placeholder', 'Min 4 digits');
-      return;
-    }
-  }
+window.completeSetup = async function() {
   try {
-    var r = await fetch('/api/auth/setup-complete', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({pin: pin})
-    });
-    var data = await r.json();
-    if (data.ok) {
-      _dashboardLocked = false;
-      document.getElementById('welcome-screen').style.display = 'none';
-      document.getElementById('app').style.display = '';
-      _initApp();
-    }
-  } catch(e) {
-    _dashboardLocked = false;
-    document.getElementById('welcome-screen').style.display = 'none';
-    document.getElementById('app').style.display = '';
-    _initApp();
-  }
-};
-
-// Global keyboard guard — when locked, only allow typing in PIN input
-document.addEventListener('keydown', function(e) {
-  if (!_dashboardLocked) return;
-  var pinInput = document.getElementById('pin-input');
-  // Allow Enter to submit from anywhere on the lock screen
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    e.stopPropagation();
-    unlockDashboard();
-    return;
-  }
-  // Numpad fix — system-level keyboard hooks can eat numpad events
-  // before they reach the browser. Manually insert the digit.
-  if (e.code && e.code.startsWith('Numpad') && /^[0-9]$/.test(e.key)) {
-    e.preventDefault();
-    e.stopPropagation();
-    pinInput.focus();
-    var maxLen = parseInt(pinInput.maxLength) || 6;
-    if (pinInput.value.length < maxLen) {
-      pinInput.value += e.key;
-    }
-    return;
-  }
-  // If the PIN input isn't focused, redirect focus to it
-  if (document.activeElement !== pinInput) {
-    pinInput.focus();
-  }
-}, true); // 'true' = capture phase, runs before any other handler
-
-window.unlockDashboard = async function() {
-  var pin = document.getElementById('pin-input').value;
-  var errEl = document.getElementById('pin-error');
-  errEl.textContent = '';
-  try {
-    var r = await fetch('/api/auth/verify', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({pin: pin})
-    });
-    var data = await r.json();
-    if (data.ok) {
-      _dashboardLocked = false;
-      document.getElementById('lock-screen').style.display = 'none';
-      document.getElementById('app').style.display = '';
-      // Now init the app
-      _initApp();
-    } else {
-      errEl.textContent = data.error || 'Invalid PIN';
-      document.getElementById('pin-input').value = '';
-      document.getElementById('pin-input').focus();
-    }
-  } catch(e) {
-    errEl.textContent = 'Invalid PIN';
-    document.getElementById('pin-input').value = '';
-    document.getElementById('pin-input').focus();
-  }
+    await fetch('/api/auth/setup-complete', { method: 'POST' });
+  } catch(e) {}
+  document.getElementById('welcome-screen').style.display = 'none';
+  document.getElementById('app').style.display = '';
+  _initApp();
 };
 
 window.toggleIncognito = async function() {
@@ -141,14 +52,6 @@ window.toggleIncognito = async function() {
 // ── API Client ────────────────────────────────────────────
 async function api(path, opts) {
   const r = await fetch(API + path, opts || {});
-  if (r.status === 401) {
-    // Session expired — show lock screen
-    _dashboardLocked = true;
-    document.getElementById('lock-screen').style.display = 'flex';
-    document.getElementById('app').style.display = 'none';
-    setTimeout(function() { document.getElementById('pin-input').focus(); }, 100);
-    throw new Error('Session expired');
-  }
   if (!r.ok) {
     const detail = await r.json().catch(() => ({}));
     const e = new Error(detail.error || detail.detail || `API ${r.status}`);
@@ -257,10 +160,6 @@ function moveIndicator(btn) {
 }
 
 // ── Router with animated transitions ──────────────────────
-// Chat and summary are "sticky" — their DOM persists across navigation
-// so in-flight SSE streams and message history survive tab switches.
-const _stickyViews = new Set(['chat', 'summary']);
-
 function navigate(view) {
   currentView = view;
   window.location.hash = view;
@@ -279,7 +178,7 @@ function navigate(view) {
   if (activeBtn) moveIndicator(activeBtn);
 
   // Update header
-  const titles = { timeline:'Timeline', search:'Search', bookmarks:'Bookmarks', analytics:'Analytics', rewind:'Day Rewind', summary:'Summary & Standup', chat:'Chat', meetings:'Meetings', memos:'Voice Memos', agents:'Agents', settings:'Settings' };
+  const titles = { timeline:'Timeline', search:'Search', analytics:'Analytics', meetings:'Meetings', settings:'Settings' };
   $('#page-title').textContent = titles[view] || view;
 
   const el = $('#content');
@@ -288,45 +187,19 @@ function navigate(view) {
   const spinner = el.querySelector(':scope > .spinner');
   if (spinner) spinner.remove();
 
-  // Hide all sticky containers
-  el.querySelectorAll('.view-sticky').forEach(c => c.style.display = 'none');
-
-  // Hide the ephemeral slot
   let ephemeral = el.querySelector('.view-ephemeral');
-
-  if (_stickyViews.has(view)) {
-    if (ephemeral) ephemeral.style.display = 'none';
-
-    let container = el.querySelector(`[data-view="${view}"]`);
-    if (!container) {
-      container = document.createElement('div');
-      container.className = 'view-sticky view-enter';
-      container.dataset.view = view;
-      el.appendChild(container);
-      const fns = { chat: renderChat, summary: renderSummary };
-      (fns[view])(container);
-    } else {
-      container.style.display = '';
-      if (view === 'chat') {
-        const chatInput = document.getElementById('chat-input');
-        if (chatInput) chatInput.focus();
-      }
-    }
-  } else {
-    if (!ephemeral) {
-      ephemeral = document.createElement('div');
-      ephemeral.className = 'view-ephemeral';
-      el.appendChild(ephemeral);
-    }
-    ephemeral.style.display = '';
-    ephemeral.innerHTML = '';
-    const wrapper = document.createElement('div');
-    wrapper.className = 'view-enter';
-    ephemeral.appendChild(wrapper);
-
-    const fns = { timeline: renderTimeline, search: renderSearch, bookmarks: renderBookmarks, analytics: renderAnalytics, rewind: renderRewind, meetings: renderMeetings, memos: renderMemos, agents: renderAgents, settings: renderSettings };
-    (fns[view] || renderTimeline)(wrapper);
+  if (!ephemeral) {
+    ephemeral = document.createElement('div');
+    ephemeral.className = 'view-ephemeral';
+    el.appendChild(ephemeral);
   }
+  ephemeral.innerHTML = '';
+  const wrapper = document.createElement('div');
+  wrapper.className = 'view-enter';
+  ephemeral.appendChild(wrapper);
+
+  const fns = { timeline: renderTimeline, search: renderSearch, analytics: renderAnalytics, meetings: renderMeetings, settings: renderSettings };
+  (fns[view] || renderTimeline)(wrapper);
 }
 
 $('#sidebar-nav').addEventListener('click', e => {
@@ -364,7 +237,7 @@ async function pollStatus() {
       if (s.model.capabilities) _modelState.capabilities = s.model.capabilities;
 
       if (prev !== 'ready' && _modelState.status === 'ready') {
-        showToast('\ud83c\udf89 Model ready! Chat is now available.', 'success');
+        showToast('\ud83c\udf89 Model ready! Screen analysis is running.', 'success');
       }
 
       // Adaptive poll: 5s during lifecycle, 15s otherwise (#7)
@@ -477,7 +350,7 @@ async function _renderModelHubCards() {
             <div class="mh-card-name">\u26a0\ufe0f ${_modelState.externalModel}
               <span class="mh-badge" style="background:rgba(251,191,36,0.2);color:#fbbf24">External</span>
             </div>
-            <div class="mh-card-meta" style="color:#fbbf24">Unknown model — may lack vision or audio support. Voice memos and screen analysis may not work correctly.</div>
+            <div class="mh-card-meta" style="color:#fbbf24">Unknown model — may lack vision or audio support. Screen analysis and call transcription may not work correctly.</div>
           </div>
         </div>
         <div class="mh-card-caps">
@@ -715,7 +588,7 @@ function _confirmAudioLoss(key) {
   if (m && m.audio === false) {
     return confirm(
       `${m.name} has no audio support.\n\n` +
-      `Voice memos and meeting transcription will be unavailable ` +
+      `Call transcription will be unavailable ` +
       `until you switch back to Gemma 4 E2B/E4B.\n\nContinue?`
     );
   }
@@ -800,22 +673,8 @@ function _updateTimelinePill() {
 
 // ── Unified Model UI Dispatcher ───────────────────────────
 function _updateModelUI() {
-  if (typeof _updateChatLockState === 'function') _updateChatLockState();
   _updateModelHubOverlay();
   _updateTimelinePill();
-
-  // Nav badge: warning dot on Chat
-  const chatNav = document.querySelector('[data-view="chat"] .nav-badge-warning');
-  if (_modelState.status === 'ready') {
-    if (chatNav) chatNav.remove();
-  } else {
-    const chatNavItem = document.querySelector('[data-view="chat"]');
-    if (chatNavItem && !chatNavItem.querySelector('.nav-badge-warning')) {
-      const badge = document.createElement('span');
-      badge.className = 'nav-badge-warning';
-      chatNavItem.appendChild(badge);
-    }
-  }
 
   // Settings model list — in-place badge/button update (avoids flicker #5)
   if (currentView === 'settings') {

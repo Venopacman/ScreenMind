@@ -3,52 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ScreenMind — Your AI Memory, 100% Local</title>
-    <meta name="description" content="Privacy-first screen activity journal powered by Gemma 4 E2B. All data stays on your machine.">
-    <link rel="stylesheet" href="/css/styles.css?v=16">
+    <title>ScreenMind — Local Activity Recorder</title>
+    <meta name="description" content="Records apps, windows, pages, screen text and calls. Labels them with a local Gemma model. All data stays on your machine.">
+    <link rel="stylesheet" href="/css/styles.css?v=17">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 </head>
 <body>
-<!-- Lock Screen Overlay -->
-<div id="lock-screen" style="display:none;position:fixed;inset:0;z-index:9999;background:#0a0e1a;align-items:center;justify-content:center">
-  <div style="text-align:center;max-width:320px">
-    <div style="font-size:3rem;margin-bottom:16px">🔒</div>
-    <div style="font-size:1.3rem;font-weight:600;color:var(--text);margin-bottom:8px">ScreenMind Locked</div>
-    <div style="color:var(--text-muted);font-size:0.85rem;margin-bottom:20px">Enter your PIN to continue</div>
-    <input type="password" id="pin-input" maxlength="6" placeholder="Enter PIN" style="width:160px;padding:12px 16px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:12px;color:var(--text);font-size:1.2rem;text-align:center;letter-spacing:8px" onkeydown="if(event.key==='Enter')unlockDashboard()">
-    <br>
-    <button class="btn btn-primary" style="margin-top:12px;padding:8px 32px" onclick="unlockDashboard()">Unlock</button>
-    <div id="pin-error" style="color:#ef4444;font-size:0.82rem;margin-top:10px"></div>
-  </div>
-</div>
-
 <!-- Welcome / First-Run Setup -->
 <div id="welcome-screen" style="display:none;position:fixed;inset:0;z-index:9998;background:#0a0e1a;align-items:center;justify-content:center">
   <div style="text-align:center;max-width:420px;padding:40px">
     <div style="font-size:3.5rem;margin-bottom:12px">🧠</div>
     <div style="font-size:1.6rem;font-weight:700;color:var(--text);margin-bottom:4px">Welcome to ScreenMind</div>
-    <div style="color:var(--text-muted);font-size:0.9rem;margin-bottom:32px">Your AI-powered screen activity journal — 100% local, 100% private.</div>
+    <div style="color:var(--text-muted);font-size:0.9rem;margin-bottom:24px">A local recorder of what you do on screen.</div>
 
-    <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:24px;text-align:left;margin-bottom:24px">
-      <div style="font-size:0.85rem;font-weight:600;color:var(--text);margin-bottom:16px">🔐 Secure your dashboard (optional)</div>
-      <div style="color:var(--text-muted);font-size:0.8rem;margin-bottom:12px">Set a PIN to lock the dashboard when you're away. You can always change this later in Settings.</div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input type="password" id="setup-pin" maxlength="6" placeholder="4-6 char PIN" style="flex:1;padding:10px 14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:10px;color:var(--text);font-size:1rem;text-align:center;letter-spacing:6px" onkeydown="if(event.key==='Enter')completeSetup(true)">
-      </div>
+    <div style="color:var(--text-muted);font-size:0.85rem;line-height:1.6;margin-bottom:24px;text-align:left">
+      ScreenMind records which apps, windows and pages you use, the text on screen, and your calls. A local model labels each frame. Nothing leaves this machine unless you export it.
     </div>
 
-    <div style="display:flex;flex-direction:column;gap:10px">
-      <button class="btn btn-primary" style="padding:12px 32px;font-size:0.95rem;border-radius:12px" onclick="completeSetup(true)">Set PIN & Get Started</button>
-      <button style="padding:10px 32px;font-size:0.85rem;border-radius:10px;background:transparent;border:1px solid rgba(255,255,255,0.1);color:var(--text-muted);cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='rgba(255,255,255,0.25)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.1)'" onclick="completeSetup(false)">Skip — I'll set it up later</button>
-    </div>
-
-    <div style="margin-top:24px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.06)">
-      <div style="color:var(--text-muted);font-size:0.75rem;line-height:1.5">
-        <span style="opacity:0.7">📸 Ctrl+Shift+B — Bookmark</span> · 
-        <span style="opacity:0.7">⏸ Ctrl+Shift+P — Pause</span> · 
-        <span style="opacity:0.7">🎤 Ctrl+Shift+V — Voice Memo</span>
-      </div>
-    </div>
+    <button class="btn btn-primary" style="padding:12px 32px;font-size:0.95rem;border-radius:12px" onclick="completeSetup()">Get Started</button>
   </div>
 </div>
 
@@ -57,7 +29,7 @@
     <aside class="sidebar">
         <div class="sidebar-header">
             <div class="sidebar-logo">ScreenMind</div>
-            <div class="sidebar-tagline">100% Local AI Memory</div>
+            <div class="sidebar-tagline">Local activity recorder</div>
         </div>
         <nav class="sidebar-nav" id="sidebar-nav">
             <div class="nav-indicator" id="nav-indicator"></div>
@@ -67,29 +39,11 @@
             <button class="nav-item" data-view="search">
                 <span class="nav-icon">🔍</span><span>Search</span>
             </button>
-            <button class="nav-item" data-view="bookmarks">
-                <span class="nav-icon">⭐</span><span>Bookmarks</span>
-            </button>
             <button class="nav-item" data-view="analytics">
                 <span class="nav-icon">📊</span><span>Analytics</span>
             </button>
-            <button class="nav-item" data-view="rewind">
-                <span class="nav-icon">⏪</span><span>Rewind</span>
-            </button>
-            <button class="nav-item" data-view="summary">
-                <span class="nav-icon">📝</span><span>Summary</span>
-            </button>
-            <button class="nav-item" data-view="chat">
-                <span class="nav-icon">🧠</span><span>Ask</span>
-            </button>
             <button class="nav-item" data-view="meetings">
                 <span class="nav-icon">🎙️</span><span>Meetings</span>
-            </button>
-            <button class="nav-item" data-view="memos">
-                <span class="nav-icon">🎤</span><span>Memos</span>
-            </button>
-            <button class="nav-item" data-view="agents">
-                <span class="nav-icon">🤖</span><span>Agents</span>
             </button>
             <button class="nav-item" data-view="settings">
                 <span class="nav-icon">⚙️</span><span>Settings</span>
@@ -165,17 +119,11 @@
 <!-- Toast Notifications -->
 <div class="toast-container" id="toast-container"></div>
 
-<script src="/js/core.js?v=29"></script>
-<script src="/js/timeline.js?v=30"></script>
-<script src="/js/search.js?v=29"></script>
-<script src="/js/bookmarks.js?v=29"></script>
-<script src="/js/analytics.js?v=29"></script>
-<script src="/js/rewind.js?v=29"></script>
-<script src="/js/summary.js?v=29"></script>
-<script src="/js/chat.js?v=29"></script>
-<script src="/js/meetings.js?v=29"></script>
-<script src="/js/memos.js?v=29"></script>
-<script src="/js/agents.js?v=29"></script>
-<script src="/js/settings.js?v=29"></script>
+<script src="/js/core.js?v=30"></script>
+<script src="/js/timeline.js?v=32"></script>
+<script src="/js/search.js?v=30"></script>
+<script src="/js/analytics.js?v=30"></script>
+<script src="/js/meetings.js?v=30"></script>
+<script src="/js/settings.js?v=31"></script>
 </body>
 </html>

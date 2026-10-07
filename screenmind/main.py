@@ -352,19 +352,18 @@ async def main():
     _loop = asyncio.get_running_loop()
     _api_deps.request_shutdown = lambda: _loop.call_soon_threadsafe(handle_signal)
 
-    # ── Safety check: warn/block 0.0.0.0 binding without PIN ──────────
+    # ── Safety check: never expose the API to the network ─────────────
+    # The API has no auth. Binding to all interfaces would expose all
+    # screen data to the network.
     if settings.api_host in ("0.0.0.0", "::"):
-        if not settings.dashboard_pin_hash:
-            _safe_print("")
-            _safe_print("=" * 70)
-            _safe_print("WARNING: Binding to 0.0.0.0 exposes ALL screen data to your network!")
-            _safe_print("   Set a PIN (dashboard_pin_hash) before exposing to the network.")
-            _safe_print("   Falling back to 127.0.0.1 for safety.")
-            _safe_print("=" * 70)
-            _safe_print("")
-            settings.api_host = "127.0.0.1"
-        else:
-            logger.warning("WARNING: Server exposed to network (0.0.0.0). PIN auth is enabled.")
+        _safe_print("")
+        _safe_print("=" * 70)
+        _safe_print("WARNING: The API has no auth. Binding to all interfaces would")
+        _safe_print("   expose all screen data to your network.")
+        _safe_print("   Falling back to 127.0.0.1 for safety.")
+        _safe_print("=" * 70)
+        _safe_print("")
+        settings.api_host = "127.0.0.1"
 
     # ── Start API server in background thread ────────────────────────
     server_config = uvicorn.Config(

@@ -1,6 +1,6 @@
 """Test API endpoints using FastAPI TestClient."""
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 @pytest.fixture
@@ -18,11 +18,7 @@ def client():
     db.get_rewind_data.return_value = []
 
     app = create_app(database=db, capture_worker=MagicMock(), analysis_worker=MagicMock(), audio_worker=MagicMock())
-
-    # Bypass PIN lock middleware — tests shouldn't need auth
-    with patch("screenmind.api.server.settings") as mock_settings:
-        mock_settings.dashboard_pin_hash = None
-        yield TestClient(app)
+    yield TestClient(app)
 
 
 def test_root_returns_html(client):
@@ -41,12 +37,10 @@ def test_status_endpoint(client):
 
 
 def test_auth_status(client):
-    """Auth status returns first_run and has_pin fields."""
+    """Auth status returns the first-run flag."""
     r = client.get("/api/auth/status")
     assert r.status_code == 200
-    data = r.json()
-    assert "has_pin" in data
-    assert "authenticated" in data
+    assert "first_run" in r.json()
 
 
 def test_timeline_returns_list(client):

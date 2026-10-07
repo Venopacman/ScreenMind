@@ -49,19 +49,13 @@ async function loadTimeline(silent = false) {
     if (!acts.length && !meetings.length) {
       list.innerHTML = `<div class="onboarding">
         <h2>🚀 ScreenMind is Running!</h2>
-        <div class="subtitle">Your privacy-first AI memory is warming up. First capture coming soon...</div>
+        <div class="subtitle">The first capture is coming soon...</div>
         <div class="feature-grid">
-          <div class="feature-card"><div class="fc-icon">📋</div><div class="fc-title">Timeline</div><div class="fc-desc">Chronological activity feed with AI analysis</div></div>
-          <div class="feature-card"><div class="fc-icon">🔍</div><div class="fc-title">Semantic Search</div><div class="fc-desc">Natural language queries powered by Gemma 4</div></div>
-          <div class="feature-card"><div class="fc-icon">📊</div><div class="fc-title">Analytics</div><div class="fc-desc">Category breakdown, top apps, hours tracked</div></div>
-          <div class="feature-card"><div class="fc-icon">⏪</div><div class="fc-title">Day Rewind</div><div class="fc-desc">Timelapse playback of your screen activity</div></div>
-          <div class="feature-card"><div class="fc-icon">📝</div><div class="fc-title">Daily Summary</div><div class="fc-desc">AI-generated summaries and standup notes</div></div>
-          <div class="feature-card"><div class="fc-icon">🛡️</div><div class="fc-title">100% Local</div><div class="fc-desc">No cloud, no telemetry — your data stays yours</div></div>
-        </div>
-        <div class="shortcut-row" style="margin-bottom:8px">
-          <span class="shortcut-key">Ctrl+Shift+B</span> Bookmark from any app
-          &nbsp;&nbsp;
-          <span class="shortcut-key">Ctrl+Shift+P</span> Pause/Resume anywhere
+          <div class="feature-card"><div class="fc-icon">📋</div><div class="fc-title">Timeline</div><div class="fc-desc">Every captured frame with app, page, screen text and a label</div></div>
+          <div class="feature-card"><div class="fc-icon">🔍</div><div class="fc-title">Search</div><div class="fc-desc">Keyword search over screen text and labels</div></div>
+          <div class="feature-card"><div class="fc-icon">📊</div><div class="fc-title">Analytics</div><div class="fc-desc">Time per category and app</div></div>
+          <div class="feature-card"><div class="fc-icon">🎙️</div><div class="fc-title">Meetings</div><div class="fc-desc">Calls with start, end and an optional transcript</div></div>
+          <div class="feature-card"><div class="fc-icon">🛡️</div><div class="fc-title">100% Local</div><div class="fc-desc">No cloud, no telemetry. Data leaves only when you export it.</div></div>
         </div>
         <div class="waiting-pulse"><span class="pulse-dot"></span> Waiting for first capture...</div>
       </div>`;
@@ -120,9 +114,6 @@ window.toggleTlMeeting = function(id) {
 function timelineCard(a, i) {
   const time = formatTime(a.timestamp);
   const cat = a.category || 'other';
-  const bookmarkLabel = a.bookmarked ? '★ Bookmarked' : '☆ Bookmark';
-  const bookmarkClass = a.bookmarked ? 'active' : '';
-  const devCtx = a.repo_name ? `<div class="dev-ctx">🔀 ${a.repo_name}/${a.branch || 'main'} ${a.insertions ? `<span style="color:#10b981">+${a.insertions}</span>` : ''}${a.deletions ? ` <span style="color:#ef4444">-${a.deletions}</span>` : ''}</div>` : '';
   const thumb = a.screenshot_url ? `<img class="thumb" src="${a.screenshot_url}" loading="lazy" onclick="openModal('${a.screenshot_url}', ${a.id})" alt="">` : '<div class="thumb"></div>';
 
   // Analysis method badge — color-coded
@@ -146,15 +137,11 @@ function timelineCard(a, i) {
         </div>
         <div class="summary">${a.summary || 'No analysis'}</div>
         ${a.active_url ? `<div style="margin-top:2px"><a href="${a.active_url}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:0.7rem;color:#60a5fa;text-decoration:none;opacity:0.8;word-break:break-all" title="${a.active_url}">🔗 ${(() => { try { return new URL(a.active_url).hostname } catch(e) { return a.active_url.substring(0, 40) } })()}</a></div>` : ''}
-        ${devCtx}
         ${userActions}
       </div>
       <div class="card-menu-wrap">
         <button class="card-menu-trigger" onclick="event.stopPropagation(); toggleCardMenu(this)" title="Actions">⋮</button>
         <div class="card-menu">
-          <button class="menu-item bookmark-item ${bookmarkClass}" onclick="event.stopPropagation(); toggleBookmark(${a.id}, this)">
-            <span class="menu-icon">${a.bookmarked ? '★' : '☆'}</span> ${bookmarkLabel}
-          </button>
           <button class="menu-item reanalyze-item" onclick="event.stopPropagation(); reanalyzeActivity(${a.id}, this)">
             <span class="menu-icon">↻</span> Re-analyze
           </button>
@@ -189,17 +176,6 @@ document.addEventListener('click', function() {
   document.querySelectorAll('.card-menu.open').forEach(function(m) { m.classList.remove('open'); });
   document.querySelectorAll('.card-menu-trigger.active').forEach(function(t) { t.classList.remove('active'); });
 });
-
-window.toggleBookmark = async function(id, el) {
-  try {
-    const r = await fetch(`/api/activities/${id}/bookmark`, { method: 'PUT' });
-    const data = await r.json();
-    el.closest('.card-menu').classList.remove('open');
-    el.closest('.card-menu-wrap').querySelector('.card-menu-trigger').classList.remove('active');
-    showToast(data.bookmarked ? '⭐ Bookmarked!' : 'Bookmark removed', data.bookmarked ? 'success' : 'info');
-    loadTimeline(true);
-  } catch {}
-};
 
 window.reanalyzeActivity = async function(id, el) {
   el.closest('.card-menu').classList.remove('open');

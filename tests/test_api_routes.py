@@ -117,13 +117,10 @@ async def test_summary_not_generated(client):
 
 
 @pytest.mark.asyncio
-async def test_auth_status_no_pin(client):
+async def test_auth_status(client):
     resp = await client.get("/api/auth/status")
     assert resp.status_code == 200
-    data = resp.json()
-    # PIN is cleared in test fixture
-    assert data["has_pin"] is False
-    assert data["authenticated"] is True
+    assert "first_run" in resp.json()
 
 
 @pytest.mark.asyncio
