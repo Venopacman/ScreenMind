@@ -34,7 +34,7 @@ from screenmind.engine.llm_client import InferenceCancelled
 from screenmind.engine.ocr import OCRExtractor
 from screenmind.storage.database import Database
 from screenmind.storage.models import ScreenshotEntry, ActivityRecord
-from screenmind.workers.capture_worker import CaptureResult
+from screenmind.workers.capture_worker import CaptureResult, filter_sensitive
 
 logger = logging.getLogger("screenmind.workers.analysis_worker")
 
@@ -148,19 +148,6 @@ def _extract_all_urls(text: str) -> list[str]:
             seen.add(url.lower())
             result.append(url)
     return result
-
-
-def _filter_sensitive(text: Optional[str]) -> Optional[str]:
-    """Redact sensitive data (per settings) before text reaches the AI or the DB."""
-    if not settings.sensitive_filter_enabled or not text:
-        return text
-    try:
-        from screenmind.privacy.data_filter import filter_sensitive_text, parse_enabled_types
-        enabled_types = parse_enabled_types(settings.sensitive_filter_types)
-        return filter_sensitive_text(text, enabled_types)["clean_text"]
-    except Exception as e:
-        logger.warning(f"Sensitive filter error: {e}")
-        return text
 
 
 class AnalysisWorker:
@@ -278,7 +265,7 @@ class AnalysisWorker:
                         # Keep what was read at capture time; no OCR, no Gemma.
                         self._db.mark_skipped(
                             capture.activity_id,
-                            ocr_text=_filter_sensitive(capture.a11y_text),
+                            ocr_text=filter_sensitive(capture.a11y_text),
                             active_url=capture.browser_url,
                         )
                     self._cache_skips += 1
@@ -430,7 +417,7 @@ class AnalysisWorker:
                             text_method = "ocr"
 
             # 3c. Sensitive data filter — redact before AI + storage
-            ocr_text = _filter_sensitive(ocr_text)
+            ocr_text = filter_sensitive(ocr_text)
 
             # 3c'. Nothing on screen: no window label and almost no text (e.g. a
             #      display showing only the wallpaper). Skip Gemma. Without hints

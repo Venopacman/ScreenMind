@@ -31,6 +31,9 @@ logger = logging.getLogger("screenmind.workers.capture_worker")
 # bursts of events are merged into one capture within EVENT_MERGE_WINDOW_S.
 MIN_EVENT_CAPTURE_GAP_S = 3.0
 EVENT_MERGE_WINDOW_S = 3.0
+# Linking UI events waits on the recorder. If that hangs, capture goes on
+# without actions instead of stopping with it.
+LINK_UI_EVENTS_TIMEOUT_S = 5.0
 
 
 @dataclass
@@ -79,6 +82,7 @@ class CaptureWorker:
         self._ui_recorder = None
         self._trigger_lock = threading.Lock()
         self._pending_trigger = None  # (due_ts, first_request_ts, reason)
+        self._stuck_link = None  # executor future of a UI-event link that timed out
 
     async def run(self):
         """
@@ -245,6 +249,7 @@ class CaptureWorker:
 
         # Content has changed! Save it.
         now = datetime.now()
+        window_title = filter_sensitive(window_title)
 
         # Read the focused window right after the grab, before the DB insert
         # and UI-event linking, so text and URL match the image.
@@ -326,6 +331,7 @@ class CaptureWorker:
 
         # Always process bookmarked captures — never dedup
         now = datetime.now()
+        window_title = filter_sensitive(window_title)
         a11y_text, browser_url = self._read_focused(focused, active_title)
 
         # Insert to DB immediately
@@ -428,6 +434,11 @@ class CaptureWorker:
         them as bullet lines for the analyzer."""
         if not activity_id or not self._db or not self._ui_recorder or not settings.ui_events_enabled:
             return None
+        if self._stuck_link is not None:
+            if not self._stuck_link.done():
+                logger.debug("UI-event linking still stuck; frame saved without actions")
+                return None
+            self._stuck_link = None
 
         def _link():
             self._ui_recorder.flush_for_capture()
@@ -439,8 +450,17 @@ class CaptureWorker:
                 self._db.set_user_actions(activity_id, text)
             return text
 
+        future = asyncio.get_event_loop().run_in_executor(None, _link)
         try:
-            return await asyncio.get_event_loop().run_in_executor(None, _link)
+            # shield: on timeout the executor future stays pending, so the
+            # next frames can tell the call is still stuck.
+            return await asyncio.wait_for(asyncio.shield(future), LINK_UI_EVENTS_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            self._stuck_link = future
+            future.add_done_callback(lambda f: f.cancelled() or f.exception())
+            logger.warning(f"Linking UI events took over {LINK_UI_EVENTS_TIMEOUT_S:.0f}s; "
+                           "capturing without actions until it returns")
+            return None
         except Exception as e:
             logger.debug(f"Could not link UI events: {e}")
             return None
@@ -492,6 +512,19 @@ class CaptureWorker:
             "captures": self._capture_count,
             "skipped": self._skip_count,
         }
+
+
+def filter_sensitive(text: Optional[str]) -> Optional[str]:
+    """Redact sensitive data (per settings) before text reaches the AI or the DB."""
+    if not settings.sensitive_filter_enabled or not text:
+        return text
+    try:
+        from screenmind.privacy.data_filter import filter_sensitive_text, parse_enabled_types
+        enabled_types = parse_enabled_types(settings.sensitive_filter_types)
+        return filter_sensitive_text(text, enabled_types)["clean_text"]
+    except Exception as e:
+        logger.warning(f"Sensitive filter error: {e}")
+        return text
 
 
 def _get_browser_url() -> Optional[str]:

@@ -561,3 +561,50 @@ class TestFocusConsistency:
 
         await self._tick(worker, patches)
         assert calls == ["url", "a11y", "insert", "link"]
+
+    async def test_window_title_filtered_before_storage(self, db, tmp_path):
+        title = "notes — password: Tr0ub4dor&3 - Notepad"
+        worker, patches, _ = self._make_worker(tmp_path, [title, title], db=db)
+        item = await self._tick(worker, patches)
+
+        assert "Tr0ub4dor&3" not in item.window_title
+        assert "REDACTED" in item.window_title
+        assert db.get_activity_by_id(item.activity_id)["window_title"] == item.window_title
+        # The raw titles still match, so the focus check keeps the reads
+        assert item.a11y_text == "page text"
+
+
+class TestUiEventLinkGuard:
+    """A hung UI-event recorder must not stop capture."""
+
+    async def test_stuck_link_times_out_and_is_skipped_until_it_returns(self, monkeypatch):
+        import threading
+        import screenmind.workers.capture_worker as cw
+
+        monkeypatch.setattr(cw, "LINK_UI_EVENTS_TIMEOUT_S", 0.2)
+        monkeypatch.setattr(settings_mod.settings, "ui_events_enabled", True)
+        release = threading.Event()
+        flushes = []
+
+        def flush():
+            flushes.append(1)
+            release.wait(5)
+
+        worker = CaptureWorker(queue=asyncio.Queue(maxsize=10), database=MagicMock())
+        worker._db.attach_ui_events.return_value = False
+        worker._ui_recorder = MagicMock()
+        worker._ui_recorder.flush_for_capture.side_effect = flush
+
+        assert await worker._link_ui_events(1, datetime.now()) is None
+        stuck = worker._stuck_link
+        assert stuck is not None and not stuck.done()
+
+        # Still stuck: the next frame doesn't wait or pile up another call
+        assert await asyncio.wait_for(worker._link_ui_events(2, datetime.now()), 0.1) is None
+        assert len(flushes) == 1
+
+        release.set()
+        await stuck
+        await worker._link_ui_events(3, datetime.now())
+        assert len(flushes) == 2
+        assert worker._stuck_link is None
