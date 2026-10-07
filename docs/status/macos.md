@@ -6,7 +6,7 @@ How to read it: [README.md](README.md).
 | | |
 |---|---|
 | State | not run yet |
-| Command | `.venv/bin/python scripts/e2e_collect.py --write-status` |
+| Command | `uv run python scripts/e2e_collect.py --write-status` |
 
 ## Results
 
@@ -15,9 +15,9 @@ No results yet.
 ## Notes
 
 - Nobody has run the check on this machine yet.
-- First `git pull origin custom` and `uv sync` (the project moved from pip to uv). Then run the command above from the repo root, in a normal terminal. It takes 3 to 5 minutes. Hands off the mouse and keyboard until it says you can use the computer again.
+- First `git pull origin custom` (the project now uses uv and Python 3.14; `uv run` sets that up). Then run the command above from the repo root, in a normal terminal. It takes 3 to 5 minutes. Hands off the mouse and keyboard until it says you can use the computer again.
 - Gemma analysis needs llama-server. If it is not running, ScreenMind starts its own and stops it at the end. Without llama-server the Analysis row is a FAIL; the rest still works.
 - Then commit this file and `summary.md` (`git add docs/status`), and push to `custom`.
 - Run it from Terminal.app, not from a Claude session (gap G1).
 
-<!-- e2e-results {"meta": {"os_label": "macOS", "state": "not run yet", "date": "", "command": ".venv/bin/python scripts/e2e_collect.py --write-status"}, "results": []} -->
+<!-- e2e-results {"meta": {"os_label": "macOS", "state": "not run yet", "date": "", "command": "uv run python scripts/e2e_collect.py --write-status"}, "results": []} -->

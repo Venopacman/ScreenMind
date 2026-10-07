@@ -11,10 +11,9 @@ SKIP with evidence.
     FAIL  it was checked and is missing or wrong
     SKIP  it could not be checked in this run (no call, no input, backlog...)
 
-Run it from the repo root with the main venv's Python:
+Run it from the repo root:
 
-    macOS:    .venv/bin/python scripts/e2e_collect.py --write-status
-    Windows:  .venv\\Scripts\\python.exe scripts\\e2e_collect.py --write-status
+    uv run python scripts/e2e_collect.py --write-status
 
 --write-status writes docs/status/<os>.md and docs/status/summary.md.
 See docs/status/README.md for the rules.
@@ -1199,14 +1198,15 @@ def write_summary():
 
 def write_placeholder(os_key: str):
     """Status file for a machine that has not run the check yet."""
-    cmd = {"windows": r".venv\Scripts\python.exe scripts\e2e_collect.py --write-status",
-           "macos": ".venv/bin/python scripts/e2e_collect.py --write-status"}.get(os_key)
+    cmd = {"windows": r"uv run python scripts\e2e_collect.py --write-status",
+           "macos": "uv run python scripts/e2e_collect.py --write-status"}.get(os_key)
     meta = {"os_label": {"windows": "Windows", "macos": "macOS"}.get(os_key, os_key),
             "state": "not run yet", "date": "", "command": cmd}
     notes = [
         "Nobody has run the check on this machine yet.",
-        "First `git pull origin custom` and `uv sync` (the project moved from pip to uv). Then run "
-        "the command above from the repo root, in a normal terminal. It takes 3 to 5 minutes. "
+        "First `git pull origin custom` (the project now uses uv and Python 3.14; `uv run` sets "
+        "that up). Then run the command above from the repo root, in a normal terminal. "
+        "It takes 3 to 5 minutes. "
         "Hands off the mouse and keyboard until it says you can use the computer again.",
         "Gemma analysis needs llama-server. If it is not running, ScreenMind starts its own and "
         "stops it at the end. Without llama-server the Analysis row is a FAIL; the rest still works.",

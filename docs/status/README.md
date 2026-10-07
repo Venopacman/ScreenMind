@@ -14,18 +14,18 @@ Each machine writes only its own file. So two machines never edit the same file,
 
 ## How to run
 
-Run from the repo root, with the repo's venv (`uv sync` creates it; run it after a pull that changed dependencies). Use a normal terminal. `uv run python scripts/e2e_collect.py --write-status` works too, on both OSes.
+Run from the repo root, in a normal terminal. `uv run` uses the repo's venv and creates it from `uv.lock` if needed.
 
 macOS, from Terminal.app (not from a Claude session, see below):
 
 ```bash
-.venv/bin/python scripts/e2e_collect.py --write-status
+uv run python scripts/e2e_collect.py --write-status
 ```
 
 Windows, from PowerShell or Windows Terminal:
 
 ```
-.venv\Scripts\python.exe scripts\e2e_collect.py --write-status
+uv run python scripts\e2e_collect.py --write-status
 ```
 
 Then commit and push:
