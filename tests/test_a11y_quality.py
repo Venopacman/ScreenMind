@@ -97,6 +97,62 @@ class TestWalk:
         mac._walk_ax_tree(FakeEl("AXWindow", children=kids), texts, 0)
         assert sum(len(t) for t in texts) <= 20000
 
+    def test_skips_password_fields(self, mac):
+        win = FakeEl("AXWindow", children=[
+            FakeEl("AXTextField", value="••••••", AXSubrole="AXSecureTextField"),
+            FakeEl("AXTextField", value="user name"),
+        ])
+        texts = []
+        mac._walk_ax_tree(win, texts, 0)
+        assert texts == ["user name"]
+
+    def test_long_title_capped(self, mac):
+        texts = []
+        mac._walk_ax_tree(FakeEl("AXWindow", children=[FakeEl("AXGroup", title="t" * 9000)]), texts, 0)
+        assert len(texts[0]) == 4000
+
+    def test_web_area_text_deep_inside_is_read(self, mac):
+        """Electron apps: the web area is ~7 levels down and its text ~30 more."""
+        el = FakeEl("AXStaticText", value="deep message")
+        for _ in range(30):
+            el = FakeEl("AXGroup", children=[el])
+        el = FakeEl("AXWebArea", children=[el])
+        for _ in range(7):
+            el = FakeEl("AXGroup", children=[el])
+        texts = []
+        mac._walk_ax_tree(FakeEl("AXWindow", children=[el]), texts, 0)
+        assert "deep message" in texts
+
+    def test_node_budget_stops_walk(self, mac):
+        kids = [FakeEl("AXStaticText", value=f"line {i}") for i in range(50)]
+        texts = []
+        mac._walk_ax_tree(FakeEl("AXWindow", children=kids), texts, 0, budget=[20000, 11])
+        assert len(texts) == 10
+
+    def test_page_areas_skip_devtools_panels_and_iframes(self, mac):
+        page = FakeEl("AXWebArea", AXURL="https://example.com/",
+                      children=[FakeEl("AXWebArea", AXURL="https://ads.example/")])
+        devtools = FakeEl("AXWebArea", AXURL="devtools://devtools/bundled/devtools_app.html")
+        panel = FakeEl("AXWebArea", AXURL="chrome-extension://abc/panel.html")
+        win = FakeEl("AXWindow", children=[FakeEl("AXGroup", children=[devtools, page, panel])])
+        assert mac._ax_page_areas(win) == [page]
+
+    def test_browser_reads_only_the_page(self, mac):
+        """Not the tab strip or the address bar (raw URL, not sanitized)."""
+        page = FakeEl("AXWebArea", title="Example", AXURL="https://example.com/",
+                      children=[FakeEl("AXStaticText", value="the page text people read")])
+        win = FakeEl("AXWindow", title="Example - Google Chrome", children=[
+            FakeEl("AXTextField", value="example.com/secret?token=1"),
+            FakeEl("AXRadioButton", title="Other tab title"),
+            FakeEl("AXGroup", children=[page]),
+        ])
+        with patch("ApplicationServices.AXUIElementCreateApplication"), \
+             patch("ApplicationServices.AXUIElementCopyAttributeValue", return_value=(0, win)), \
+             patch.object(MacOSAdapter, "_is_browser", return_value=True), \
+             patch.object(MacOSAdapter, "enable_full_a11y_tree"):
+            text, source = mac.extract_a11y_text(7)
+        assert text == "Example\nthe page text people read" and source == "a11y"
+
 
 class TestTitlesAndUrls:
     def test_electron_title_from_web_area(self, mac):

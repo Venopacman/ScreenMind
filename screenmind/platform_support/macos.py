@@ -25,6 +25,15 @@ _A11Y_SKIP_ROLES = {"AXMenuBar", "AXMenuBarItem", "AXMenu", "AXMenuItem"}
 # size we read only the visible part.
 _A11Y_VISIBLE_ONLY_CHARS = 4000
 _A11Y_MAX_TOTAL_CHARS = 20000
+# Web content (Electron apps, browsers) starts 7-8 levels down, and its text
+# sits up to ~40 levels deeper. Depth starts again at each web area.
+_A11Y_MAX_DEPTH = 8
+_A11Y_WEB_MAX_DEPTH = 45
+_A11Y_MAX_NODES = 4000
+# Web areas that are not the page: docked DevTools, extension side panels.
+_NON_PAGE_SCHEMES = ("devtools:", "chrome-extension:", "moz-extension:", "safari-web-extension:")
+# AX calls to a hung app wait 6 s each by default.
+_AX_TIMEOUT_SECONDS = 1.0
 
 
 class MacOSAdapter(PlatformAdapter):
@@ -50,8 +59,11 @@ class MacOSAdapter(PlatformAdapter):
             from ApplicationServices import (  # type: ignore
                 AXUIElementCreateSystemWide,
                 AXUIElementCopyAttributeValue,
+                AXUIElementSetMessagingTimeout,
             )
             self._ax_available = True
+            # On the system-wide element this sets the default for the process.
+            AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), _AX_TIMEOUT_SECONDS)
             logger.debug("macOS Accessibility initialized")
         except ImportError:
             logger.warning("macOS Accessibility not available (install pyobjc-framework-ApplicationServices)")
@@ -368,8 +380,12 @@ class MacOSAdapter(PlatformAdapter):
             if err or not window:
                 return None, "none"
 
-            texts = []
-            self._walk_ax_tree(window, texts, depth=0, max_depth=8, seen=set(), budget=[_A11Y_MAX_TOTAL_CHARS])
+            # Browsers: only the page. The tab strip is other pages' titles,
+            # and the address bar has the raw URL, which skips sanitize_url.
+            roots = self._ax_page_areas(window) if self._is_browser(pid) else [window]
+            texts, seen, budget = [], set(), [_A11Y_MAX_TOTAL_CHARS, _A11Y_MAX_NODES]
+            for root in roots:
+                self._walk_ax_tree(root, texts, depth=0, seen=seen, budget=budget)
 
             if texts:
                 result = '\n'.join(texts)
@@ -383,22 +399,28 @@ class MacOSAdapter(PlatformAdapter):
             logger.error(f"macOS extraction failed: {e}")
             return None, "none"
 
-    def _walk_ax_tree(self, element, texts: list, depth: int, max_depth: int = 8,
+    def _walk_ax_tree(self, element, texts: list, depth: int, max_depth: int = _A11Y_MAX_DEPTH,
                       seen: Optional[set] = None, budget: Optional[list] = None):
         """Walk the AXUIElement tree to extract text.
 
-        Skips menu subtrees, drops repeated lines, reads only the visible part
-        of large text areas, and stops after _A11Y_MAX_TOTAL_CHARS.
+        Skips menu subtrees and password fields, drops repeated lines, reads
+        only the visible part of large text areas, and stops after
+        _A11Y_MAX_TOTAL_CHARS or _A11Y_MAX_NODES. budget is [chars, nodes] left.
         """
         seen = set() if seen is None else seen
-        budget = [_A11Y_MAX_TOTAL_CHARS] if budget is None else budget
-        if depth > max_depth or len(texts) > 500 or budget[0] <= 0:
+        budget = [_A11Y_MAX_TOTAL_CHARS, _A11Y_MAX_NODES] if budget is None else budget
+        if depth > max_depth or len(texts) > 500 or budget[0] <= 0 or budget[1] <= 0:
             return
+        budget[1] -= 1
 
         try:
             role = self._ax_attr(element, "AXRole")
             if role in _A11Y_SKIP_ROLES:
                 return
+            if self._ax_attr(element, "AXSubrole") == "AXSecureTextField":
+                return  # only bullets, but never read password fields
+            if role == "AXWebArea":
+                depth, max_depth = 0, _A11Y_WEB_MAX_DEPTH
 
             def _add(text: str):
                 text = text.strip()
@@ -411,7 +433,7 @@ class MacOSAdapter(PlatformAdapter):
 
             title = self._ax_attr(element, "AXTitle")
             if title and str(title).strip():
-                _add(str(title))
+                _add(str(title)[:_A11Y_VISIBLE_ONLY_CHARS])
 
             value = self._ax_attr(element, "AXValue")
             if isinstance(value, str) and value.strip():
@@ -427,6 +449,28 @@ class MacOSAdapter(PlatformAdapter):
 
         except Exception:
             pass
+
+    def _is_browser(self, pid: int) -> bool:
+        try:
+            from AppKit import NSRunningApplication  # type: ignore
+            app = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+            return bool(app) and str(app.localizedName() or "").lower() in BROWSER_APPS
+        except Exception:
+            return False
+
+    def _ax_page_areas(self, window, max_nodes: int = 400) -> list:
+        """Top-level web areas of a browser window that show a page: not
+        docked DevTools or extension panels, not iframes inside a page."""
+        areas, queue, seen = [], [window], 0
+        while queue and seen < max_nodes:
+            el = queue.pop(0)
+            seen += 1
+            if self._ax_attr(el, "AXRole") == "AXWebArea":
+                if not str(self._ax_attr(el, "AXURL") or "").startswith(_NON_PAGE_SCHEMES):
+                    areas.append(el)
+                continue
+            queue.extend(self._ax_attr(el, "AXChildren") or [])
+        return areas
 
     def _ax_visible_text(self, element) -> Optional[str]:
         """Only the on-screen part of a text area (e.g. Terminal without its
