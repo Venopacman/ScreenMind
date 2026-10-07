@@ -107,7 +107,7 @@ Gap ids (G1, G2...) point to [section 8](#8-gaps).
 
 | Data point | What we collect | macOS | Windows | Linux (side column) | Stored in | Gaps |
 |---|---|---|---|---|---|---|
-| Screenshot | One JPEG per display per changed tick | ScreenCaptureKit `SCScreenshotManager` (pyobjc), then `screencapture -x` CLI, then `mss` (CoreGraphics) | `mss` (GDI BitBlt) | X11: `mss`. Wayland: `grim`, then XDG Desktop Portal | `screenshots/YYYY-MM-DD/HH-MM-SS_mmm[_mN].jpg`, `activities.screenshot_path` | G1, G2, G3, G30 |
+| Screenshot | One JPEG per display per changed tick | ScreenCaptureKit `SCScreenshotManager` (pyobjc), then `screencapture -x` CLI, then `mss` (CoreGraphics) | `mss` (GDI BitBlt) | X11: `mss`. Wayland: `grim`, then XDG Desktop Portal | `screenshots/YYYY-MM-DD/HH-MM-SS_mmm[_mN].jpg`, `activities.screenshot_path` | G1, G2, G3 |
 | Change detection | pHash per display | `imagehash.phash` | same | same | not stored (in memory) | G4 |
 | App name | Owner of the top window per display | Quartz `CGWindowListCopyWindowInfo`, `kCGWindowOwnerName` | `EnumWindows` + `QueryFullProcessImageNameW` (exe name, UWP child process) | `xdotool` + `/proc`, or compositor IPC on Wayland | `activities.detected_app` | G5, G6 |
 | Window title | Title of the top window per display | `kCGWindowName`; if it is only the app name, `AXTitle` of the window's `AXWebArea` (Electron) | `GetWindowTextW`; if it is only the app name, the name of the window's UIA `Document` | `xdotool getwindowname` / `xprop`, compositor IPC | `activities.window_title` (sensitive-filtered) | G5 |
@@ -186,7 +186,7 @@ flowchart TB
 2. **`screencapture -x -t png -R x,y,w,h`**, the macOS CLI, about 0.2 s per display. Used after SCK fails, or for good after one mss grab took over 5 s.
 3. **mss**, which uses `CGWindowListCreateImage`. It is deprecated and can hang 30 s.
 
-SCK needs `pyobjc-framework-ScreenCaptureKit` and macOS 14. Without them `sck.available()` is False and the log says "ScreenCaptureKit not available; using mss". See G30.
+SCK needs `pyobjc-framework-ScreenCaptureKit` (a macOS dependency in `pyproject.toml`) and macOS 14. Without them `sck.available()` is False and the log says "ScreenCaptureKit not available; using mss".
 
 **Windows:** mss only (GDI). The active monitor comes from `MonitorFromWindow` + `GetMonitorInfoW`. mss makes the process per-monitor DPI aware, so window rects and monitors are both in physical pixels.
 
@@ -474,7 +474,6 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G27 | No UI events backend, no browser URL, no mic info on Linux. | Linux | new |
 | G28 | macOS may show a periodic "still recording your screen" reminder; not seen yet. | macOS | [sck-capture.md](../backlog/sck-capture.md) "macOS still recording your screen reminder" |
 | G29 | Wayland hides window positions: no window list, no active display, no per-display labels. | Linux | [multi-display-capture.md](../backlog/multi-display-capture.md) (Wayland note) |
-| G30 | `pyobjc-framework-ScreenCaptureKit` is not in `pyproject.toml`. A fresh install has no SCK and uses `screencapture`/mss. It works on the main venv only because the package is installed there. | macOS | new |
 | G31 | Typed text and clipboard are opt-in, because there is no PII detection before they are stored. | both | [ui-events.md](../backlog/ui-events.md) "PII detection before storing typed text and clipboard" |
 
 Closed while this map was written: G10 and G11 by `fa80d39` (Windows a11y reads the page, not the browser UI), G13 by `81277a8` (capture-time data kept on backlog skips). Their ids stay reserved.

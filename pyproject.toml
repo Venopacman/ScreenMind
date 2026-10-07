@@ -73,6 +73,8 @@ dependencies = [
     "pyobjc-framework-Cocoa>=10.0 ; sys_platform == 'darwin'",
     "pyobjc-framework-Quartz>=10.0 ; sys_platform == 'darwin'",
     "pyobjc-framework-ApplicationServices>=10.0 ; sys_platform == 'darwin'",
+    # macOS: screenshots via ScreenCaptureKit (capture/sck.py)
+    "pyobjc-framework-ScreenCaptureKit>=10.0 ; sys_platform == 'darwin'",
 
     # Windows: accessibility text and UI events (UI Automation)
     "uiautomation>=2.0,<3.0 ; sys_platform == 'win32'",

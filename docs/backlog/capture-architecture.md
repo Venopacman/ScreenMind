@@ -4,13 +4,6 @@ From the session "Capture architecture map" (2026-10-07). The full map is [docs/
 
 ## Items
 
-### G30: ScreenCaptureKit is not a declared dependency
-Status: open
-
-`sck.available()` imports `ScreenCaptureKit`, but `pyproject.toml` lists only `pyobjc-framework-Cocoa`, `-Quartz` and `-ApplicationServices`. The main venv has `pyobjc-framework-ScreenCaptureKit` 12.2.2 installed by hand. A fresh install silently uses `screencapture`/mss. Add `"pyobjc-framework-ScreenCaptureKit>=10.0 ; sys_platform == 'darwin'"`.
-
-Refs: `pyproject.toml`, `screenmind/capture/sck.py` (`available()`), `screen.py` (`_make_sck_grabber()`).
-
 ### G7: No a11y text or URL for displays without focus
 Status: idea
 

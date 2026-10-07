@@ -242,7 +242,7 @@ flowchart TB
     <colgroup><col style="width:9%"><col style="width:13%"><col class="os"><col class="os"><col style="width:13%"><col style="width:15%"><col style="width:7%"></colgroup>
     <thead><tr><th>Data point</th><th>What we collect</th><th><span class="chip mac">macOS</span></th><th><span class="chip win">Windows</span></th><th><span class="chip lnx">Linux</span></th><th>Stored in</th><th>Gaps</th></tr></thead>
     <tbody>
-      <tr><td>Screenshot</td><td>One JPEG per display per changed tick</td><td>ScreenCaptureKit <code>SCScreenshotManager</code> (pyobjc), then <code>screencapture -x</code> CLI, then <code>mss</code> (CoreGraphics)</td><td><code>mss</code> (GDI BitBlt)</td><td>X11: <code>mss</code>. Wayland: <code>grim</code>, then XDG Desktop Portal</td><td><code>screenshots/YYYY-MM-DD/HH-MM-SS_mmm[_mN].jpg</code>, <code>activities.screenshot_path</code></td><td>G1 G2 G3 G30</td></tr>
+      <tr><td>Screenshot</td><td>One JPEG per display per changed tick</td><td>ScreenCaptureKit <code>SCScreenshotManager</code> (pyobjc), then <code>screencapture -x</code> CLI, then <code>mss</code> (CoreGraphics)</td><td><code>mss</code> (GDI BitBlt)</td><td>X11: <code>mss</code>. Wayland: <code>grim</code>, then XDG Desktop Portal</td><td><code>screenshots/YYYY-MM-DD/HH-MM-SS_mmm[_mN].jpg</code>, <code>activities.screenshot_path</code></td><td>G1 G2 G3</td></tr>
       <tr><td>Change detection</td><td>pHash per display</td><td><code>imagehash.phash</code></td><td>same</td><td>same</td><td>not stored (in memory)</td><td>G4</td></tr>
       <tr><td>App name</td><td>Owner of the top window per display</td><td>Quartz <code>CGWindowListCopyWindowInfo</code>, <code>kCGWindowOwnerName</code></td><td><code>EnumWindows</code> + <code>QueryFullProcessImageNameW</code> (exe name, UWP child process)</td><td><code>xdotool</code> + <code>/proc</code>, or compositor IPC</td><td><code>activities.detected_app</code></td><td>G5 G6</td></tr>
       <tr><td>Window title</td><td>Title of the top window per display</td><td><code>kCGWindowName</code>; if only the app name, <code>AXTitle</code> of the window's <code>AXWebArea</code> (Electron)</td><td><code>GetWindowTextW</code>; if only the app name, the name of the window's UIA <code>Document</code></td><td><code>xdotool getwindowname</code> / <code>xprop</code>, compositor IPC</td><td><code>activities.window_title</code> (sensitive-filtered)</td><td>G5</td></tr>
@@ -331,7 +331,7 @@ flowchart TB
         <li><b><code>screencapture -x -t png -R x,y,w,h</code></b>, about 0.2 s per display. Used after SCK fails, or for good after one mss grab took over 5 s.</li>
         <li><b>mss</b> (<code>CGWindowListCreateImage</code>). Deprecated, can hang 30 s.</li>
       </ol>
-      <p>SCK needs <code>pyobjc-framework-ScreenCaptureKit</code> and macOS 14. Without them the log says "ScreenCaptureKit not available; using mss" (G30).</p>
+      <p>SCK needs <code>pyobjc-framework-ScreenCaptureKit</code> (a macOS dependency in <code>pyproject.toml</code>) and macOS 14. Without them the log says "ScreenCaptureKit not available; using mss".</p>
     </div>
     <div>
       <div class="os-head"><span class="chip win">Windows</span><h4>mss only</h4></div>
@@ -639,7 +639,6 @@ flowchart TB
       <tr data-s="lnx" data-new="1"><td class="gid">G27</td><td>No UI events backend, no browser URL, no mic info on Linux.</td><td><span class="chip lnx">Linux</span></td><td><span class="chip new">new</span></td></tr>
       <tr data-s="mac"><td class="gid">G28</td><td>macOS may show a periodic "still recording your screen" reminder; not seen yet.</td><td><span class="chip mac">macOS</span></td><td>sck-capture.md "macOS still recording your screen reminder"</td></tr>
       <tr data-s="lnx"><td class="gid">G29</td><td>Wayland hides window positions: no window list, no active display, no per-display labels.</td><td><span class="chip lnx">Linux</span></td><td>multi-display-capture.md (Wayland note)</td></tr>
-      <tr data-s="mac" data-new="1"><td class="gid">G30</td><td><code>pyobjc-framework-ScreenCaptureKit</code> is not in <code>pyproject.toml</code>. A fresh install has no SCK and uses <code>screencapture</code>/mss. The main venv works only because the package is installed there.</td><td><span class="chip mac">macOS</span></td><td><span class="chip new">new</span></td></tr>
       <tr data-s="both"><td class="gid">G31</td><td>Typed text and clipboard are opt-in, because there is no PII detection before they are stored.</td><td><span class="chip both">both</span></td><td>ui-events.md "PII detection before storing typed text and clipboard"</td></tr>
     </tbody>
   </table></div>
