@@ -26,6 +26,7 @@ scripts/dev-instance.sh
 ```
 
 It gives the worktree its own data dir (`~/.screenmind-dev/<worktree>`) and a fixed port in 7800-7899. It loads the main `.env` (OCR languages, capture on start), then overrides only the isolation settings.
+It uses the worktree's `.venv` if there is one, else the main checkout's.
 
 - `scripts/dev-instance.sh info` prints the port and data dir.
 - `scripts/dev-instance.sh reset` deletes the worktree's data for a fresh start.
@@ -34,14 +35,17 @@ It gives the worktree its own data dir (`~/.screenmind-dev/<worktree>`) and a fi
 
 ## What is still shared
 
-- The venv in the main checkout. If your branch needs a new dependency, tell the user before installing it, because it changes the main instance's environment too.
+- The main checkout's `.venv` is the main instance's environment. Never run `uv sync`, `uv pip` or `pip` against it.
+- To add a dependency, run `uv add <package>` in your worktree. It updates `pyproject.toml`, `uv.lock` and your worktree's own `.venv`. Commit both files. Tell the user when a lock change is merged, because the main `.venv` then needs a `uv sync` and a restart.
 - Models in `~/.screenmind/models`.
 - `llama-server` on port 5809. The dev instance reuses it and never stops it. Don't kill it.
 
 ## Tests
 
-`pytest` already isolates the data dir (`tests/conftest.py`). Run it with the main venv:
+`pytest` already isolates the data dir (`tests/conftest.py`). Run it with uv from the worktree root:
 
 ```bash
-/Users/pavel/projects/ScreenMind/.venv/bin/python -m pytest tests -q
+uv run pytest tests -q
 ```
+
+The first run creates the worktree's own `.venv` from `uv.lock`.
