@@ -6,25 +6,25 @@ Generated from the other files in this folder by `scripts/e2e_collect.py --summa
 
 | Data point | [macos](macos.md) | [windows](windows.md) |
 |---|---|---|
-| *State* | not run yet | not run yet |
-| *Date* |  |  |
-| *Git* |  |  |
-| Screenshots, every display | - | - |
-| Screen grab backend | - | - |
-| App name | - | - |
-| Window title | - | - |
-| Screen text from accessibility | - | - |
-| OCR text | - | - |
-| Browser URL | - | - |
-| UI event: click with element role/name | - | - |
-| UI event: app switch | - | - |
-| UI event: typed text (opt-in) | - | - |
-| UI event: clipboard (opt-in) | - | - |
-| UI events linked to frames | - | - |
-| Typed secret is redacted | - | - |
-| Password field is not stored | - | - |
-| Call detection | - | - |
-| Analysis (Gemma) | - | - |
-| Retention cleanup at startup | - | - |
+| *State* | ran | not run yet |
+| *Date* | 2026-10-07 18:19 |  |
+| *Git* | custom ea9510c |  |
+| Screenshots, every display | PASS | - |
+| Screen grab backend | PASS | - |
+| App name | PASS | - |
+| Window title | PASS | - |
+| Screen text from accessibility | PASS | - |
+| OCR text | PASS | - |
+| Browser URL (google chrome) | PASS | - |
+| UI event: click with element role/name | PASS | - |
+| UI event: app switch | PASS | - |
+| UI event: typed text (opt-in) | PASS | - |
+| UI event: clipboard (opt-in) | PASS | - |
+| UI events linked to frames | PASS | - |
+| Typed secret is redacted | PASS | - |
+| Password field is not stored | PASS | - |
+| Call detection | SKIP | - |
+| Analysis (Gemma) | PASS | - |
+| Retention cleanup at startup | PASS | - |
 
 `-` means this machine has no result for that row (not run, or no such browser there).

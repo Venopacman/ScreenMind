@@ -5,20 +5,40 @@ How to read it: [README.md](README.md).
 
 | | |
 |---|---|
-| State | not run yet |
-| Command | `uv run python scripts/e2e_collect.py --write-status` |
+| State | ran |
+| Date | 2026-10-07 18:19 |
+| Machine | Pavels-MacBook-Pro.local |
+| OS | macOS 26.6.2 (arm64) |
+| Git | custom ea9510c |
+| Python | 3.14.6 |
+| Started from | Apple_Terminal |
+| Permissions | screen_recording=yes, accessibility=yes, input_monitoring=yes; ScreenMind sees: input_monitoring=yes, accessibility=yes |
+| Displays | 2 |
+| Input | injected |
+| UI event recorder | backend=macos, running=True, hook_running=True, keys_tapped=True, input_events=48, events_recorded=16, skipped={}, permissions={'input_monitoring': True, 'accessibility': True, 'all_granted': True}, last_error=None |
+| Run time | 165s |
+| Command | `python scripts/e2e_collect.py --write-status` |
 
 ## Results
 
-No results yet.
+| Data point | Result | Evidence | Known gaps |
+|---|---|---|---|
+| Screenshots, every display | **PASS** | 2 display(s); frames saved: display 1: 1, display 2: 5; 6 activity rows | [G1](../architecture/capture.md#8-gaps) |
+| Screen grab backend | **PASS** | used: sck; expected sck | [G1](../architecture/capture.md#8-gaps), [G2](../architecture/capture.md#8-gaps) |
+| App name | **PASS** | detected_app=TextEdit on 1 rows |  |
+| Window title | **PASS** | window_title='screenmind-e2e-iu30fi.txt' on 1 rows |  |
+| Screen text from accessibility | **PASS** | marker found without OCR on 1 editor rows; text length 603 chars | [G7](../architecture/capture.md#8-gaps), [G12](../architecture/capture.md#8-gaps) |
+| OCR text | **PASS** | OCR boxes on 1 of 6 analyzed rows (longest text 1652 chars) | [G14](../architecture/capture.md#8-gaps) |
+| Browser URL (google chrome) | **PASS** | active_url=https://example.com/ on 1 rows; ui_events.url on 1 events | [G8](../architecture/capture.md#8-gaps), [G9](../architecture/capture.md#8-gaps) |
+| UI event: click with element role/name | **PASS** | click in TextEdit: role=AXTextArea, name=''; all events: app_switch: 5, click: 9, clipboard: 1, text: 2, window_focus: 2 | [G20](../architecture/capture.md#8-gaps) |
+| UI event: app switch | **PASS** | 5 app switches, 2 to TextEdit | [G20](../architecture/capture.md#8-gaps) |
+| UI event: typed text (opt-in) | **PASS** | text='e2e typed iu30fi' in TextEdit, role=AXTextArea | [G20](../architecture/capture.md#8-gaps), [G31](../architecture/capture.md#8-gaps) |
+| UI event: clipboard (opt-in) | **PASS** | clipboard text='e2e clipboard iu30fi' in TextEdit | [G20](../architecture/capture.md#8-gaps), [G31](../architecture/capture.md#8-gaps) |
+| UI events linked to frames | **PASS** | user_actions set on 4 of 6 rows; 2 mention the test | [G21](../architecture/capture.md#8-gaps) |
+| Typed secret is redacted | **PASS** | secret not stored; redacted in 1 text events and 1 editor rows |  |
+| Password field is not stored | **PASS** | secret not stored; no event for the field either (macOS secure input hides keys in password fields from event taps) |  |
+| Call detection | **SKIP** | no call was active during the run |  |
+| Analysis (Gemma) | **PASS** | status ok: 6; sample (Google Chrome): category=browsing, summary 65 chars; summary set on 6 of 6 ok rows | [G15](../architecture/capture.md#8-gaps) |
+| Retention cleanup at startup | **PASS** | 30-day-old activity, ui_event, meeting and JPEG were deleted at startup | [G24](../architecture/capture.md#8-gaps) |
 
-## Notes
-
-- Nobody has run the check on this machine yet.
-- Once per machine: install uv (https://docs.astral.sh/uv/). It installs Python 3.14 itself (`uv python install 3.14` if you want it up front).
-- Then `git pull origin custom` and `uv sync` in the repo root. Run the command above from there, in a normal terminal. It takes 3 to 5 minutes. Hands off the mouse and keyboard until it says you can use the computer again.
-- Gemma analysis needs llama-server. If it is not running, ScreenMind starts its own and stops it at the end. Without llama-server the Analysis row is a FAIL; the rest still works.
-- Then commit this file and `summary.md` (`git add docs/status`), and push to `custom`.
-- Run it from Terminal.app, not from a Claude session (gap G1).
-
-<!-- e2e-results {"meta": {"os_label": "macOS", "state": "not run yet", "date": "", "command": "uv run python scripts/e2e_collect.py --write-status"}, "results": []} -->
+<!-- e2e-results {"meta": {"os_label": "macOS", "state": "ran", "date": "2026-10-07 18:19", "machine": "Pavels-MacBook-Pro.local", "os": "macOS 26.6.2 (arm64)", "git": "custom ea9510c", "python": "3.14.6", "host_app": "Apple_Terminal", "permissions": "screen_recording=yes, accessibility=yes, input_monitoring=yes; ScreenMind sees: input_monitoring=yes, accessibility=yes", "displays": "2", "input_mode": "injected", "ui_events": "backend=macos, running=True, hook_running=True, keys_tapped=True, input_events=48, events_recorded=16, skipped={}, permissions={'input_monitoring': True, 'accessibility': True, 'all_granted': True}, last_error=None", "duration": "165s", "command": "python scripts/e2e_collect.py --write-status"}, "results": [{"id": "screenshots", "label": "Screenshots, every display", "result": "PASS"}, {"id": "grab_backend", "label": "Screen grab backend", "result": "PASS"}, {"id": "app_name", "label": "App name", "result": "PASS"}, {"id": "window_title", "label": "Window title", "result": "PASS"}, {"id": "a11y_text", "label": "Screen text from accessibility", "result": "PASS"}, {"id": "ocr", "label": "OCR text", "result": "PASS"}, {"id": "browser_url:google chrome", "label": "Browser URL (google chrome)", "result": "PASS"}, {"id": "ui_click", "label": "UI event: click with element role/name", "result": "PASS"}, {"id": "ui_app_switch", "label": "UI event: app switch", "result": "PASS"}, {"id": "ui_text", "label": "UI event: typed text (opt-in)", "result": "PASS"}, {"id": "ui_clipboard", "label": "UI event: clipboard (opt-in)", "result": "PASS"}, {"id": "ui_linked", "label": "UI events linked to frames", "result": "PASS"}, {"id": "redact_typed", "label": "Typed secret is redacted", "result": "PASS"}, {"id": "password_field", "label": "Password field is not stored", "result": "PASS"}, {"id": "calls", "label": "Call detection", "result": "SKIP"}, {"id": "analysis", "label": "Analysis (Gemma)", "result": "PASS"}, {"id": "retention", "label": "Retention cleanup at startup", "result": "PASS"}]} -->
