@@ -1,15 +1,24 @@
 # Ship ScreenMind as an app
 
-Status: research and recommendation, 2026-10-07. Nothing here is built or signed yet. One unsigned macOS spike was built (see [packaging-spikes.md](packaging-spikes.md)).
+Status: research and recommendation, 2026-10-07 (updated the same day for a headless agent and a resource budget). Nothing here is built or signed yet. One unsigned macOS spike was built (see [packaging-spikes.md](packaging-spikes.md)).
 
 ## Short answer
 
-- **Both OS: freeze with PyInstaller (onedir).** It supports Python 3.14 and has hooks for onnxruntime, sounddevice and keyring. The macOS spike built a working `ScreenMind.app` (343 MB, 122 MB as a DMG). The dashboard answered 2 s after start.
-- **macOS: a signed, notarized `.app` in a DMG.** The first-run wizard is a page in the existing dashboard. It walks through the permissions and the model download. Start at login uses `SMAppService`, not a LaunchAgent plist. Add a menu bar icon.
-- **Windows: an Inno Setup wizard, per-user install.** It needs no admin rights. It adds an optional "Start at login" checkbox (HKCU Run) and asks on uninstall whether to delete `%USERPROFILE%\.screenmind`. Add a tray icon.
-- **Heavy parts:** bundle a pinned CPU/Metal (macOS) or CPU/Vulkan (Windows) `llama-server`, about 10-30 MB. Download Gemma (1.5-3 GB) on first run, with progress in the wizard.
+Two requirements from the user (2026-10-07) shape the plan:
+
+1. **No UI ships.** The product is a headless background agent that starts at login. The dashboard stays a developer tool. The shipped build has only a menu bar / tray item and a first-run permissions flow. See [What ships: a headless agent](#what-ships-a-headless-agent).
+2. **It must not be greedy with RAM and CPU.** See [Resource budget](#resource-budget). Today the agent is far over any fair budget: about 1-1.6 GB for ScreenMind (mostly OCR) plus about 4 GB for `llama-server`.
+
+Recommendation:
+
+- **Both OS: freeze with PyInstaller (onedir).** It supports Python 3.14 and has hooks for onnxruntime, sounddevice and keyring. The macOS spike built a working `ScreenMind.app` (343 MB, 122 MB as a DMG) that started in 2 s. The bundler adds no RAM: the frozen app runs the same single Python process.
+- **macOS: a signed, notarized `.app` in a DMG.** Native minimum UI through pyobjc: a menu bar item (status, pause, quit) and a short first-run window that explains each permission before macOS asks. Start at login uses `SMAppService`, not a LaunchAgent plist.
+- **Windows: an Inno Setup wizard, per-user install.** The wizard explains what is recorded and has a "Start at login" checkbox. A tray item gives status, pause and quit. Uninstall asks whether to delete `%USERPROFILE%\.screenmind`.
+- **Do not ship local Gemma in the default agent.** Collect on the device, label on the server (or through a cheap vendor API in batch). That removes about 4 GB of RAM and a 3 GB download. Keep local labeling as an opt-in mode that loads the model only when needed. See [Should local LLM analysis ship?](#should-local-llm-analysis-ship).
+- **Fix OCR memory before shipping.** OCR alone holds 1.1-1.8 GB and uses 4-7 CPU-seconds per frame (measured below).
+- **Target budget:** median 250 MB, peak 500 MB of memory for the agent, and on average under 3% of one CPU core over a workday. Measured by the e2e check on each machine.
 - **Architectures:** Apple Silicon only, macOS 14+. Windows x64 only. Intel Macs are out: onnxruntime has no Intel macOS wheels for Python 3.14. Windows ARM64 is out for now: our lock has no `opencv-python` wheel for it. ARM64 laptops can run the x64 build under emulation (not tested).
-- **First milestone (about one week):** an unsigned `.app` + DMG and an unsigned Inno Setup wizard for internal testers, built in GitHub Actions. That needs a few code fixes first (listed below).
+- **First milestone (about one to two weeks):** the code fixes below, the OCR memory fix, and an unsigned `.app` + DMG and Inno Setup wizard for internal testers, built in GitHub Actions.
 - **Public release:** Apple Developer Program (99 USD/year) for signing and notarization. Azure Artifact Signing (about 10 USD/month) or an OV certificate for Windows. Auto-update comes last.
 
 ## What we ship
@@ -21,11 +30,105 @@ Measured on the user's Mac (2026-10-07, branch `custom` after the strip, `cd9556
 | Python 3.14 + all packages, frozen (`.app`) | 343 MB on disk (363 MB before the strip) | PyInstaller spike |
 | Same, as a compressed DMG | 157 MB (zlib), 122 MB (LZMA, `ULMO`) | `hdiutil create` |
 | `llama-server` (llama.cpp) | 10-31 MB per OS (CPU, Metal, Vulkan builds). CUDA builds are 150-400 MB plus runtime | Homebrew or PATH, or `setup_llama.py` downloads it into the checkout |
-| Gemma 4 E2B GGUF + mmproj | 1.5 GB (Q4_0) to 5 GB; 3.2 GB on this Mac | `huggingface_hub` into `~/.screenmind/models/<model>` |
+| Gemma 4 E2B GGUF + mmproj | Q4_0 2.8 GB + mmproj 0.56 GB = 3.2 GB on this Mac; Q8_0 5 GB. (The "~1.5 GB" label in `model_manager.py` is too low.) | `huggingface_hub` into `~/.screenmind/models/<model>` |
 | RapidOCR models | 25 MB | downloaded on first use into `~/.screenmind/models/ocr` |
 | Embedder | 87 MB in `~/.screenmind/models/embedder` | removed by the strip ([strip-to-actions.md](strip-to-actions.md)); the folder can be deleted |
 
 The biggest parts of the frozen app are onnxruntime (70 MB), `cv2` (40 MB plus the ffmpeg/X11 libraries it bundles, from `opencv-python`, pulled in by `rapidocr`) and scipy (32 MB, pulled in by `imagehash`). Ways to make it smaller are in [Size](#size).
+
+## What ships: a headless agent
+
+The user's decision: no UI ships. The dashboard stays for development.
+
+| Part | Developer build (today) | Shipped agent |
+|---|---|---|
+| Capture, a11y text, UI events, OCR, dedup, call tracking, export | yes | yes |
+| Dashboard (static pages, Model Hub, settings pages) | yes | no |
+| HTTP server (FastAPI + uvicorn) | yes | only if the export needs it. Ask the export session. Dropping it saves some RAM (not measured) and closes a local port. |
+| Settings | dashboard and `settings.json` | `settings.json`, plus a few menu items (pause, start at login) |
+| Labeling model | local Gemma | none by default; see [Should local LLM analysis ship?](#should-local-llm-analysis-ship) |
+| UI on macOS | none | menu bar item + first-run permissions window ([details](#first-run-flow-native-no-dashboard)) |
+| UI on Windows | none | installer wizard + tray item ([details](#install-details-inno-setup)) |
+
+The minimum per OS:
+
+- **macOS needs a little UI.** The system prompts don't explain why ScreenMind needs Screen Recording, Accessibility or Input Monitoring. They send the user to System Settings. So the agent shows its own short explanation first, one step per permission. It also needs a menu bar item: macOS can revoke Screen Recording (the monthly prompt), and the user must see that recording runs and be able to pause it.
+- **Windows needs almost none.** No permission prompts, except the microphone for call transcription. The installer wizard explains what is recorded. A tray item shows status and offers pause and quit.
+
+In the build, a flag selects agent mode. The spec then leaves out `screenmind/api/static` (and FastAPI/uvicorn, if the export doesn't need them).
+
+## Resource budget
+
+The agent must not be greedy with RAM and CPU. Today it is.
+
+### Measured today
+
+On the user's Mac (24 GB, 4 performance + 6 efficiency cores), 2026-10-07:
+
+| Part | Memory | CPU | How measured |
+|---|---|---|---|
+| ScreenMind main process (main instance, code from before the strip, still with the embedder) | 1.6 GB footprint (peak 1.9 GB) | | `footprint` on the running process |
+| ...of that, OCR (RapidOCR on onnxruntime) | 1.1-1.8 GB footprint after 20-60 full-size Retina frames | 7.1 CPU-seconds per frame (1.5 s wall) | offline run on 20 and 60 saved screenshots, separate process |
+| ...OCR with tuning (`enable_mem_pattern=False`, 2 threads) | 1.3 GB after 20 frames (-450 MB); 1.1-1.5 GB over 60 frames | 4.3 CPU-s per frame (2.1 s wall) | same |
+| ...Python + OCR imports / OCR models loaded | 35-50 MB / about 100 MB | | same |
+| Frozen app right after start (no OCR yet, nothing captured) | 123 MB RSS | about 0 | spike |
+| `llama-server`, Gemma 4 E2B Q4_0 + mmproj, context 6144 | about 4.0 GB RSS | about 12 s per call. About 880 calls per workday (861 full analyses + 300 cache hits on 2026-10-06/07), so about 3 hours of inference a day | coordinator's measurement; call counts from the DB |
+| **Total** | **about 5-5.5 GB** | | |
+
+What this shows:
+
+- **The bundler costs nothing.** PyInstaller onedir runs the same single Python process. Nuitka is about the same. Onefile adds a second process and unpacks to a temp folder on every start, so avoid it. Electron or Tauri would add a webview process, which a headless agent doesn't need.
+- **OCR is the main cost in the ScreenMind process.** RapidOCR already turns onnxruntime's memory arena off. The memory is per-frame working buffers that the allocator keeps dirty. Calling `malloc_zone_pressure_relief` and even dropping the OCR engine gave nothing back. Halving the image size changed almost nothing. Over 60 frames it levels off at 1.1-1.5 GB, so it is a working set, not a leak.
+- **Measure footprint, not RSS.** On macOS, RSS also counts freed pages the allocator keeps. Activity Monitor shows "phys_footprint". On Windows, Task Manager shows the private working set.
+- **`llama-server` has two hidden costs.** The host prompt cache (`--cache-ram`) defaults to 8 GiB; set it to 0. The mmproj (0.56 GB) is only needed when images are sent. The model weights are memory-mapped, so part of the 4 GB RSS is file pages the OS can reclaim. Its footprint is lower (not measured yet).
+
+### Target budget
+
+| Metric | Target | Hard cap |
+|---|---|---|
+| Memory of the agent and its child processes (macOS footprint, Windows private working set) | median 250 MB | peak 500 MB. Above 750 MB the agent restarts its OCR worker and logs a warning. |
+| CPU, average over a workday | under 3% of one core (about 15 CPU-minutes in 8 hours) | |
+| CPU per captured frame | under 1 CPU-second | |
+| Screen not changing | about 0% CPU | |
+| Opt-in local labeling | up to +1.5 GB, only while a batch runs, and 0 when idle | only on AC power, after the user is idle for a few minutes |
+
+Why these numbers: 250 MB is about 3% of an 8 GB laptop. That is small enough to stay unnoticed. The start footprint (123 MB) plus the OCR models (about 100 MB) fits. The OCR working memory does not fit today, so the levers below are needed. The numbers are proposals; M0 proves or adjusts them.
+
+### Levers, biggest first
+
+1. **Label off the device** (saves about 4 GB and 3 hours of inference a day). See the next section.
+2. **OCR in a short-lived worker process.** The agent starts a worker (a hidden mode of the same executable) for a batch of frames, then the worker exits and its memory goes back to the OS. Cost: about 100 MB and a second or two to load the models per batch (to measure).
+3. **Tune onnxruntime for OCR.** `enable_mem_pattern=False`, `intra_op_num_threads=2`. Measured: -25% memory and -40% CPU, but each frame takes 45% longer, which a background agent can afford. RapidOCR passes these through its `EngineConfig.onnxruntime` settings.
+4. **OCR less.** Skip OCR when the accessibility text is real content (exists: `_a11y_is_content`) and when the frame is a near-duplicate (exists: pHash). New: OCR only the front window region, not every display. Try a smaller detector input (`Det.limit_side_len`, `Global.max_side_len`). Halving the whole image did not help, so measure each change.
+5. **Lower priority.** This reduces CPU contention, not RAM.
+   - macOS: `setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG)` at start. That means lowest CPU priority, efficiency cores only, and throttled disk I/O. If grabs then come late, keep the capture thread at utility QoS. For a `llama-server` child, `taskpolicy -b -p <pid>` works from outside. ([Eclectic Light](https://eclecticlight.co/2025/05/09/what-is-quality-of-service-and-how-does-it-matter/), [man page](https://cs.iossec.tech/xnu/latest/source/bsd/man/man2/getpriority.2))
+   - Windows: EcoQoS through `SetProcessInformation(ProcessPowerThrottling, PROCESS_POWER_THROTTLING_EXECUTION_SPEED)`, which also works on a child's handle. `BELOW_NORMAL_PRIORITY_CLASS` (inherited by children) and `MEMORY_PRIORITY_LOW` (its pages are trimmed first). psutil covers the priority class; EcoQoS needs ctypes. ([Microsoft Learn](https://learn.microsoft.com/en-us/windows/win32/procthread/quality-of-service))
+   - `llama-server`: `--prio -1 --poll 0` and a small `-t`.
+6. **Do heavy work at good times.** The analysis queue (`defer_analysis` exists) runs on AC power when the user is idle or the screen is locked. It pauses on battery saver, Low Power Mode or high thermal state. Detection: macOS `IOPSGetProvidingPowerSourceType`, `NSProcessInfo.thermalState`, `isLowPowerModeEnabled`, `CGEventSourceSecondsSinceLastEventType`. Windows `GetSystemPowerStatus`, `GetLastInputInfo`. psutil `sensors_battery().power_plugged` works on both.
+7. **Hard caps are a last resort.** Windows Job Objects can cap committed memory, but allocations then fail instead of slowing down. macOS has no supported per-process memory cap for apps. So the agent watches itself and recycles the OCR worker.
+
+### Should local LLM analysis ship?
+
+Inputs to the labeling call are mostly text (accessibility or OCR text, after redaction) plus one 768 px screenshot.
+
+| Option | Extra RAM on the device | CPU/GPU on the device | Money | Privacy | Effort |
+|---|---|---|---|---|---|
+| A. As today: Gemma 4 E2B with vision, always loaded | about 4 GB | about 3 h of inference per workday | none | stays on the device | none |
+| B. Same model, loaded on demand: `llama-server --sleep-idle-seconds 60`, batches only when idle on AC | about 4 GB during a batch; the model unloads when idle (the PR's test went from 43 GB to 442 MB) | same total, moved to idle time | none | stays on the device | small: flags and a scheduler |
+| C. Smaller local model, text only: Gemma 3 1B (Q4_K_M 0.8 GB), Qwen3 0.6B (Q8_0 0.64 GB), or Qwen3.5 0.8B with vision (0.74 GB with mmproj) | about 1 GB while loaded, 0 when idle (with B) | much less per call (not measured) | none | stays on the device | medium: prompt work and a quality check on the questionnaire bench |
+| D. Label on the workflows server | none | none | server cost | the export already sends this data to the workflows app | medium: a server job |
+| E. Vendor API from the agent, text only, batched | almost none | almost none | per user per workday: Gemini 2.5 Flash-Lite about 0.2 USD, gpt-5-nano about 0.1-0.3 USD, Claude Haiku 4.5 about 2.2 USD (1.1 with the Batch API) | redacted text leaves the device. Images would leave unredacted, so send none. | medium: see "Swap Gemma for a vendor LLM API" in [setup-ocr-and-upstream-prs.md](../backlog/setup-ocr-and-upstream-prs.md). Also an API key in the client. |
+
+Cost assumption for E: 880 calls a workday, about 2,000 input and 100 output tokens each. For example, Gemini 2.5 Flash-Lite at 0.10/0.40 USD per million tokens: 1.76 M input = 0.18 USD, plus 0.09 M output = 0.04 USD. Claude Haiku 4.5 at 1/5 USD per million: 1.76 + 0.44 = 2.20 USD. Over 22 workdays: about 5 USD per user a month with Flash-Lite, about 48 USD with Haiku (24 USD with the Batch API). gpt-5-nano bills its reasoning tokens as output, so its cost depends on how much it reasons. ([Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing), [OpenAI pricing](https://developers.openai.com/api/docs/pricing))
+
+**Recommendation: D by default.** The agent only collects and exports. Labeling runs where the data goes anyway, with no model download, no 4 GB of RAM and no API key in the client. The server can call a vendor API in batch (E's prices, without the key problem). Offer **B + C as an opt-in "label on this computer" mode** for people who must keep everything local, after C passes the questionnaire bench. This is a product decision; see the open questions.
+
+### Measure and enforce
+
+- **Metric.** macOS: `phys_footprint` from `proc_pid_rusage(RUSAGE_INFO_V4)` (what Activity Monitor shows). Windows: private working set, psutil `memory_full_info().uss` (what Task Manager shows). Add up the agent and its children. CPU: psutil `cpu_times()` user + system, per frame and per hour.
+- **In the agent.** The 10-minute summary log line gets memory (median, peak), CPU-seconds per frame and frames OCR'd. Above the hard cap: recycle the OCR worker, log a warning.
+- **In the e2e check** (`scripts/e2e_collect.py`). Sample memory and CPU of ScreenMind and `llama-server` every second during the run. Write "Memory median / peak" and "CPU-s per frame" rows into `docs/status/<os>.md`. WARN over the target, FAIL over the hard cap.
+- **In CI.** A benchmark job on GitHub's macOS and Windows runners. It runs OCR and the analysis pipeline (with a fake LLM) on a fixed set of synthetic screenshots committed to `tests/fixtures`, with no private data. It records memory and CPU per frame and fails on more than 20% regression against the stored baseline for that runner. Runners are not laptops, so compare each runner with its own baseline, not with the laptop target.
 
 ## Things in the code that break inside an app
 
@@ -39,7 +142,7 @@ These need fixing before any installer is useful. They are small. Most of them a
 | F4 | `startup.py` `_get_startup_command()`, `main.run()` `--background`, `launcher.py`, `_install_desktop_shortcut()` | They build commands from `sys.executable -m screenmind`, `pythonw.exe` or `launcher.py`. None of these exist in an app. | In app mode the start command is the app itself. macOS: `SMAppService.mainApp` instead of the plist. Windows: HKCU Run with the path to `ScreenMind.exe` (the installer can write it). Drop the shortcut and splash code from the app path. |
 | F5 | `config._setup_logging()` | A windowed build has no console. Logs go nowhere unless `SCREENMIND_LOG_FILE` is set. | In app mode, always log to `~/.screenmind/screenmind.log` (rotating). |
 | F6 | `engine/ocr.py` (`Global.model_root_dir`) | The app ships rapidocr's own default models (31 MB) but never uses them. It downloads other models into `~/.screenmind/models/ocr` on first use. | Ship the 5 models we use inside the app (works offline) and exclude rapidocr's defaults. |
-| F7 | `capture_worker`, `ui_events` permission requests | Screen Recording is never requested explicitly. macOS asks on the first grab, at a random moment. | The onboarding page requests each permission on a button press (see [macOS onboarding](#first-run-wizard-onboarding)). |
+| F7 | `capture_worker`, `ui_events` permission requests | Screen Recording is never requested explicitly. macOS asks on the first grab, at a random moment. | The first-run window requests each permission on a button press (see [First-run flow](#first-run-flow-native-no-dashboard)). |
 
 The spike ran with F1-F7 still in place. The dashboard worked because the test needed none of these paths.
 
@@ -67,7 +170,7 @@ Why onedir matters on macOS: PyInstaller's onedir bootloader loads Python into i
 
 Child processes and permissions: Apple DTS says macOS follows the chain from a child process to its parent to find the "responsible" app, as long as the parent stays alive ([forum](https://developer.apple.com/forums/thread/805245)). So a sidecar would usually get the shell app's grants. But the chain can break, and macOS 26.1 had a bug in how such children show in Settings ([forum](https://developer.apple.com/forums/thread/807898)).
 
-**Recommendation: no native shell now.** The dashboard already is the UI. A menu bar / tray icon in Python (pyobjc `NSStatusItem` on macOS, `pystray` on Windows) gives "Open dashboard", "Pause", "Quit". Revisit a shell only if we need real app windows.
+**Recommendation: no native shell.** No UI ships, so a webview shell would only add a process and RAM (Electron alone is often 100+ MB). A menu bar / tray item in Python (pyobjc `NSStatusItem` on macOS, `pystray` on Windows) is enough.
 
 ## 2. macOS
 
@@ -84,18 +187,22 @@ Child processes and permissions: Apple DTS says macOS follows the chain from a c
 
 DMG with the app and an "Applications" link. Build it with `create-dmg` or `dmgbuild`; plain `hdiutil` is enough for testers. A `.pkg` adds nothing we need.
 
-### First-run wizard (onboarding)
+### First-run flow (native, no dashboard)
 
-Make it a page of the existing dashboard. The first-run welcome screen already exists (`setup_complete`). Steps:
+macOS needs some UI. The system prompts for Screen Recording, Accessibility and Input Monitoring say nothing about why, and they send the user to System Settings to flip a switch. Without our own explanation first, most people will deny or ignore them. The minimum is a small native window or a few `NSAlert` dialogs, built with pyobjc (already a dependency):
 
-1. **Permissions.** One row per permission, with its state and a "Grant" button. The backend calls the request API, and the page polls the state.
+1. **What ScreenMind records and where it goes.** One screen, plain words, a "Continue" button.
+2. **One step per permission.** A sentence on why, then a button that triggers the request and opens the right Settings pane (`x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture`, `...Privacy_Accessibility`, `...Privacy_ListenEvent`). The step shows a check mark when the grant is seen.
    - Screen Recording: `CGPreflightScreenCaptureAccess` / `CGRequestScreenCaptureAccess`.
-   - Accessibility: `AXIsProcessTrustedWithOptions` (already in `POST /api/ui-events/permissions`).
-   - Input Monitoring: `CGPreflightListenEventAccess` / `CGRequestListenEventAccess` (same route).
-   - Microphone: only if call transcription is on. `AVCaptureDevice.requestAccessForMediaType_`. Needs `NSMicrophoneUsageDescription` in Info.plist (the spike has it).
-   - Some grants need an app restart. The page says so and offers a "Restart ScreenMind" button.
-2. **Model.** Pick a Gemma size, show download progress. The Model Hub already reports `downloaded_bytes`. Allow "Skip: collect now, label later".
-3. **Start at login** (on by default) and **Start capturing**.
+   - Accessibility: `AXIsProcessTrustedWithOptions`.
+   - Input Monitoring: `CGPreflightListenEventAccess` / `CGRequestListenEventAccess`.
+   - Microphone: only if call transcription is on. `AVCaptureDevice.requestAccessForMediaType_`, with `NSMicrophoneUsageDescription` in Info.plist (the spike has it).
+   - Some grants need a restart. The last step offers "Restart ScreenMind".
+3. **Start at login** (on by default), then start capturing.
+
+The menu bar item has a "Permissions..." entry that reopens this flow. It also shows "Needs permission" when a grant is missing or was revoked, for example after the monthly Screen Recording prompt was dismissed.
+
+If local labeling is on (opt-in, see [Resource budget](#resource-budget)), the model download shows as a menu bar line ("Downloading model: 42%"). No window is needed for that.
 
 ### Start at login
 
@@ -103,7 +210,7 @@ Use `SMAppService.mainApp.register()` (macOS 13+) through pyobjc (`pyobjc-framew
 
 ### Menu bar
 
-An `NSStatusItem` with Open dashboard / Pause / Quit. It needs the AppKit run loop on the main thread. Today the main thread runs asyncio, so asyncio moves to a worker thread. Set `LSUIElement` so there is no Dock icon (the spike does this).
+An `NSStatusItem` with a status line (Capturing / Paused / Needs permission), Pause or Resume, Permissions..., and Quit. Developer builds can add "Open dashboard". It needs the AppKit run loop on the main thread. Today the main thread runs asyncio, so asyncio moves to a worker thread. Set `LSUIElement` so there is no Dock icon (the spike does this). AppKit in the same process costs little RAM (not measured; expect tens of MB).
 
 ### Does a signed app fix the permission prompts?
 
@@ -130,11 +237,11 @@ Mostly yes. Facts:
 ### Install details (Inno Setup)
 
 - Per-user, no admin: install to `%LOCALAPPDATA%\Programs\ScreenMind`. Data stays in `%USERPROFILE%\.screenmind` as today.
-- Wizard pages: welcome, folder, "Start ScreenMind when I sign in" checkbox, "Open the dashboard now" on finish. The model download happens in the dashboard's first-run page, same as macOS.
+- Wizard pages: welcome, "What ScreenMind records" (plain words, an "I understand" checkbox), folder, "Start ScreenMind when I sign in" checkbox, "Start ScreenMind now" on finish. This wizard is the whole first-run flow on Windows. No window after install.
 - Start at login: the installer writes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\ScreenMind = "<path>\ScreenMind.exe"`. The app's own toggle (`startup.py`) must write the same value (F4).
 - Uninstall: stop the running app first. Remove the Run value. Ask: "Also delete your ScreenMind data (screenshots, database, models: N GB)?" Default No. Models are large, so offer them separately.
-- Tray icon via `pystray`: Open dashboard / Pause / Quit.
-- Permissions: only the microphone ("Let desktop apps access your microphone"). Screen grabs, UI Automation and low-level hooks need no prompt.
+- Tray icon via `pystray`: status line, Pause or Resume, Quit. A tooltip shows the status. This is the minimum, so the user can always see that recording runs and can stop it.
+- Permissions: only the microphone ("Let desktop apps access your microphone"), and only if call transcription is on. Screen grabs, UI Automation and low-level hooks need no prompt. So Windows needs less UI than macOS.
 
 ## 4. Signing and trust
 
@@ -168,6 +275,8 @@ Apple 99 USD + Azure Artifact Signing ~120 USD = **about 220 USD/year**. With an
 
 ### llama-server
 
+Only needed for the opt-in local labeling mode. If that mode ships:
+
 | Choice | Pros | Cons |
 |---|---|---|
 | **Bundle a pinned build** (recommended) | Works offline after install. One known-good version. Signed with the app. | Adds 10-30 MB. We track llama.cpp updates ourselves. |
@@ -177,10 +286,11 @@ Apple 99 USD + Azure Artifact Signing ~120 USD = **about 220 USD/year**. With an
 - Windows: the Vulkan build (about 31 MB) runs on most GPUs (Intel, AMD, NVIDIA) and should fall back to CPU (to check). CUDA builds are 150-400 MB plus runtime, so offer them only as an optional download when an NVIDIA GPU is found. `setup_llama.py` already detects that.
 - Pin a llama.cpp build tag (today `b11476`) and a SHA-256 in the build script. Note that llama.cpp now has two kinds of release: version tags like `v0.6.0` with notes only, and build tags `bNNNN` with the binaries.
 - Keep the current behavior of reusing a llama-server already running on port 5809.
+- Start it with `--sleep-idle-seconds 60 --cache-ram 0 --prio -1 --poll 0` (see [Resource budget](#resource-budget)). `--sleep-idle-seconds` needs build b7492 or newer.
 
 ### Gemma models
 
-Download on first run, in the onboarding page, with progress and resume (`hf_hub_download` resumes). Default to E2B Q4_0 (1.5 GB). Needs fix F2 first. Show free disk space before starting. Never ship models inside the installer: it would be 2-5 GB, and most updates would re-download it.
+Only for the opt-in local labeling mode (see [Resource budget](#resource-budget)). Then download on demand, with progress in the menu bar item and resume (`hf_hub_download` resumes). Gemma 4 E2B Q4_0 is 2.8 GB + 0.56 GB mmproj; a smaller text-only model would be under 1 GB. Needs fix F2 first. Show free disk space before starting. Never ship models inside the installer: most updates would re-download them.
 
 ### OCR models
 
@@ -206,7 +316,7 @@ The app is 343 MB unpacked, 122-157 MB as a DMG. Ways to shrink it, none tested:
 
 | Option | OS | Notes |
 |---|---|---|
-| **"New version" check** (first) | both | On start and daily, read the latest GitHub Release. Show a banner in the dashboard with a download link. Half a day of work, no risk. |
+| **"New version" check** (first) | both | On start and daily, read the latest GitHub Release. Show it in the menu bar / tray item ("Update available") with a download link. Half a day of work, no risk. |
 | Sparkle 2 (2.10.0) | macOS | The standard. EdDSA-signed appcast, delta updates. Needs `Sparkle.framework` in the app, loaded via pyobjc (untested), or the `sparkle-cli` helper. ([docs](https://sparkle-project.org/documentation/)) |
 | Velopack | both | Installer + updater, has a Python package, works with PyInstaller onedir. Needs the .NET SDK on the build machine. On Windows it would replace the Inno wizard. ([docs](https://docs.velopack.io/getting-started/python)) |
 | WinSparkle 0.9.4 | Windows | C DLL, called from Python via ctypes (untested). Pairs with an Inno installer. |
@@ -241,16 +351,17 @@ The unsigned milestone needs no secrets.
 
 | Milestone | What | Effort (rough) | Main risk |
 |---|---|---|---|
-| **M0: internal testers** | Fix F1-F6. Bundle `llama-server`. Unsigned `.app` + DMG. Unsigned Inno Setup wizard (per-user, Run key, uninstall data question). CI builds both on a tag. Short tester guide ("Open Anyway", SmartScreen "Run anyway"). | ~1 week | Unsigned macOS builds lose permission grants on every update (try the self-signed certificate trick). |
-| **M1: app feel** | Onboarding page (permissions, model download, start at login). Menu bar / tray icon. `SMAppService` login item. "New version" banner. Check by hand that a Finder-launched app gets "ScreenMind" prompts and SCK grabs work (G1, G22). | ~1-1.5 weeks | Main thread change for the menu bar. SMAppService via pyobjc untested. |
+| **M0: internal testers** | Fix F1-F6. Agent-mode build without the dashboard. OCR memory fixes (worker process, onnxruntime settings) and background priority. Memory and CPU rows in the e2e check. Labeling decision (server, vendor or local) implemented in its simplest form. Unsigned `.app` + DMG. Unsigned Inno Setup wizard (per-user, Run key, uninstall data question). CI builds both on a tag. Short tester guide ("Open Anyway", SmartScreen "Run anyway"). | ~2 weeks | OCR worker may not reach 250 MB. Unsigned macOS builds lose permission grants on every update (try the self-signed certificate trick). |
+| **M1: app feel** | Native first-run permissions window (macOS). Menu bar / tray item. `SMAppService` login item. "Update available" menu line. Idle/AC scheduling of analysis. CI resource benchmark. Check by hand that a Finder-launched app gets "ScreenMind" prompts and SCK grabs work (G1, G22). | ~1-1.5 weeks | Main thread change for the menu bar. SMAppService via pyobjc untested. |
 | **M2: signed public release** | Apple Developer enrollment, Developer ID signing, entitlements, notarization in CI. Azure Artifact Signing (or OV cert) for Windows. | 3-5 days of work, plus waiting: Apple org enrollment and Azure identity checks take days to weeks | Notarization fails on some nested binary. SmartScreen warnings for the first weeks anyway. |
 | **M3: auto-update** | Sparkle + WinSparkle, or Velopack | ~1 week | Integration with a frozen Python app is untested for all three. |
 
 ### Recommendation
 
-- **macOS:** PyInstaller onedir `.app`, DMG, Developer ID + notarization, dashboard onboarding, `SMAppService`, menu bar icon. Apple Silicon only.
-- **Windows:** PyInstaller onedir, Inno Setup per-user wizard, Azure Artifact Signing, tray icon. x64 only.
-- **Start with M0** once the strip has landed, so we freeze the slimmed app. The PyInstaller spec from the spike (`packaging/screenmind.spec`) is the starting point.
+- **Product:** a headless agent that collects and exports. No dashboard, no local LLM by default. Labeling on the server. Target: median 250 MB, peak 500 MB, under 3% of a core.
+- **macOS:** PyInstaller onedir `.app`, DMG, Developer ID + notarization, native first-run permissions window, `SMAppService`, menu bar item. Apple Silicon only.
+- **Windows:** PyInstaller onedir, Inno Setup per-user wizard (it explains what is recorded), Azure Artifact Signing, tray item. x64 only.
+- **Start with M0** (the strip has landed). Fix OCR memory first: it is needed whatever we decide about labeling. The PyInstaller spec from the spike (`packaging/screenmind.spec`) is the starting point.
 
 ## Open questions for the user
 
@@ -258,6 +369,9 @@ The unsigned milestone needs no secrets.
 2. Is Inno Setup's commercial license OK, or do we prefer NSIS (free)?
 3. Is a monthly "keep allowing screen recording?" prompt acceptable? There is no way around it for this kind of app.
 4. Is Apple Silicon + Windows x64 enough for the first testers?
+5. Where does labeling run: on the workflows server (recommended), through a vendor API, or on the device? Is sending redacted text off the device OK?
+6. Is the budget right: median 250 MB, peak 500 MB, under 3% of one core?
+7. Does the export need the HTTP server, or can the agent drop FastAPI/uvicorn?
 
 ## Sources
 
@@ -300,6 +414,25 @@ Windows:
 - Certum open source: https://shop.certum.eu/open-source-code-signing-on-simplysign.html
 - Velopack for Python: https://docs.velopack.io/getting-started/python, https://docs.velopack.io/packaging/signing
 - MSIX auto-update: https://learn.microsoft.com/en-us/windows/msix/app-installer/auto-update-and-repair--overview
+
+Resources:
+- llama-server idle sleep (`--sleep-idle-seconds`, build b7492): https://github.com/ggml-org/llama.cpp/pull/18228
+- llama-server host prompt cache (`--cache-ram`, default 8 GiB): https://github.com/ggml-org/llama.cpp/pull/16391
+- llama-server options (`--prio`, `--poll`): https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+- Router mode and model management: https://huggingface.co/blog/ggml-org/model-management-in-llamacpp
+- Gemma model sizes: https://ai.google.dev/gemma/docs/core, https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF
+- Small model GGUFs: https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF, https://huggingface.co/unsloth/Qwen3-VL-2B-Instruct-GGUF
+- RapidOCR default config (arena off): https://raw.githubusercontent.com/RapidAI/RapidOCR/main/python/rapidocr/config.yaml
+- macOS QoS: https://eclecticlight.co/2025/05/09/what-is-quality-of-service-and-how-does-it-matter/, https://developer.apple.com/library/archive/documentation/Performance/Conceptual/EnergyGuide-iOS/PrioritizeWorkWithQoS.html
+- macOS `PRIO_DARWIN_BG`: https://cs.iossec.tech/xnu/latest/source/bsd/man/man2/getpriority.2
+- macOS footprint: https://leancrew.com/all-this/man/man1/footprint.html
+- macOS freed pages still in RSS: https://codereview.chromium.org/2743563004
+- Windows EcoQoS and priority: https://learn.microsoft.com/en-us/windows/win32/procthread/quality-of-service, https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-setprocessinformation, https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-setpriorityclass
+- Windows job memory limits: https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_extended_limit_information
+- Task Manager memory column: https://scorpiosoftware.net/2023/04/12/memory-information-in-task-manager/
+- psutil changelog: https://psutil.io/changelog/
+- Gemini pricing: https://ai.google.dev/gemini-api/docs/pricing
+- OpenAI pricing: https://developers.openai.com/api/docs/pricing
 
 CI and llama.cpp:
 - macos-13 runner retired: https://github.blog/changelog/2025-09-19-github-actions-macos-13-runner-image-is-closing-down/

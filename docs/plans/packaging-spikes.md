@@ -2,7 +2,7 @@
 
 The shared place for packaging experiments on each machine. The plan is in [packaging.md](packaging.md). Each machine adds its results to its own section. Keep the same table rows, so results compare side by side.
 
-Build files: [`packaging/screenmind.spec`](../../packaging/screenmind.spec) and [`packaging/entry.py`](../../packaging/entry.py). Output goes to `packaging/build/` and `packaging/dist/` (both in `.gitignore`). PyInstaller is not a project dependency. `uv run --with pyinstaller` pulls it in for the one command.
+Build files: [`packaging/screenmind.spec`](../../packaging/screenmind.spec) and [`packaging/entry.py`](../../packaging/entry.py). OCR resource benchmark: [`packaging/ocr_mem_bench.py`](../../packaging/ocr_mem_bench.py). Output goes to `packaging/build/` and `packaging/dist/` (both in `.gitignore`). PyInstaller is not a project dependency. `uv run --with pyinstaller` pulls it in for the one command.
 
 ## Results
 
@@ -24,11 +24,15 @@ Build files: [`packaging/screenmind.spec`](../../packaging/screenmind.spec) and 
 | OCR, capture, UI events | not tested (no screen grabs from Claude sessions on macOS) | |
 | Memory after start | 123 MB RSS (317 MB before the strip, with the embedder) | |
 | Clean stop | `POST /api/shutdown`, stopped in 2 s | |
+| OCR benchmark, `default`, 20 frames (memory at end / max; CPU) | 1770 / 1770 MB footprint; 7.1 CPU-s and 1.46 s wall per frame (3024x1964 frames, 10 cores) | |
+| OCR benchmark, `tuned`, 20 frames | 1314 / 1514 MB footprint; 4.3 CPU-s and 2.14 s wall per frame | |
+| OCR benchmark, `tuned`, 60 frames | 1072 / 1554 MB footprint; 4.4 CPU-s per frame | |
 
 ## macOS notes (2026-10-07)
 
 - Ran the binary inside the bundle (`Contents/MacOS/ScreenMind`) from a scratch folder, so no `.env` loaded. Env: temp `DATA_DIR`, `API_PORT=7790`, `CAPTURE_ON_START=false`, `UI_EVENTS_ENABLED=false`, `MEETING_TRANSCRIPTION=false`, a dead llama port, and a `PATH` without Homebrew. It started in degraded mode ("llama-server not found"), as expected.
 - Not tested: launching from Finder, permission prompts, screen grabs, OCR on a real frame, model download (fails by design until fix F2 in the plan).
+- OCR benchmark: run with the worktree's `.venv` on saved screenshots from `~/.screenmind/screenshots/2026-10-07`. Memory is `phys_footprint` (what Activity Monitor shows). RSS was 5-10% higher. Halving the image size first changed almost nothing. Analysis is in [packaging.md, Resource budget](packaging.md#resource-budget).
 - The bundle holds rapidocr's own default models (`PP-OCRv6_*_small`), which ScreenMind never uses (fix F6).
 
 ## Windows: how to run the same spike
@@ -79,10 +83,23 @@ For the Windows laptop session. It only builds and starts the app. It installs n
 
 6. Optional, Windows only (grabs work from Claude-started processes there): in the dashboard on port 7790, turn on UI events and start capturing for a minute. Check that screenshots, a11y text and clicks arrive. This tests `uiautomation`/`comtypes` and `mss` inside the frozen app. The spec collects `uiautomation` DLLs and `comtypes` submodules on Windows; that part is untested.
 
-7. Stop it: the dashboard's Stop Server button, or
+7. Memory of the running app (Task Manager's "Memory" column is the private working set):
+
+   ```powershell
+   uv run --with psutil python -c "import psutil; p=[x for x in psutil.process_iter(['name']) if x.info['name']=='ScreenMind.exe']; print([round(x.memory_full_info().uss/2**20) for x in p], 'MB')"
+   ```
+
+8. OCR resource benchmark (no screen grabs; uses saved screenshots from `%USERPROFILE%\.screenmind\screenshots`):
+
+   ```powershell
+   uv run --with psutil python packaging/ocr_mem_bench.py default
+   uv run --with psutil python packaging/ocr_mem_bench.py tuned
+   ```
+
+9. Stop it: the dashboard's Stop Server button, or
 
    ```powershell
    curl.exe -s -X POST http://127.0.0.1:7790/api/shutdown
    ```
 
-8. Fill in the Windows column above and add a "Windows notes" section: errors, missing modules from `packaging\build\screenmind\warn-screenmind.txt` that matter, and anything that differs from macOS. Commit only this file (and spec fixes, if any).
+10. Fill in the Windows column above and add a "Windows notes" section: errors, missing modules from `packaging\build\screenmind\warn-screenmind.txt` that matter, and anything that differs from macOS. Commit only this file (and spec fixes, if any).
