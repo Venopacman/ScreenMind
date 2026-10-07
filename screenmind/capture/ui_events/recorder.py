@@ -8,8 +8,10 @@ Owns the OS backend and an enricher thread:
                                                       +-> CaptureWorker.request_capture()
 
 The enricher does all slow work: accessibility lookups, text grouping,
-privacy checks, DB writes. All its state is guarded by one lock, so the
-capture worker can call flush_for_capture() from the asyncio thread.
+privacy checks, DB writes. The text buffer and the pending events are
+guarded by one lock, so the capture worker can call flush_for_capture()
+from its own thread. Backend calls (UIA, clipboard) run without the lock:
+they can hang on Windows, and a hung call must not stall capture.
 """
 
 import logging
@@ -39,6 +41,10 @@ _CLIPBOARD_POLL_S = 1.0
 _DB_FLUSH_S = 2.0
 _DB_FLUSH_BATCH = 50
 _FOCUS_CACHE_S = 1.0
+# flush_for_capture() and stop() give up after this instead of waiting
+# for a stuck enricher (e.g. a slow DB write).
+_LOCK_TIMEOUT_S = 2.0
+_STOP_JOIN_S = 3.0
 # How long a typed label ("pwd -") waits for its value in the next chunk.
 _LABEL_CARRY_S = 30.0
 
@@ -131,8 +137,11 @@ class UiEventRecorder:
             self._last_error = "Could not install the input hook"
             return False
         self._clip_count = self._backend.clipboard_change_count()
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._run, name="ui-events-enricher", daemon=True)
+        # A new event per thread: an old enricher still stuck in a backend
+        # call must not come back to life when we restart.
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, args=(self._stop,),
+                                        name="ui-events-enricher", daemon=True)
         self._thread.start()
         logger.info("UI event recording started")
         return True
@@ -142,12 +151,14 @@ class UiEventRecorder:
             return
         self._backend.stop()
         self._stop.set()
-        self._thread.join(timeout=3.0)
+        self._thread.join(timeout=_STOP_JOIN_S)
+        if self._thread.is_alive():
+            logger.warning("UI events: enricher thread is stuck; leaving it behind")
         self._thread = None
-        with self._lock:
-            self._emit_chunk(self._buffer.flush(), trigger=False)
-            self._write_pending()
-        logger.info("UI event recording stopped")
+        if self._flush_locked():
+            logger.info("UI event recording stopped")
+        else:
+            logger.warning("UI events: stopped without writing the last events")
 
     def status(self) -> dict:
         perms = self._backend.check_permissions().as_dict() if self.supported else None
@@ -169,21 +180,31 @@ class UiEventRecorder:
     def flush_for_capture(self):
         """Write everything up to now to the DB. Called by the capture worker
         right before it links events to a new frame."""
-        with self._lock:
+        if not self._flush_locked():
+            logger.debug("UI events: recorder busy, frame linked without the latest events")
+
+    def _flush_locked(self) -> bool:
+        """Flush the text buffer and pending events. False if the lock was
+        not free within _LOCK_TIMEOUT_S; the events stay queued then."""
+        if not self._lock.acquire(timeout=_LOCK_TIMEOUT_S):
+            return False
+        try:
             self._emit_chunk(self._buffer.flush(), trigger=False)
             self._write_pending()
+        finally:
+            self._lock.release()
+        return True
 
     # ── Enricher loop ────────────────────────────────────────────────
 
-    def _run(self):
-        while not self._stop.is_set():
+    def _run(self, stop: threading.Event):
+        while not stop.is_set():
             try:
                 raw = self._queue.get(timeout=0.25)
             except queue.Empty:
                 raw = None
             try:
-                with self._lock:
-                    self._tick(raw, time.time())
+                self._tick(raw, time.time())
             except Exception as e:
                 self._last_error = str(e)
                 logger.error(f"UI event processing failed: {e}")
@@ -200,11 +221,12 @@ class UiEventRecorder:
             self._clip_check_at and now >= self._clip_check_at
         ):
             self._poll_clipboard(now)
-        self._emit_chunk(self._buffer.poll(now), trigger=True)
-        if self._pending and (
-            now - self._last_db_flush >= _DB_FLUSH_S or len(self._pending) >= _DB_FLUSH_BATCH
-        ):
-            self._write_pending()
+        with self._lock:
+            self._emit_chunk(self._buffer.poll(now), trigger=True)
+            if self._pending and (
+                now - self._last_db_flush >= _DB_FLUSH_S or len(self._pending) >= _DB_FLUSH_BATCH
+            ):
+                self._write_pending()
 
     # ── Gates ────────────────────────────────────────────────────────
 
@@ -233,7 +255,7 @@ class UiEventRecorder:
         if prev is None:
             return
         if front.pid != prev.pid or front.app_name != prev.app_name:
-            self._emit_chunk(self._buffer.flush(), trigger=False)
+            self._end_chunk()
             self._focus = None
             self._last_browser_url = None
             if self._type_enabled(EventType.APP_SWITCH) and self._should_record(front.app_name):
@@ -258,7 +280,7 @@ class UiEventRecorder:
 
     def _on_click(self, raw: RawEvent):
         # A click moves the text cursor, so the current chunk ends here.
-        self._emit_chunk(self._buffer.flush(), trigger=False)
+        self._end_chunk()
         self._focus = None
         if not self._type_enabled(EventType.CLICK):
             return
@@ -293,15 +315,16 @@ class UiEventRecorder:
             # Only record typing into real text inputs. Without a known
             # focused element we cannot tell a password field from a normal
             # one, and keys sent to windows, lists or games are not text.
-            self._emit_chunk(self._buffer.flush(), trigger=False)
+            self._end_chunk()
             return
         app_name = self._app_for(target)
         if not self._should_record(app_name):
-            self._emit_chunk(self._buffer.flush(), trigger=False)
+            self._end_chunk()
             return
         window = self._front.title if self._front and self._front.app_name == app_name else None
-        for chunk in self._buffer.add(raw, target, app_name, window):
-            self._emit_chunk(chunk, trigger=raw.key == "enter")
+        with self._lock:
+            for chunk in self._buffer.add(raw, target, app_name, window):
+                self._emit_chunk(chunk, trigger=raw.key == "enter")
 
     def _poll_clipboard(self, now: float):
         self._last_clip_poll = now
@@ -358,7 +381,13 @@ class UiEventRecorder:
         from screenmind.privacy.data_filter import filter_after_label, parse_enabled_types
         return filter_after_label(after_label, text, parse_enabled_types(settings.sensitive_filter_types))
 
+    def _end_chunk(self):
+        """Store the text typed so far (focus moved, app changed...)."""
+        with self._lock:
+            self._emit_chunk(self._buffer.flush(), trigger=False)
+
     def _emit_chunk(self, chunk: Optional[TextChunk], trigger: bool):
+        """Queue one text chunk as an event. Caller holds self._lock."""
         if chunk is None:
             return
         ts = chunk.end_ts
@@ -400,15 +429,19 @@ class UiEventRecorder:
             fields["x"] = int(fields["x"])
         if fields.get("y") is not None:
             fields["y"] = int(fields["y"])
-        self._pending.append(UiEvent(
+        event = UiEvent(
             timestamp=datetime.fromtimestamp(ts),
             type=type_,
             app_name=app_name,
             window_title=window_title,
             **fields,
-        ))
+        )
+        with self._lock:
+            self._pending.append(event)
 
     def _write_pending(self):
+        """Store the queued events. Caller holds self._lock, so a frame
+        never links while a write is half done."""
         self._last_db_flush = time.time()
         if not self._pending:
             return
