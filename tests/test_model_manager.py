@@ -8,6 +8,7 @@
   - _check_model_disk_space for all models + variant-specific sizes
   - get_model_status capabilities field
   - delete_variant / delete_model guards and behavior
+  - shared llama-server (dev instances): never started, never stopped
 """
 
 import threading
@@ -535,3 +536,62 @@ class TestAvailableModelsConsistency:
         for m in model_manager.AVAILABLE_MODELS:
             assert "audio" in m, f"{m['key']} missing 'audio' flag"
             assert "vision" in m, f"{m['key']} missing 'vision' flag"
+
+
+# ── Shared llama-server (dev instances) ───────────────────────────────
+
+class TestSharedServer:
+    """A dev instance must never stop a llama-server another instance uses.
+
+    2026-10-07: a dev instance started llama-server while the main instance
+    was down. The main instance came back and adopted it. Then the dev
+    instance shut down and main.py's stop_server() killed it.
+    """
+
+    @pytest.fixture
+    def own_process(self, monkeypatch):
+        proc = MagicMock()
+        proc.poll.return_value = None  # alive
+        monkeypatch.setattr(model_manager, "_server_process", proc)
+        return proc
+
+    def test_shutdown_stops_own_server(self, monkeypatch, own_process):
+        """Normal mode: the instance that started llama-server stops it on exit."""
+        monkeypatch.setattr(model_manager.settings, "llama_server_shared", False)
+        model_manager.stop_server()
+        own_process.terminate.assert_called_once()
+        assert model_manager._server_process is None
+
+    def test_shutdown_leaves_shared_server_running(self, monkeypatch, own_process):
+        """Shared mode: stop_server() on exit never terminates a process."""
+        monkeypatch.setattr(model_manager.settings, "llama_server_shared", True)
+        model_manager.stop_server()
+        own_process.terminate.assert_not_called()
+        own_process.kill.assert_not_called()
+
+    @patch.object(model_manager, "detect_running_model", return_value=None)
+    def test_shared_mode_never_starts_a_server(self, _detect, monkeypatch):
+        monkeypatch.setattr(model_manager.settings, "llama_server_shared", True)
+        with patch("subprocess.Popen") as popen:
+            assert model_manager.start_server("gemma-4-e2b") is False
+        popen.assert_not_called()
+
+    @patch.object(model_manager, "detect_running_model",
+                  return_value={"matched": True, "key": "gemma-4-e2b", "quant": "Q4_0", "name": "Gemma 4 E2B"})
+    def test_shared_mode_adopts_running_server(self, _detect, monkeypatch):
+        monkeypatch.setattr(model_manager.settings, "llama_server_shared", True)
+        monkeypatch.setattr(model_manager, "_external_server", False)
+        monkeypatch.setattr(model_manager, "_active_model_key", None)
+        with patch("subprocess.Popen") as popen:
+            assert model_manager.start_server("gemma-4-e2b") is True
+        popen.assert_not_called()
+        assert model_manager._external_server is True
+        assert model_manager.get_active_model() == "gemma-4-e2b"
+
+    def test_env_flag_sets_shared_mode(self, monkeypatch):
+        """scripts/dev-instance.sh exports LLAMA_SERVER_SHARED=1."""
+        from screenmind.config import Settings
+        monkeypatch.setenv("LLAMA_SERVER_SHARED", "1")
+        assert Settings(_env_file=None).llama_server_shared is True
+        monkeypatch.delenv("LLAMA_SERVER_SHARED")
+        assert Settings(_env_file=None).llama_server_shared is False

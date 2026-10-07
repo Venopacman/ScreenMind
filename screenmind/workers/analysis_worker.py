@@ -18,6 +18,7 @@ Per-app pHash cache avoids redundant processing for similar screens:
 """
 
 import asyncio
+import json
 import logging
 import re
 import sys
@@ -30,6 +31,7 @@ from typing import Optional
 from PIL import Image
 
 from screenmind.config import settings
+from screenmind.engine import model_manager
 from screenmind.engine.analyzer import GemmaAnalyzer
 from screenmind.engine.ocr import OCRExtractor
 from screenmind.storage.database import Database
@@ -180,6 +182,9 @@ class AnalysisWorker:
         self._processed = 0
         self._errors = 0
         self._is_backfill = False  # Set by _backfill_skipped for method labeling
+        # Rows backfill already tried in this run. A row that fails again stays
+        # 'failed' and is not retried until restart, so one bad frame can't loop.
+        self._backfill_tried: set[int] = set()
 
         # Per-app analysis cache: (app_name, title) -> cached results
         # Avoids redundant Gemma calls for identical/similar screens
@@ -399,7 +404,6 @@ class AnalysisWorker:
                 except Exception as e:
                     logger.warning(f"Sensitive filter error (OCR boxes): {e}")
             if ocr_boxes:
-                import json
                 ocr_boxes_json = json.dumps(ocr_boxes)
 
             # 3c'. Nothing on screen: no window label and almost no text (e.g. a
@@ -553,6 +557,9 @@ class AnalysisWorker:
             analysis_label = f"cache:minor" if tier == "minor" else f"full:{settings.analysis_mode}"
             if self._is_backfill:
                 analysis_label = f"backfill:{analysis_label}"
+            # The analyzer returns "Analysis failed..." instead of raising when
+            # llama-server is down. Store it as 'failed' so the idle backfill retries it.
+            failed = (analysis.activity_summary or "").startswith("Analysis failed")
             self._db.update_activity_analysis(
                 activity_id=activity_id,
                 analysis=analysis,
@@ -561,10 +568,12 @@ class AnalysisWorker:
                 organized_text=organized_text,
                 analysis_method=analysis_label,
                 active_url=active_url,
+                status="failed" if failed else "ok",
             )
 
-            # 5. Update per-app cache (for both "full" and "minor" tiers)
-            if capture.phash:
+            # 5. Update per-app cache (for both "full" and "minor" tiers).
+            # Never cache a failure: similar frames would copy it.
+            if capture.phash and not failed:
                 self._app_cache[cache_key] = {
                     "phash": capture.phash,
                     "analysis": analysis,
@@ -617,6 +626,10 @@ class AnalysisWorker:
         Catches: entries from crashes (analyzed=0) + stale skips.
         """
         try:
+            # Without llama-server every retry fails again
+            if not model_manager.is_server_running():
+                return
+
             conn = self._db._get_conn()
             row = conn.execute(
                 """SELECT id, screenshot_path, window_title, COALESCE(detected_app, app_name), ocr_text, ocr_boxes,
@@ -624,7 +637,9 @@ class AnalysisWorker:
                    FROM activities
                    WHERE status IN ('pending', 'skipped', 'failed')
                      AND DATE(timestamp) = DATE('now', 'localtime')
+                     AND id NOT IN (SELECT value FROM json_each(?))
                    ORDER BY timestamp DESC LIMIT 1""",
+                (json.dumps(sorted(self._backfill_tried)),),
             ).fetchone()
 
             if not row:
@@ -648,6 +663,7 @@ class AnalysisWorker:
                 return
 
             logger.info(f"Backfilling #{activity_id} ({app_name})...")
+            self._backfill_tried.add(activity_id)
 
             # Load image and create a minimal CaptureResult
             try:

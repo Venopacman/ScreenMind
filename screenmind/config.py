@@ -140,6 +140,11 @@ class Settings(BaseSettings):
         default=5809,
         description="llama-server port",
     )
+    llama_server_shared: bool = Field(
+        default=False,
+        description="Another process owns llama-server: use it if it runs, never start or stop it. "
+                    "Set by scripts/dev-instance.sh.",
+    )
     # ── Privacy ──────────────────────────────────────────────────────────
     blocked_apps: str = Field(
         default="",

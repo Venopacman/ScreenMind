@@ -465,6 +465,9 @@ def start_server(model_key: Optional[str] = None, timeout: int = 60, hf_file: st
         logger.warning(f"Unknown model: {key}")
         return False
 
+    if settings.llama_server_shared:
+        return _use_shared_server()
+
     with _server_lock:
         # Clear external server state — we're taking over
         global _external_server, _external_model_name
@@ -600,9 +603,33 @@ def start_server(model_key: Optional[str] = None, timeout: int = 60, hf_file: st
             return False
 
 
+def _use_shared_server() -> bool:
+    """Adopt the shared llama-server if it runs. Never start one.
+
+    A dev instance runs next to the main one. If it started llama-server and
+    the main instance adopted it, stopping the dev instance would stop the
+    main instance's analysis too.
+    """
+    detection = detect_running_model()
+    if detection:
+        adopt_external_server(detection)
+        return True
+    logger.warning(
+        f"llama-server is not running on port {settings.llama_server_port}. "
+        "This instance shares it, so it will not start one. "
+        "Start the main instance to get analysis."
+    )
+    return False
+
+
 def stop_server():
     """Stop the running llama-server process."""
     global _server_process, _active_model_key
+
+    if settings.llama_server_shared:
+        # Shared mode never starts a server, so there is nothing of ours to stop
+        logger.info("llama-server is shared, not stopping it")
+        return
 
     with _server_lock:
         if _server_process:
@@ -714,8 +741,9 @@ def is_server_running() -> bool:
     """Check if llama-server process is alive (internal or external)."""
     if _server_process is not None and _server_process.poll() is None:
         return True
-    if _external_server:
-        # External server — verify it's still responding
+    if _external_server or settings.llama_server_shared:
+        # External server — verify it's still responding.
+        # Shared mode probes even before adopting: the main instance may start it later.
         try:
             import httpx
             r = httpx.get(f"http://127.0.0.1:{settings.llama_server_port}/health", timeout=2)

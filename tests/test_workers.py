@@ -181,12 +181,77 @@ class TestAnalysisWorkerBackfill:
 
         worker = AnalysisWorker(queue=asyncio.Queue(maxsize=100), database=db)
         worker._process = AsyncMock()
-        await worker._backfill_skipped()
+        with patch("screenmind.engine.model_manager.is_server_running", return_value=True):
+            await worker._backfill_skipped()
 
         worker._process.assert_awaited_once()
         capture = worker._process.await_args.args[0]
         assert capture.app_name == "Telegram"
         assert capture.window_title == "Chats"
+
+
+class TestFailedAnalysis:
+    """The analyzer returns "Analysis failed" instead of raising when llama-server
+    is down. Such frames must be stored as 'failed' so the backfill retries them."""
+
+    def _setup(self, db, tmp_path):
+        from PIL import Image
+        from screenmind.storage.models import ScreenshotEntry, ActivityRecord
+        from screenmind.workers.analysis_worker import AnalysisWorker
+
+        shot = tmp_path / "shot.jpg"
+        Image.new("RGB", (64, 64), "teal").save(shot)
+        activity_id = db.insert_activity(ScreenshotEntry(
+            timestamp=datetime.now(), screenshot_path=str(shot),
+            window_title="Inbox", detected_app_name="Mail", analyzed=False,
+        ))
+        worker = AnalysisWorker(queue=asyncio.Queue(maxsize=100), database=db)
+        worker._ocr = MagicMock(is_available=True)
+        worker._ocr.extract_text_with_boxes.return_value = ("Inbox: 3 unread messages", [])
+        failed = (ActivityRecord(app_name="Mail", activity_category="other",
+                                 activity_summary="Analysis failed", confidence=0.0), [])
+        worker._analyzer = MagicMock()
+        worker._analyzer.analyze_screenshot_fast.return_value = failed
+        worker._analyzer.analyze_screenshot_balanced.return_value = failed
+        worker._analyzer.analyze_screenshot.return_value = failed
+        capture = CaptureResult(
+            filepath=shot, timestamp=datetime.now(), window_title="Inbox", app_name="Mail",
+            image=Image.open(shot), activity_id=activity_id, phash=1,
+        )
+        return worker, capture, activity_id
+
+    async def test_failed_analysis_stored_as_failed(self, db, tmp_path):
+        worker, capture, activity_id = self._setup(db, tmp_path)
+        await worker._process(capture)
+
+        row = db.get_activity_by_id(activity_id)
+        assert row["summary"] == "Analysis failed"
+        assert row["status"] == "failed"
+        # Not cached, so a similar next frame gets a real analysis
+        assert worker._app_cache == {}
+
+    async def test_backfill_waits_for_llama_server(self, db, tmp_path):
+        worker, capture, _ = self._setup(db, tmp_path)
+        await worker._process(capture)
+        worker._process = AsyncMock()
+
+        with patch("screenmind.engine.model_manager.is_server_running", return_value=False):
+            await worker._backfill_skipped()
+        worker._process.assert_not_awaited()
+
+    async def test_backfill_tries_a_failed_row_once(self, db, tmp_path):
+        worker, capture, activity_id = self._setup(db, tmp_path)
+        await worker._process(capture)
+        process = worker._process
+        worker._process = AsyncMock(side_effect=process)
+
+        with patch("screenmind.engine.model_manager.is_server_running", return_value=True):
+            await worker._backfill_skipped()
+            await worker._backfill_skipped()
+
+        worker._process.assert_awaited_once()
+        assert worker._process.await_args.args[0].activity_id == activity_id
+        assert db.get_activity_by_id(activity_id)["status"] == "failed"
 
 
 class TestEmptyScreenRule:
@@ -469,7 +534,8 @@ class TestBacklogSkip:
 
         worker = AnalysisWorker(queue=asyncio.Queue(maxsize=10), database=db)
         worker._process = AsyncMock()
-        await worker._backfill_skipped()
+        with patch("screenmind.engine.model_manager.is_server_running", return_value=True):
+            await worker._backfill_skipped()
 
         again = worker._process.await_args.args[0]
         assert again.a11y_text == "Browse channels"

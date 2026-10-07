@@ -32,6 +32,7 @@ It uses the worktree's `.venv` if there is one, else the main checkout's.
 - `scripts/dev-instance.sh reset` deletes the worktree's data for a fresh start.
 - Stop it with Ctrl+C or `kill -INT <pid>`. Shutdown takes up to a minute.
 - Stop it when you are done. It captures the screen and uses the shared `llama-server`.
+- It never starts or stops `llama-server` (the script sets `LLAMA_SERVER_SHARED=1`). If the main instance is down, the dev instance captures without analysis until the main instance is back.
 
 ## What is still shared
 
