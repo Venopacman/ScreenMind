@@ -1333,6 +1333,13 @@ def _run(args, started, data_dir):
                 driver.open_editor(sc.file)
             if not wait_for_editor_frame(data_dir / "screenmind.db", driver.editor_app, 30):
                 sc.notes.append(f"No {driver.editor_app} frame was saved in 75s after the scenario.")
+        # Stop collecting before the person takes the computer back. Otherwise
+        # their own windows keep adding frames, analysis never catches up, and
+        # the test DB fills with real screen content.
+        try:
+            inst.api("/api/capture/pause", method="POST")
+        except Exception as e:
+            sc.notes.append(f"Could not pause capture after the scenario: {e}")
         log("You can use the computer again. The rest is waiting for analysis.")
 
         step("Waiting for analysis")
