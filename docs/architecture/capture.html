@@ -77,8 +77,22 @@ table.matrix { min-width: 1150px; }
 table.matrix td:first-child { font-weight: 600; white-space: nowrap; }
 table.matrix col.os { width: 19%; }
 td.gid, th.gid { font-family: var(--font-mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 16px; overflow-x: auto; margin: 12px 0 20px; }
+.diagram { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 48px 16px 16px; overflow-x: auto; margin: 12px 0 20px; cursor: zoom-in; }
+.diagram:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .diagram pre.mermaid { margin: 0; background: transparent; font-family: var(--font-mono); font-size: 12px; }
+.expand-btn { position: absolute; top: 10px; right: 10px; font: inherit; font-size: 13px; padding: 4px 12px; border-radius: 16px; border: 1px solid var(--accent); background: var(--accent); color: var(--bg); cursor: pointer; }
+.expand-btn:focus-visible, .zoom-bar button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+.hint { font-size: 13px; color: var(--muted); margin: -4px 0 0; }
+.zoom-overlay { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; flex-direction: column; }
+.zoom-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 10px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.zoom-bar .title { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin-right: auto; }
+.zoom-bar button { font: inherit; font-size: 13px; min-width: 36px; padding: 5px 12px; border-radius: 16px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; }
+.zoom-bar button.close { border-color: var(--accent); background: var(--accent); color: var(--bg); }
+.zoom-bar .pct { font-family: var(--font-mono); font-size: 12px; color: var(--muted); min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+.zoom-stage { flex: 1; position: relative; overflow: hidden; touch-action: none; cursor: grab; padding-bottom: env(safe-area-inset-bottom, 0px); }
+.zoom-stage.dragging { cursor: grabbing; }
+.zoom-stage svg { position: absolute; left: 0; top: 0; transform-origin: 0 0; max-width: none !important; }
+.zoom-help { position: absolute; left: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); font-size: 12px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; pointer-events: none; }
 .chip { display: inline-block; font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
 .chip.mac { color: var(--mac); background: var(--mac-bg); }
 .chip.win { color: var(--win); background: var(--win-bg); }
@@ -135,9 +149,11 @@ td.gid, th.gid { font-family: var(--font-mono); white-space: nowrap; font-varian
 <section id="flow">
   <h2><span class="n">1</span>Data flow</h2>
   <p>Three workers run side by side. <code>CaptureWorker</code> takes screenshots and reads window info, a11y text and the URL at the moment of the grab. <code>AnalysisWorker</code> picks frames from a queue, runs OCR and Gemma, and writes the results. <code>AudioWorker</code> watches for calls on its own thread. <code>UiEventRecorder</code> is optional and off by default.</p>
-  <div class="diagram">
+  <p class="hint">Click a diagram to open it full screen. Zoom with the wheel, a pinch or the + and − buttons. Drag to move.</p>
+  <div class="diagram" data-title="Data flow" tabindex="0" role="button" aria-label="Open the data flow diagram full screen">
+<button type="button" class="expand-btn" tabindex="-1">Open full screen</button>
 <pre class="mermaid">
-flowchart LR
+flowchart TB
   subgraph OS["OS APIs"]
     GRAB["Screen grab&lt;br/&gt;SCK / screencapture / mss"]
     WINS["Window list&lt;br/&gt;Quartz CGWindowList / Win32 EnumWindows"]
@@ -250,7 +266,8 @@ flowchart LR
 <section id="components">
   <h2><span class="n">3</span>Components per OS</h2>
   <p><code>platform_support.get_adapter()</code> picks the adapter from <code>sys.platform</code>. <code>capture.ui_events.create_backend()</code> picks the UI event backend the same way and returns <code>None</code> on Linux.</p>
-  <div class="diagram">
+  <div class="diagram" data-title="Components per OS" tabindex="0" role="button" aria-label="Open the components diagram full screen">
+<button type="button" class="expand-btn" tabindex="-1">Open full screen</button>
 <pre class="mermaid">
 flowchart TB
   subgraph MAC["macOS"]
@@ -678,5 +695,162 @@ flowchart TB
   try { saved = localStorage.getItem('gapFilter') || 'all'; } catch (e) {}
   if (!buttons.some(function (b) { return b.dataset.f === saved; })) saved = 'all';
   apply(saved);
+})();
+</script>
+
+<script>
+(function () {
+  var overlay = null, stage = null, svg = null, pct = null, opener = null;
+  var s = 1, x = 0, y = 0, w = 0, h = 0;
+  var pointers = new Map(), pinch = null, last = null;
+
+  function apply() {
+    svg.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + s + ')';
+    pct.textContent = Math.round(s * 100) + '%';
+  }
+  function fit() {
+    var r = stage.getBoundingClientRect();
+    s = Math.min(r.width / w, r.height / h) * 0.96;
+    x = (r.width - w * s) / 2;
+    y = (r.height - h * s) / 2;
+    apply();
+  }
+  function zoomAt(f, cx, cy) {
+    var ns = Math.min(8, Math.max(0.1, s * f));
+    x = cx - (cx - x) * (ns / s);
+    y = cy - (cy - y) * (ns / s);
+    s = ns;
+    apply();
+  }
+  function center() {
+    var r = stage.getBoundingClientRect();
+    return [r.width / 2, r.height / 2];
+  }
+  function local(e) {
+    var r = stage.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  }
+  function close() {
+    if (!overlay) return;
+    overlay.remove();
+    overlay = null;
+    document.removeEventListener('keydown', onKey);
+    document.documentElement.style.overflow = '';
+    if (opener) opener.focus();
+  }
+  function onKey(e) {
+    if (e.key === 'Escape') close();
+    else if (e.key === '+' || e.key === '=') { var c = center(); zoomAt(1.25, c[0], c[1]); }
+    else if (e.key === '-') { var d = center(); zoomAt(0.8, d[0], d[1]); }
+    else if (e.key === '0') fit();
+  }
+  function button(label, title, fn, cls) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.title = title;
+    b.setAttribute('aria-label', title);
+    if (cls) b.className = cls;
+    b.addEventListener('click', fn);
+    return b;
+  }
+
+  function open(container) {
+    var src = container.querySelector('svg');
+    if (!src) return;
+    opener = container;
+    svg = src.cloneNode(true);
+    var vb = src.viewBox && src.viewBox.baseVal;
+    if (vb && vb.width) { w = vb.width; h = vb.height; }
+    else { var bb = src.getBBox(); w = bb.width; h = bb.height; svg.setAttribute('viewBox', bb.x + ' ' + bb.y + ' ' + w + ' ' + h); }
+    svg.setAttribute('width', w);
+    svg.setAttribute('height', h);
+    svg.style.maxWidth = 'none';
+    svg.style.width = w + 'px';
+    svg.style.height = h + 'px';
+
+    overlay = document.createElement('div');
+    overlay.className = 'zoom-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', (container.dataset.title || 'Diagram') + ', full screen');
+    var bar = document.createElement('div');
+    bar.className = 'zoom-bar';
+    var t = document.createElement('span');
+    t.className = 'title';
+    t.textContent = container.dataset.title || 'Diagram';
+    pct = document.createElement('span');
+    pct.className = 'pct';
+    bar.append(t, pct,
+      button('−', 'Zoom out', function () { var c = center(); zoomAt(0.8, c[0], c[1]); }),
+      button('+', 'Zoom in', function () { var c = center(); zoomAt(1.25, c[0], c[1]); }),
+      button('Fit', 'Fit to screen', fit),
+      button('100%', 'Actual size', function () { var c = center(); zoomAt(1 / s, c[0], c[1]); }),
+      button('Close', 'Close full screen', close, 'close'));
+    stage = document.createElement('div');
+    stage.className = 'zoom-stage';
+    stage.appendChild(svg);
+    var help = document.createElement('div');
+    help.className = 'zoom-help';
+    help.textContent = 'Wheel or pinch to zoom · drag to move · Esc to close';
+    stage.appendChild(help);
+    overlay.append(bar, stage);
+    document.body.appendChild(overlay);
+    document.documentElement.style.overflow = 'hidden';
+    document.addEventListener('keydown', onKey);
+
+    stage.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      var p = local(e);
+      zoomAt(Math.exp(-e.deltaY * 0.0015), p[0], p[1]);
+    }, { passive: false });
+    stage.addEventListener('pointerdown', function (e) {
+      stage.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, local(e));
+      stage.classList.add('dragging');
+      last = local(e);
+      pinch = null;
+    });
+    stage.addEventListener('pointermove', function (e) {
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, local(e));
+      if (pointers.size >= 2) {
+        var pts = Array.from(pointers.values()).slice(0, 2);
+        var dist = Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]);
+        var mid = [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2];
+        if (pinch) {
+          x += mid[0] - pinch.mid[0];
+          y += mid[1] - pinch.mid[1];
+          zoomAt(dist / pinch.dist, mid[0], mid[1]);
+        }
+        pinch = { dist: dist || 1, mid: mid };
+      } else if (last) {
+        var p = local(e);
+        x += p[0] - last[0];
+        y += p[1] - last[1];
+        last = p;
+        apply();
+      }
+    });
+    function up(e) {
+      pointers.delete(e.pointerId);
+      pinch = null;
+      last = pointers.size === 1 ? Array.from(pointers.values())[0] : null;
+      if (!pointers.size) stage.classList.remove('dragging');
+    }
+    stage.addEventListener('pointerup', up);
+    stage.addEventListener('pointercancel', up);
+
+    fit();
+    overlay.querySelector('.close').focus();
+  }
+
+  document.querySelectorAll('.diagram').forEach(function (d) {
+    d.addEventListener('click', function () { open(d); });
+    d.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(d); }
+    });
+  });
+  window.addEventListener('resize', function () { if (overlay) fit(); });
 })();
 </script>

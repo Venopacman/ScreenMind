@@ -24,7 +24,7 @@ Contents:
 Three workers run side by side. `CaptureWorker` takes screenshots and reads window info, a11y text and the URL at the moment of the grab. `AnalysisWorker` picks frames from a queue, runs OCR and Gemma, and writes the results. `AudioWorker` watches for calls on its own thread. `UiEventRecorder` is optional and off by default.
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph OS["OS APIs"]
     GRAB["Screen grab<br/>SCK / screencapture / mss"]
     WINS["Window list<br/>Quartz CGWindowList / Win32 EnumWindows"]
