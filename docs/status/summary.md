@@ -18,8 +18,8 @@ Generated from the other files in this folder by `scripts/e2e_collect.py --summa
 | Browser URL | - | - |
 | UI event: click with element role/name | - | - |
 | UI event: app switch | - | - |
-| UI event: typed text | - | - |
-| UI event: clipboard | - | - |
+| UI event: typed text (opt-in) | - | - |
+| UI event: clipboard (opt-in) | - | - |
 | UI events linked to frames | - | - |
 | Typed secret is redacted | - | - |
 | Password field is not stored | - | - |
