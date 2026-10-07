@@ -4,6 +4,8 @@ From the session "SCK capture" (2026-10-07).
 
 Done on `custom`: `screenmind/capture/sck.py` grabs each display with `SCScreenshotManager`. `ScreenCapture._grab()` tries SCK, then the `screencapture` tool, then mss. After one SCK timeout (3 s) the process uses the tool for good. `scripts/sck-bench.py` times the backends per display.
 
+Live: the main instance (started from Terminal.app, restarted 14:06 on `81bb786`) logs `Screen grab backend: sck` and saves a frame every ~10 s. From Terminal.app, an SCK grab takes ~43 ms against ~250 ms for the `screencapture` tool. Colors match (mean diff 1.19 per channel).
+
 What we know:
 
 - From a process started by a Claude session, `SCShareableContent` answers in ~15 ms, but the `SCScreenshotManager` handler never fires (waited 45 s). `CGWindowListCreateImage` hangs 30 s there. `CGPreflightScreenCaptureAccess()` is True, so the grant is there. Claude.app starts its children through a `disclaimer` helper, so the Python process is its own "responsible process" for TCC. That is the likely cause. The `screencapture` tool works there in ~0.15 s.
@@ -11,6 +13,12 @@ What we know:
 - So dev instances started from Claude only test the fallback path. Real SCK timings need a process started from Terminal.app, like the main instance.
 
 ## Items
+
+### SCK timed out once in the bench while the main instance ran
+Status: open, low priority
+
+The first bench run from Terminal.app (`scripts/sck-bench.py`) timed out after 3 s on display 1 while the main instance was running. At that time the main instance still used mss (CoreGraphics), not SCK. The next run, with the main instance stopped, worked on the first try. Possible causes: contention with the CG grabs, a cold first request, or a TCC prompt waiting for an answer. Run the bench again while the main instance runs on SCK. If it times out again, the cause is contention between capture clients. That only affects ad-hoc tools, because the main instance falls back to the `screencapture` tool by itself.
+
 
 ### macOS "still recording your screen" reminder
 Status: open
