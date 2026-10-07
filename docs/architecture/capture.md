@@ -117,7 +117,7 @@ Gap ids (G1, G2...) point to [section 8](#8-gaps).
 | Screen text (a11y) | Text of the focused window | `AXUIElement` walk, `_walk_ax_tree` | UI Automation: `_walk_tree` for native controls, `web_text` over a cached tree for web Documents (`uiautomation`) | AT-SPI (`pyatspi`) | inside `activities.ocr_text` | G7, G8, G12 |
 | Browser URL | Page URL of the focused browser window | `AXURL` of the one top-level `AXWebArea` (`_ax_page_url`) | UIA `Document` value (`pick_page_document`) | none | `activities.active_url`, `ui_events.url`, `meetings.url` (sanitized) | G8, G9, G16 |
 | OCR text | Text from pixels | RapidOCR (ONNX Runtime, CPU) | same | same | `activities.ocr_text`, `ocr_boxes`, `organized_text` | G14 |
-| UI events | Clicks, typed text, app switches, tab/page changes, clipboard | `CGEventTap` (listen-only) + `AXUIElement` + `NSPasteboard` | `WH_KEYBOARD_LL` / `WH_MOUSE_LL` hooks + UIA + Win32 clipboard | none | `ui_events`, `activities.user_actions` | G20, G21, G22, G25, G27, G31 |
+| UI events | Clicks, typed text, app switches, tab/page changes, clipboard | `CGEventTap` (listen-only) + `AXUIElement` + `NSPasteboard` | `WH_KEYBOARD_LL` / `WH_MOUSE_LL` hooks + UIA + Win32 clipboard | none | `ui_events`, `activities.user_actions` | G21, G22, G25, G27, G31 |
 | Call start/end | App, title, room URL, duration | Window rules + CoreAudio "is running input" per process | Window rules only (no mic info) | Window rules on the focused window only | `meetings` | G16, G17, G27 |
 | Call audio | Mic + system audio, transcript, summary | `sounddevice` mic; system audio only with a virtual loopback device | `sounddevice` mic + a device named "loopback" / "Stereo Mix" | `sounddevice` mic | `meetings.transcript`, `meetings.summary` | G18 |
 | Voice memo | Mic audio + one screenshot on a hotkey | hotkeys off; dashboard only | `keyboard` hotkey `ctrl+shift+v` | `keyboard` (needs root) | `activities` row with app "Voice Memo" | G19 |
@@ -293,7 +293,7 @@ Known holes: Chrome ignores `AXManualAccessibility`. After a reboot, with no oth
 
 ### 4.7 UI events
 
-`screenmind/capture/ui_events/`. On by default (`UI_EVENTS_ENABLED=true`) with `UI_EVENTS_TYPES=click,app_switch`. Typed text (`text`), `clipboard` and `window_focus` are opt-in, because text and clipboard can hold private content (G31). A `settings.json` saved before this default keeps its own value (G20).
+`screenmind/capture/ui_events/`. On by default (`UI_EVENTS_ENABLED=true`) with `UI_EVENTS_TYPES=click,app_switch`. Typed text (`text`), `clipboard` and `window_focus` are opt-in, because text and clipboard can hold private content (G31). A `settings.json` saved before this default keeps its own value.
 
 ```
 OS hook thread -> queue.SimpleQueue -> enricher thread -> ui_events table
@@ -470,7 +470,6 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G17 | No mic-in-use signal on Windows. Discord calls are never detected. Slack needs "huddle" in the title. A call whose window is hidden ends after 120 s. | Windows | new |
 | G18 | System audio is recorded only from a device named "loopback" or "Stereo Mix". macOS has none by default, so transcripts have the mic side only. | both (macOS always) | new |
 | G19 | Global hotkeys (bookmark, pause, voice memo) are off on macOS because the `keyboard` library cannot do them there. | macOS | new |
-| G20 | UI events are on by default now, but the main instance's `settings.json` saved `ui_events_enabled: false`, so it stays off there until turned on. | both | [ui-events.md](../backlog/ui-events.md) "UI events are off on the main instance" |
 | G21 | With several displays, all UI events go to the first frame saved in the tick. | both | [ui-events.md](../backlog/ui-events.md) "Events go to the first frame of a tick" |
 | G22 | Permission prompts name Terminal or Python, not ScreenMind. | macOS | [ui-events.md](../backlog/ui-events.md) "macOS permission prompts name Terminal or Python" |
 | G23 | The DB is plain text. Only screenshots can be encrypted, and that is off by default. | both | [ui-events.md](../backlog/ui-events.md) "Encrypt the whole DB" |
@@ -482,7 +481,7 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G29 | Wayland hides window positions: no window list, no active display, no per-display labels. | Linux | [multi-display-capture.md](../backlog/multi-display-capture.md) (Wayland note) |
 | G31 | Typed text and clipboard are opt-in, because there is no PII detection before they are stored. | both | [ui-events.md](../backlog/ui-events.md) "PII detection before storing typed text and clipboard" |
 
-Closed while this map was written: G10 and G11 by `fa80d39` (Windows a11y reads the page, not the browser UI), G13 by `81277a8` (capture-time data kept on backlog skips). Their ids stay reserved.
+Closed while this map was written: G10 and G11 by `fa80d39` (Windows a11y reads the page, not the browser UI), G13 by `81277a8` (capture-time data kept on backlog skips), G20 by `399a565` (UI events on by default, live on the main instance since 2026-10-07). Their ids stay reserved.
 
 ## 9. Code vs backlog
 

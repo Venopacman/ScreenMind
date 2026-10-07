@@ -32,13 +32,6 @@ Status: open (waiting for the user's decision)
 
 Refs: branch `claude/questionnaire-screenshots-extraction-1904e8`, `bench/replay.py`, `bench/scenarios.example.yaml`.
 
-### UI events are not enabled
-Status: in progress (a session is fixing macOS clicks, 2026-10-07; after that the user turns on UI Events in Settings and grants Input Monitoring + Accessibility)
-
-`ui_events` has 0 rows and `activities.user_actions` is empty, so `duration`, `trigger` and time per site (`ui_events.url`, v9) have no data. This is the biggest gap left for the record. Once it is on, check `app_switch` timing and the `activity_id` link with the scan.
-
-Refs: `screenmind/capture/ui_events/`, settings `ui_events_enabled`, `ui_events_types`.
-
 ### Do not backfill rows from before 55a9198
 Status: open (rule for the feed design)
 

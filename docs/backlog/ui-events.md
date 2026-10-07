@@ -27,11 +27,6 @@ The questionnaire session's hourly scan covers most of this.
 
 Refs: `MacOSAdapter._best_title()`, `capture_worker._get_browser_url()`, `UiEventRecorder._poll_front()`.
 
-### UI events are off on the main instance
-Status: blocked on the user
-
-Since 2026-10-07 UI events are on by default (clicks and app switches). But the main instance's `settings.json` saved `ui_events_enabled: false` earlier, and a saved value wins over the default. So `ui_events` and `activities.user_actions` stay empty there until it is turned on in Settings → Privacy & Security → UI Events. The app that starts ScreenMind (Terminal) needs Accessibility for element names. Input Monitoring is only needed for typed text: clicks work without it.
-
 ### PII detection before storing typed text and clipboard
 Status: open
 
