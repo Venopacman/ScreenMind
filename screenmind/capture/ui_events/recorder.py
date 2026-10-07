@@ -39,6 +39,8 @@ _CLIPBOARD_POLL_S = 1.0
 _DB_FLUSH_S = 2.0
 _DB_FLUSH_BATCH = 50
 _FOCUS_CACHE_S = 1.0
+# How long a typed label ("pwd -") waits for its value in the next chunk.
+_LABEL_CARRY_S = 30.0
 
 # Delays before an event-driven capture, so the screen can finish updating.
 TRIGGER_DELAYS = {
@@ -92,6 +94,8 @@ class UiEventRecorder:
         self._last_db_flush = 0.0
         self._events_recorded = 0
         self._last_error: Optional[str] = None
+        # (field identity, end time, label) of a chunk that ended in "pwd -".
+        self._open_label: Optional[tuple] = None
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
@@ -272,8 +276,8 @@ class UiEventRecorder:
         else:
             self._add(EventType.CLICK, raw.ts, app_name, window,
                       element_role=element.role if element else None,
-                      element_name=self._clean(element.name) if element else None,
-                      element_value=self._clean(element.value) if element else None,
+                      element_name=element.name if element else None,
+                      element_value=element.value if element else None,
                       x=raw.x, y=raw.y, url=url)
         if not (element and element.is_text_input):
             self._trigger("click")
@@ -314,7 +318,7 @@ class UiEventRecorder:
         text = self._backend.read_clipboard()
         if not text or not text.strip():
             return
-        text = self._clean(text.strip()[:MAX_CLIPBOARD_CHARS])
+        text = text.strip()[:MAX_CLIPBOARD_CHARS]
         self._add(EventType.CLIPBOARD, now, app_name,
                   self._front.title if self._front else None, text=text)
 
@@ -333,7 +337,7 @@ class UiEventRecorder:
         Sanitized like active_url: no query strings, no sign-in/token pages."""
         try:
             from screenmind.privacy.url_filter import sanitize_url
-            return self._clean(sanitize_url(self._backend.browser_url()))
+            return sanitize_url(self._backend.browser_url())
         except Exception:
             return None
 
@@ -346,30 +350,52 @@ class UiEventRecorder:
                 return name
         return self._front.app_name if self._front else None
 
-    def _clean(self, text: Optional[str]) -> Optional[str]:
+    def _clean(self, text: Optional[str], after_label: Optional[str] = None) -> Optional[str]:
         if not text:
             return text
         if not settings.sensitive_filter_enabled:
             return text
-        from screenmind.privacy.data_filter import filter_sensitive_text, parse_enabled_types
-        return filter_sensitive_text(text, parse_enabled_types(settings.sensitive_filter_types))["clean_text"]
+        from screenmind.privacy.data_filter import filter_after_label, parse_enabled_types
+        return filter_after_label(after_label, text, parse_enabled_types(settings.sensitive_filter_types))
 
     def _emit_chunk(self, chunk: Optional[TextChunk], trigger: bool):
         if chunk is None:
             return
         ts = chunk.end_ts
+        label, self._open_label = self._open_label, None
         if chunk.is_password:
             self._add(EventType.TEXT, ts, chunk.app_name, chunk.window_title,
                       element_role=chunk.target.role, text=PASSWORD_PLACEHOLDER)
             return
         self._add(EventType.TEXT, ts, chunk.app_name, chunk.window_title,
                   element_role=chunk.target.role,
-                  element_name=self._clean(chunk.target.name),
-                  text=self._clean(chunk.text))
+                  element_name=chunk.target.name,
+                  text=self._typed_text(chunk, label))
         if trigger:
             self._trigger("typing_pause")
 
+    def _typed_text(self, chunk: TextChunk, label: Optional[tuple]) -> str:
+        """Chunk text, with a value redacted if it belongs to a label typed
+        just before. Enter or a pause can split "pwd -" and the value into
+        two chunks, so a label left open by the previous chunk in the same
+        field is filtered together with this one. _add() filters the rest."""
+        from screenmind.privacy.data_filter import dangling_secret_label
+        text = chunk.text
+        if (label and label[0] == chunk.target.identity()
+                and chunk.start_ts - label[1] <= _LABEL_CARRY_S):
+            text = self._clean(text, after_label=label[2])
+        tail = dangling_secret_label(text)
+        if tail:
+            self._open_label = (chunk.target.identity(), chunk.end_ts, tail)
+        return text
+
     def _add(self, type_: EventType, ts: float, app_name, window_title, **fields):
+        # Every free-text field goes through the sensitive-data filter here,
+        # before it is queued for the DB.
+        window_title = self._clean(window_title)
+        for key in ("element_name", "element_value", "text", "url"):
+            if fields.get(key):
+                fields[key] = self._clean(fields[key])
         if fields.get("x") is not None:
             fields["x"] = int(fields["x"])
         if fields.get("y") is not None:

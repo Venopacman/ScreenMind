@@ -1,6 +1,7 @@
 """
 Sensitive Data Filter
-Detects and redacts credit cards, SSNs, API keys, passwords from OCR text
+Detects and redacts credit cards, SSNs, API keys, passwords from screen text
+and recorded UI events (typed text, clipboard, element values)
 before it's stored in the database or passed to AI models.
 """
 
@@ -26,6 +27,78 @@ def _luhn_check(number: str) -> bool:
                 d -= 9
         checksum += d
     return checksum % 10 == 0
+
+
+# ── Passwords ────────────────────────────────────────────────────────
+
+_SECRET_LABEL = r"(?:password|passwd|passcode|pwd|secret|token|api.?key)"
+_DASHES = "\\-\u2010\u2011\u2012\u2013\u2014\u2212"
+_REDACTED_MARK = "[REDACTED:"
+
+# "password: value", "DB_PASSWORD=value". The separator says a value
+# follows, so any 4+ chars count. The value may be on the next line.
+_PASSWORD_STRICT = re.compile(
+    r"(?i)(?P<label>" + _SECRET_LABEL + r"\s*[:=]\s*)"
+    r"(?P<value>[\"']?\S{4,})"
+)
+
+# "pwd - value", "password  value", and OCR putting the value on the next
+# line ("pwd" / "- value"). Prose uses these forms too ("password reset"),
+# so the value must also pass _looks_like_secret().
+_PASSWORD_LOOSE = re.compile(
+    r"(?i)(?<![a-z])(?P<label>" + _SECRET_LABEL + r"(?=[\s" + _DASHES + r"])"
+    r"[ \t]*(?:\r?\n)?[ \t]*(?:[" + _DASHES + r"]+[ \t]*(?:\r?\n)?[ \t]*)?)"
+    r"(?P<value>[^\s" + _DASHES + r"]\S{5,})"
+)
+
+# A label with nothing after it yet ("pwd -", "Password:"). The recorder
+# uses it to join typed text split by Enter or a pause before the value.
+_DANGLING_LABEL = re.compile(
+    r"(?i)(?<![a-z])" + _SECRET_LABEL + r"[ \t]*(?:[:=" + _DASHES + r"]+[ \t]*)?$"
+)
+
+_SYMBOLS = re.compile(r"[!@#$%^&*_+=~|\\]")
+
+
+def _looks_like_secret(value: str) -> bool:
+    """Is a word after "password" without ":"/"=" a credential or prose?
+    Credentials here have a digit or a symbol (abc123, Tr0ub4dor, hunter_x).
+    Plain words don't, including CamelCase names ("Reset password - LinkedIn"),
+    and neither do dates or URLs."""
+    v = value.strip("\"'").rstrip(".,;:!?)]}>\"'")
+    if len(v) < 6 or "REDACTED" in v:
+        return False
+    if "://" in v or v.lower().startswith("www."):
+        return False
+    if re.fullmatch(r"[\d.,:/\-]+", v) and not v.isdigit():
+        return False  # dates, times, amounts
+    return any(c.isdigit() for c in v) or bool(_SYMBOLS.search(v))
+
+
+def _redact_passwords(text: str, replacement: str) -> tuple:
+    """Replace password values, keeping the label ("pwd - [REDACTED:password]").
+    Returns (text, count)."""
+    count = 0
+
+    def _sub(m, check):
+        nonlocal count
+        value = m.group("value")
+        if _REDACTED_MARK in value or (check and not _looks_like_secret(value)):
+            return m.group()
+        count += 1
+        return m.group("label") + replacement
+
+    text = _PASSWORD_STRICT.sub(lambda m: _sub(m, False), text)
+    text = _PASSWORD_LOOSE.sub(lambda m: _sub(m, True), text)
+    return text, count
+
+
+def dangling_secret_label(text: Optional[str]) -> Optional[str]:
+    """The trailing label if text ends with one and no value ("pwd -"), else None."""
+    if not text:
+        return None
+    m = _DANGLING_LABEL.search(text)
+    return m.group() if m else None
 
 
 PATTERNS = {
@@ -76,12 +149,10 @@ PATTERNS = {
     },
     "password": {
         "label": "Password",
-        "regex": re.compile(
-            r"(?i)(?:password|passwd|pwd|secret|token|api.?key)"
-            r"\s*[:=]\s*"
-            r"[\"']?(\S{4,})[\"']?",
-        ),
-        "replacement": r"[REDACTED:password]",
+        "regex": _PASSWORD_STRICT,
+        "replacement": "[REDACTED:password]",
+        # Also catches "pwd - value" and values on the next line.
+        "redactor": _redact_passwords,
     },
     "email": {
         "label": "Email Address",
@@ -140,6 +211,15 @@ def filter_sensitive_text(
         regex = pattern_info["regex"]
         replacement = pattern_info["replacement"]
 
+        redactor = pattern_info.get("redactor")
+        if redactor:
+            clean, count = redactor(clean, replacement)
+            if count:
+                total_redacted += count
+                types_found.append(ptype)
+                details.append({"type": ptype, "count": count})
+            continue
+
         # Count matches before replacing
         matches = regex.findall(clean)
         count = len(matches)
@@ -170,6 +250,34 @@ def filter_sensitive_text(
         "types_found": types_found,
         "details": details,
     }
+
+
+def filter_after_label(label: Optional[str], text: str, enabled_types: Optional[list] = None) -> str:
+    """Filter text that may be the value for a label in the previous piece
+    ("pwd -" in one OCR box or typed chunk, the value in the next one)."""
+    if label:
+        prefix = label + "\n"
+        joined = filter_sensitive_text(prefix + text, enabled_types)["clean_text"]
+        if joined.startswith(prefix):
+            text = joined[len(prefix):]
+    return filter_sensitive_text(text, enabled_types)["clean_text"]
+
+
+def filter_ocr_boxes(boxes: Optional[list], enabled_types: Optional[list] = None) -> Optional[list]:
+    """Redact the "text" of OCR boxes (dicts), in place and in list order.
+
+    OCR often puts a label and its value in neighbouring boxes ("pwd" and
+    "- value"), so a label left open by one box is checked with the next.
+    Returns the same list.
+    """
+    label = None
+    for box in boxes or []:
+        text = box.get("text")
+        if not text:
+            continue
+        box["text"] = filter_after_label(label, text, enabled_types)
+        label = dangling_secret_label(box["text"])
+    return boxes
 
 
 def parse_enabled_types(types_str: str) -> list:
