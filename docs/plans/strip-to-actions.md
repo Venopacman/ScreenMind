@@ -1,6 +1,6 @@
 # Strip ScreenMind down to action collection
 
-Status: approved by the user on 2026-10-07. The tables below show the final decisions. The [Decisions](#decisions) section lists the answers.
+Status: done on 2026-10-07. All slices are merged into `custom`. See [Progress](#progress) at the end. The tables below show the final decisions.
 
 ## Goal
 
@@ -217,3 +217,26 @@ The user's answers, 2026-10-07:
 6. **Git context.** Remove.
 7. **Privacy.** Keep screenshot encryption. Drop the PIN lock.
 8. **DB.** Drop unused tables and columns in migration v11.
+
+## Progress
+
+All on `custom`, 2026-10-07:
+
+| Slice | Commit |
+|---|---|
+| Plan | `824470b` |
+| 1. Dashboard pages and the PIN lock | `ea9510c` |
+| 2. Routes | `1c408f6` |
+| 3. Workers and engine | `57cf0dd` |
+| 4. Settings keys (`.env` ignores unknown keys now) | `cd95561` |
+| 5. Migration v11 and export format 2 | `edfc76e` |
+| Leftovers: e2e env, old `settings.json` test | `d2308cd` |
+| 6. Docs and backlog | `3c7a2f7` |
+| 7. Dependencies | `b76042a` |
+
+Left for the user:
+
+- Back up the DB before the main instance first runs v11: `cp ~/.screenmind/screenmind.db ~/.screenmind/screenmind.db.pre-v11`.
+- Run `uv sync` for the main `.venv` before the next start.
+- These folders and files are no longer used and can be deleted by hand: `~/.screenmind/agents/`, `~/.screenmind/memos/`, `~/.screenmind/webhook_log.db`, `~/.screenmind/models/embedder/`.
+
