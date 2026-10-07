@@ -71,7 +71,7 @@ async def reanalyze_activity(activity_id: int):
     """Re-run Gemma analysis + layout detection on a single activity."""
     conn = db._get_conn()
     row = conn.execute(
-        "SELECT screenshot_path, ocr_text, ocr_boxes, detected_app_name, window_title FROM activities WHERE id = ?",
+        "SELECT screenshot_path, ocr_text, ocr_boxes, detected_app, window_title FROM activities WHERE id = ?",
         (activity_id,),
     ).fetchone()
     if not row:
@@ -138,30 +138,10 @@ async def reanalyze_activity(activity_id: int):
             except Exception as e:
                 organized_text = ""  # Non-fatal — skip layout on error
 
-        # Generate embedding for semantic search
-        embedding = None
-        try:
-            from screenmind.api.dependencies import embedder as _emb
-            if _emb:
-                embedding = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: _emb.embed_activity(
-                        summary=record.activity_summary,
-                        details=record.detailed_context,
-                        visible_text=record.visible_text_snippets,
-                        app_name=record.app_name,
-                        category=record.activity_category,
-                        scene_description=record.scene_description,
-                    ),
-                )
-        except Exception:
-            pass  # Non-fatal — search still works via FTS
-
         # Update DB (handles FTS5 sync automatically)
         db.update_activity_analysis(
             activity_id=activity_id,
             analysis=record,
-            embedding=embedding,
             ocr_text=ocr_text,
             organized_text=organized_text,
             analysis_method="reanalyze",

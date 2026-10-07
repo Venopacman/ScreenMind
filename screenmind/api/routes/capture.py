@@ -8,15 +8,6 @@ from screenmind.engine import model_manager
 router = APIRouter(prefix="/api", tags=["capture"])
 
 
-@router.post("/capture/bookmark")
-async def bookmark_capture():
-    """Trigger an instant bookmarked screenshot capture."""
-    if capture_worker:
-        capture_worker.trigger_bookmark()
-        return {"status": "captured", "message": "Screenshot captured and bookmarked."}
-    return {"status": "error", "message": "Capture worker not available"}
-
-
 @router.post("/capture/pause")
 async def pause_capture():
     if capture_worker:

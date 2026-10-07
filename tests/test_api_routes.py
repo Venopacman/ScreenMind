@@ -40,27 +40,6 @@ async def test_timeline_with_data(client, db):
     assert any(a["window_title"] == "Test Window" for a in data["activities"])
 
 
-@pytest.mark.asyncio
-async def test_bookmarks_empty(client):
-    resp = await client.get("/api/bookmarks")
-    assert resp.status_code == 200
-    assert resp.json()["bookmarks"] == [] or isinstance(resp.json()["bookmarks"], list)
-
-
-@pytest.mark.asyncio
-async def test_toggle_bookmark(client, db):
-    entry = ScreenshotEntry(
-        timestamp=datetime(2026, 5, 16, 11, 0, 0),
-        screenshot_path="/tmp/bm.jpg",
-        bookmarked=False,
-        analyzed=False,
-    )
-    aid = db.insert_activity(entry)
-
-    resp = await client.put(f"/api/activities/{aid}/bookmark")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["bookmarked"] is True
 
 
 @pytest.mark.asyncio
@@ -101,19 +80,6 @@ async def test_capture_pause_resume(client):
     assert resp.json()["paused"] is False
 
 
-@pytest.mark.asyncio
-async def test_rewind_empty(client):
-    resp = await client.get("/api/rewind?date=2099-01-01")
-    assert resp.status_code == 200
-    assert resp.json()["frames"] == []
-
-
-@pytest.mark.asyncio
-async def test_summary_not_generated(client):
-    resp = await client.get("/api/summary?date=2099-01-01")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["generated"] is False
 
 
 @pytest.mark.asyncio
@@ -158,3 +124,52 @@ async def test_models_list(client):
     data = resp.json()
     assert "models" in data
     assert len(data["models"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_search_is_keyword_only(client, db):
+    def add(summary, category):
+        aid = db.insert_activity(ScreenshotEntry(
+            timestamp=datetime(2026, 5, 16, 10, 0, 0),
+            screenshot_path="/tmp/q.jpg",
+            analyzed=False,
+        ))
+        db.update_activity_analysis(aid, ActivityRecord(
+            app_name="Code", activity_category=category, activity_summary=summary
+        ))
+        return aid
+
+    coding = add("Fixing the zebrafish parser", "coding")
+    add("Reading about zebrafish", "browsing")
+
+    resp = await client.get("/api/search", params={"q": "zebrafish"})
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert len(results) == 2
+    assert {r["match_type"] for r in results} == {"keyword"}
+
+    resp = await client.get("/api/search", params={"q": "zebrafish", "category": "coding"})
+    assert [r["id"] for r in resp.json()["results"]] == [coding]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/bookmarks"),
+    ("GET", "/api/rewind"),
+    ("GET", "/api/summary"),
+    ("POST", "/api/chat"),
+    ("GET", "/api/memos"),
+    ("GET", "/api/agents"),
+    ("POST", "/api/capture/bookmark"),
+    ("POST", "/api/integrations/test"),
+])
+async def test_removed_routes_are_gone(client, method, path):
+    resp = await client.request(method, path)
+    assert resp.status_code in (404, 405)
+
+
+@pytest.mark.asyncio
+async def test_settings_hide_removed_features(client):
+    data = (await client.get("/api/settings")).json()
+    for key in ("bookmark_hotkey", "webhook_url", "notion_token", "agents_enabled", "auto_bookmark"):
+        assert key not in data

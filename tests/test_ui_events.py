@@ -593,28 +593,3 @@ def test_format_skips_unnamed_clicks():
     ]
     assert format_user_actions(rows) == '- clicked button "Send" in Slack'
 
-
-# ── Summary and chat context ────────────────────────────────────────
-
-
-class TestActionsInContext:
-    def test_summary_actions_line(self):
-        from screenmind.api.routes.summary import _actions_line
-        text = '- switched to Slack\n- typed "ship it" in text area (Slack)'
-        assert _actions_line(text) == 'switched to Slack; typed "ship it" in text area (Slack)'
-        assert _actions_line(None) == ""
-        assert len(_actions_line("- " + "x" * 500)) == 200
-
-    def test_chat_context_includes_actions(self):
-        from screenmind.api.routes.chat import _build_timeline_context
-        primary = {"id": 1, "app_name": "Slack", "_relevance": 3, "ocr_text": "general channel",
-                   "user_actions": '- typed "will push the fix today" in text area (Slack)'}
-        ctx, _, _ = _build_timeline_context(primary, [primary], [], lambda m: m)
-        assert "[User actions before this screenshot]" in ctx
-        assert "will push the fix today" in ctx
-
-    def test_chat_context_without_actions(self):
-        from screenmind.api.routes.chat import _build_timeline_context
-        primary = {"id": 1, "app_name": "Slack", "_relevance": 3, "ocr_text": "general channel"}
-        ctx, _, _ = _build_timeline_context(primary, [primary], [], lambda m: m)
-        assert "User actions" not in ctx

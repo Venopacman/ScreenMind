@@ -12,10 +12,7 @@ def client():
 
     db = MagicMock(spec=Database)
     db.get_activities_by_date.return_value = []
-    db.get_bookmarks.return_value = []
     db.get_stats.return_value = {"total_activities": 0, "category_breakdown": {}, "top_apps": {}, "top_repos": {}, "meetings_count": 0, "meetings_minutes": 0}
-    db.get_daily_summary.return_value = None
-    db.get_rewind_data.return_value = []
 
     app = create_app(database=db, capture_worker=MagicMock(), analysis_worker=MagicMock(), audio_worker=MagicMock())
     yield TestClient(app)

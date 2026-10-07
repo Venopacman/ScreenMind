@@ -19,7 +19,6 @@ import uvicorn
 
 from screenmind.config import settings
 from screenmind.storage.database import Database
-from screenmind.engine.embedder import Embedder
 from screenmind.workers.capture_worker import CaptureWorker
 from screenmind.workers.analysis_worker import AnalysisWorker
 from screenmind.workers.audio_worker import AudioWorker
@@ -178,7 +177,6 @@ async def main():
         if cleaned["activities"] > 0 or cleaned["meetings"] > 0:
             logger.info(f"Retention cleanup: removed {cleaned['activities']} activities, "
                   f"{cleaned['meetings']} meetings older than {settings.retention_days} days")
-    embedder = Embedder()
 
     # Thread-safe shutdown flag (checked by voice transcription thread before DB writes)
     _shutdown = threading.Event()
@@ -327,7 +325,6 @@ async def main():
     # ── API Server ───────────────────────────────────────────────────
     app = create_app(
         database=db,
-        embedder=embedder,
         capture_worker=capture_worker,
         analysis_worker=analysis_worker,
         audio_worker=audio_worker,

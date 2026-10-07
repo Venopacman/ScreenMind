@@ -1,6 +1,5 @@
-"""Settings routes — get/update config, integration tests, webhook log."""
+"""Settings routes — get/update config, startup registration, shutdown."""
 
-import json
 import sys
 
 from fastapi import APIRouter, Request
@@ -10,137 +9,37 @@ from screenmind.config import settings
 router = APIRouter(prefix="/api", tags=["settings"])
 
 
+# Keys the dashboard reads and writes
+_DASHBOARD_KEYS = (
+    "capture_interval", "performance_mode", "context_window", "kv_cache_quant",
+    "flash_attention", "analysis_mode", "auto_pause_heavy_apps", "heavy_apps",
+    "defer_analysis", "meeting_transcription", "meeting_apps", "retention_days",
+    "sensitive_filter_enabled", "sensitive_filter_types", "encryption_enabled",
+    "capture_active_monitor", "ui_events_enabled", "ui_events_types",
+    "event_triggered_capture",
+)
+
+
+def _current() -> dict:
+    return {k: getattr(settings, k) for k in _DASHBOARD_KEYS}
+
+
 @router.get("/settings")
 async def get_settings():
-    """Return current resource management settings."""
-    return {
-        "capture_interval": settings.capture_interval,
-        "performance_mode": settings.performance_mode,
-        "context_window": settings.context_window,
-        "kv_cache_quant": settings.kv_cache_quant,
-        "flash_attention": settings.flash_attention,
-        "analysis_mode": settings.analysis_mode,
-        "auto_pause_heavy_apps": settings.auto_pause_heavy_apps,
-        "heavy_apps": settings.heavy_apps,
-        "defer_analysis": settings.defer_analysis,
-        "meeting_transcription": settings.meeting_transcription,
-        "meeting_apps": settings.meeting_apps,
-        "retention_days": settings.retention_days,
-        "ollama_model": settings.ollama_model,
-        "obsidian_enabled": settings.obsidian_enabled,
-        "obsidian_vault_path": settings.obsidian_vault_path,
-        "notion_enabled": settings.notion_enabled,
-        "notion_token": settings.notion_token,
-        "notion_database_id": settings.notion_database_id,
-        "webhook_enabled": settings.webhook_enabled,
-        "webhook_url": settings.webhook_url,
-        "webhook_events": settings.webhook_events,
-        "webhook_secret": settings.webhook_secret,
-        "webhook_headers": settings.webhook_headers,
-        "webhook_extra": json.loads(settings.webhook_extra) if settings.webhook_extra else [],
-        "auto_bookmark": settings.auto_bookmark,
-        "auto_bookmark_keywords": settings.auto_bookmark_keywords,
-        "agents_enabled": settings.agents_enabled,
-        "agents_auto_run_python": settings.agents_auto_run_python,
-        "sensitive_filter_enabled": settings.sensitive_filter_enabled,
-        "sensitive_filter_types": settings.sensitive_filter_types,
-        "encryption_enabled": settings.encryption_enabled,
-        "bookmark_hotkey": settings.bookmark_hotkey,
-        "pause_hotkey": settings.pause_hotkey,
-        "voice_hotkey": settings.voice_hotkey,
-        "capture_active_monitor": settings.capture_active_monitor,
-        "ui_events_enabled": settings.ui_events_enabled,
-        "ui_events_types": settings.ui_events_types,
-        "event_triggered_capture": settings.event_triggered_capture,
-    }
+    """Return the settings shown on the dashboard."""
+    return _current()
 
 
 @router.post("/settings")
 async def update_settings(request: Request):
-    """Update resource management settings (persists to settings.json)."""
+    """Update settings (persists to settings.json)."""
     body = await request.json()
-    # Serialize webhook_extra list to JSON string for storage
-    if "webhook_extra" in body and isinstance(body["webhook_extra"], list):
-        body["webhook_extra"] = json.dumps(body["webhook_extra"])
     settings.save_runtime_overrides(body)
     if "ui_events_enabled" in body:
         from screenmind.api import dependencies
         if dependencies.ui_recorder is not None:
             dependencies.ui_recorder.sync_with_settings()
-    return {
-        "status": "saved",
-        "capture_interval": settings.capture_interval,
-        "performance_mode": settings.performance_mode,
-        "context_window": settings.context_window,
-        "kv_cache_quant": settings.kv_cache_quant,
-        "flash_attention": settings.flash_attention,
-        "analysis_mode": settings.analysis_mode,
-        "auto_pause_heavy_apps": settings.auto_pause_heavy_apps,
-        "heavy_apps": settings.heavy_apps,
-        "defer_analysis": settings.defer_analysis,
-        "meeting_transcription": settings.meeting_transcription,
-        "meeting_apps": settings.meeting_apps,
-        "retention_days": settings.retention_days,
-        "ollama_model": settings.ollama_model,
-        "obsidian_enabled": settings.obsidian_enabled,
-        "obsidian_vault_path": settings.obsidian_vault_path,
-        "notion_enabled": settings.notion_enabled,
-        "notion_token": settings.notion_token,
-        "notion_database_id": settings.notion_database_id,
-        "webhook_enabled": settings.webhook_enabled,
-        "webhook_url": settings.webhook_url,
-        "webhook_events": settings.webhook_events,
-        "webhook_secret": settings.webhook_secret,
-        "webhook_headers": settings.webhook_headers,
-        "webhook_extra": json.loads(settings.webhook_extra) if settings.webhook_extra else [],
-        "auto_bookmark": settings.auto_bookmark,
-        "auto_bookmark_keywords": settings.auto_bookmark_keywords,
-        "agents_enabled": settings.agents_enabled,
-        "agents_auto_run_python": settings.agents_auto_run_python,
-        "sensitive_filter_enabled": settings.sensitive_filter_enabled,
-        "sensitive_filter_types": settings.sensitive_filter_types,
-        "encryption_enabled": settings.encryption_enabled,
-        "bookmark_hotkey": settings.bookmark_hotkey,
-        "pause_hotkey": settings.pause_hotkey,
-        "voice_hotkey": settings.voice_hotkey,
-        "capture_active_monitor": settings.capture_active_monitor,
-        "ui_events_enabled": settings.ui_events_enabled,
-        "ui_events_types": settings.ui_events_types,
-        "event_triggered_capture": settings.event_triggered_capture,
-    }
-
-
-@router.post("/integrations/test")
-async def test_integration(request: Request):
-    """Test an integration connection (Notion or Webhook)."""
-    body = await request.json()
-    integration = body.get("type")
-
-    if integration == "notion":
-        from screenmind.integrations.notion import test_connection
-        result = test_connection(
-            body.get("token", settings.notion_token),
-            body.get("database_id", settings.notion_database_id),
-        )
-        return result
-
-    elif integration == "webhook":
-        from screenmind.integrations.webhooks import test_webhook
-        result = test_webhook(
-            body.get("url", settings.webhook_url),
-            body.get("secret", settings.webhook_secret),
-            body.get("headers", settings.webhook_headers),
-        )
-        return result
-
-    return {"ok": False, "error": "Unknown integration type"}
-
-
-@router.get("/webhooks/log")
-async def get_webhook_log():
-    """Return the last 20 webhook deliveries."""
-    from screenmind.integrations.webhooks import get_delivery_log
-    return {"deliveries": get_delivery_log()}
+    return {"status": "saved", **_current()}
 
 
 @router.get("/startup/status")

@@ -45,7 +45,7 @@ async function renderSearch(el) {
   el.innerHTML = `
     <div class="search-box">
       <span class="search-icon">🔍</span>
-      <input type="text" id="search-input" placeholder="Search your activity history... (e.g. 'working on auth module')">
+      <input type="text" id="search-input" placeholder="Search screen text and labels... (e.g. 'auth module')">
     </div>
     <div class="search-filters">
       <div class="search-date-pills">
@@ -73,7 +73,7 @@ async function renderSearch(el) {
       <input type="date" id="search-date-to" value="${today}" max="${today}">
     </div>
     <div id="search-results">
-      <div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">Semantic Search</div><div>Type a natural language query to search activities.</div></div>
+      <div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">Search</div><div>Type words that were on screen, or in a label or a call transcript.</div></div>
     </div>`;
 
   // ── Event: search input ──
@@ -157,8 +157,7 @@ async function doSearch(q) {
         const date = new Date(r.timestamp).toLocaleDateString();
         const rCat = r.category || 'other';
         const score = r.relevance_score !== undefined ? `<span class="relevance">${(r.relevance_score * 100).toFixed(0)}%</span>` : '';
-        const badge = r.match_type === 'semantic' ? '<span class="match-badge semantic">🧠 Semantic</span>'
-                    : r.match_type === 'keyword' ? '<span class="match-badge keyword">🔤 Keyword</span>'
+        const badge = r.match_type === 'keyword' ? '<span class="match-badge keyword">🔤 Keyword</span>'
                     : r.match_type === 'meeting' ? '<span class="match-badge meeting">🎙️ Meeting</span>' : '';
         const summaryHl = highlightText(r.summary || '', q);
         const ocrSnippet = r.ocr_snippet ? `<div class="ocr-snippet">${highlightText(r.ocr_snippet, q)}</div>` : '';

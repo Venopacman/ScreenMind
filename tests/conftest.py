@@ -94,18 +94,13 @@ def app(db):
     # Also patch the module-level db references in route modules
     # since they may have been imported with a previous db value
     import screenmind.api.routes.timeline as _tl
-    import screenmind.api.routes.bookmarks as _bm
     import screenmind.api.routes.stats as _st
     import screenmind.api.routes.data as _dt
     import screenmind.api.routes.screenshots as _ss
-    import screenmind.api.routes.rewind as _rw
-    import screenmind.api.routes.summary as _sm
     import screenmind.api.routes.meetings as _mt
-    import screenmind.api.routes.agents as _ag
     import screenmind.api.routes.search as _sr
-    import screenmind.api.routes.chat as _ch
 
-    for mod in [_tl, _bm, _st, _dt, _ss, _rw, _sm, _mt, _ag, _sr, _ch]:
+    for mod in [_tl, _st, _dt, _ss, _mt, _sr]:
         mod.db = db
 
     yield application
