@@ -12,7 +12,7 @@ Settings → Storage → Data Export: a user field, From and To dates, a screens
 
 ## API
 
-Both routes work only from this computer (`127.0.0.1` / `::1`). When a dashboard PIN is set, they need a signed-in dashboard session like every other route.
+Both routes work only from this computer (`127.0.0.1` / `::1`).
 
 ### `GET /api/export`
 
