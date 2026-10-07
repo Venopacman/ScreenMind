@@ -21,6 +21,9 @@ BROWSER_APPS = {
 # Subtrees that are app chrome, not window content. Chrome can expose the
 # whole menu bar many times over ("File | Edit | View | ...").
 _A11Y_SKIP_ROLES = {"AXMenuBar", "AXMenuBarItem", "AXMenu", "AXMenuItem"}
+# Web landmarks for navigation and sidebars (Claude's session list, a site's
+# nav menu). They repeat on every frame and push out the main content.
+_A11Y_SKIP_SUBROLES = {"AXLandmarkNavigation", "AXLandmarkComplementary"}
 # Text areas (Terminal, editors) hold the whole buffer in AXValue. Above this
 # size we read only the visible part.
 _A11Y_VISIBLE_ONLY_CHARS = 4000
@@ -34,6 +37,12 @@ _A11Y_MAX_NODES = 4000
 _NON_PAGE_SCHEMES = ("devtools:", "chrome-extension:", "moz-extension:", "safari-web-extension:")
 # AX calls to a hung app wait 6 s each by default.
 _AX_TIMEOUT_SECONDS = 1.0
+
+
+def _repeats(a: str, b: str) -> bool:
+    """Whether the shorter text is the start or end of the longer one."""
+    short, long_ = sorted((a, b), key=len)
+    return len(short) >= 4 and (long_.startswith(short) or long_.endswith(short))
 
 
 class MacOSAdapter(PlatformAdapter):
@@ -397,8 +406,11 @@ class MacOSAdapter(PlatformAdapter):
             role = self._ax_attr(element, "AXRole")
             if role in _A11Y_SKIP_ROLES:
                 return
-            if self._ax_attr(element, "AXSubrole") == "AXSecureTextField":
+            subrole = self._ax_attr(element, "AXSubrole")
+            if subrole == "AXSecureTextField":
                 return  # only bullets, but never read password fields
+            if subrole in _A11Y_SKIP_SUBROLES:
+                return
             if role == "AXWebArea":
                 depth, max_depth = 0, _A11Y_WEB_MAX_DEPTH
 
@@ -406,6 +418,13 @@ class MacOSAdapter(PlatformAdapter):
                 text = text.strip()
                 if len(text) <= 1 or text in seen:
                     return
+                # A link's title often repeats in its own text child, or the
+                # other way round with a prefix ("Idle Chat name", "Chat name").
+                if texts and _repeats(text, texts[-1]):
+                    if len(text) > len(texts[-1]):
+                        budget[0] += len(texts.pop())
+                    else:
+                        return
                 seen.add(text)
                 text = text[:budget[0]]
                 budget[0] -= len(text)

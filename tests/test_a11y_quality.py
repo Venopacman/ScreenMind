@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from screenmind.platform_support.macos import MacOSAdapter
-from screenmind.workers.analysis_worker import _a11y_is_content
+from screenmind.workers.analysis_worker import _a11y_is_content, _screen_text_len
 
 
 # ── Content detection ───────────────────────────────────────────────
@@ -39,6 +39,17 @@ class TestA11yIsContent:
     def test_empty(self):
         assert not _a11y_is_content(None)
         assert not _a11y_is_content("")
+
+
+class TestScreenTextLen:
+    def test_menu_bar_only_is_empty(self):
+        assert _screen_text_len("Finder\nFile\nView\nGo\nWindow\nHelp") < 20
+
+    def test_menu_bar_with_clock_is_empty(self):
+        assert _screen_text_len("Finder | File | Edit | View | Go | Window | Help\nOct 7., Wed 13:30") < 20
+
+    def test_real_text_counts(self):
+        assert _screen_text_len("Finder\nFile\nQuarterly report draft v2.docx") >= 20
 
 
 # ── macOS adapter (AX faked) ────────────────────────────────────────
@@ -152,6 +163,33 @@ class TestWalk:
              patch.object(MacOSAdapter, "enable_full_a11y_tree"):
             text, source = mac.extract_a11y_text(7)
         assert text == "Example\nthe page text people read" and source == "a11y"
+
+    def test_skips_sidebar_and_nav_landmarks(self, mac):
+        win = FakeEl("AXWindow", children=[
+            FakeEl("AXGroup", AXSubrole="AXLandmarkComplementary",
+                   children=[FakeEl("AXLink", title="Other chat")]),
+            FakeEl("AXGroup", AXSubrole="AXLandmarkNavigation",
+                   children=[FakeEl("AXLink", title="Site menu")]),
+            FakeEl("AXGroup", AXSubrole="AXLandmarkMain",
+                   children=[FakeEl("AXStaticText", value="the conversation")]),
+        ])
+        texts = []
+        mac._walk_ax_tree(win, texts, 0)
+        assert texts == ["the conversation"]
+
+    def test_drops_line_repeated_inside_the_next(self, mac):
+        """A link title with a status prefix, then its own text child."""
+        win = FakeEl("AXWindow", children=[
+            FakeEl("AXLink", title="Idle Open items review",
+                   children=[FakeEl("AXStaticText", value="Open items review")]),
+            FakeEl("AXStaticText", value="Go"),
+            FakeEl("AXStaticText", value="Google search"),
+            FakeEl("AXStaticText", value="Draft"),
+            FakeEl("AXStaticText", value="Draft saved at noon"),
+        ])
+        texts = []
+        mac._walk_ax_tree(win, texts, 0)
+        assert texts == ["Idle Open items review", "Go", "Google search", "Draft saved at noon"]
 
 
 class TestTitlesAndUrls:

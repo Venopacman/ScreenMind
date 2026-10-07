@@ -69,6 +69,28 @@ _A11Y_MAX_PREFIX_CHARS = 500
 
 # Below this much screen text, an unlabeled frame counts as an empty display
 _EMPTY_SCREEN_MAX_TEXT = 20
+# Cap on stored screen text, a11y plus OCR extras (the a11y walk alone stops at 20k)
+_MAX_TEXT_CHARS = 20000
+# The menu bar clock, e.g. "Oct 7., Wed 13:30"
+_CLOCK_RE = re.compile(r'\b\d{1,2}:\d{2}\b')
+
+
+def _screen_text_len(text: Optional[str]) -> int:
+    """Length of screen text without the macOS menu bar: menu-word lines and
+    the clock. A display that shows only the menu bar has no content."""
+    total = 0
+    for line in (text or "").split('\n'):
+        low = line.strip().lower()
+        words = [w for w in re.split(r'[\s|/·•]+', low) if w]
+        if not words or all(w in _MENU_WORDS for w in words):
+            continue
+        # One OCR line for the whole bar: the app name, then its menus
+        if len(words) >= 3 and all(w in _MENU_WORDS for w in words[1:]):
+            continue
+        if len(low) <= 25 and _CLOCK_RE.search(low):
+            continue
+        total += len(low)
+    return total
 
 
 def _a11y_is_content(text: Optional[str], window_title: Optional[str] = None,
@@ -401,6 +423,9 @@ class AnalysisWorker:
                             ocr_text = ocr_raw
                             text_method = "ocr"
 
+            if ocr_text and len(ocr_text) > _MAX_TEXT_CHARS:
+                ocr_text = ocr_text[:_MAX_TEXT_CHARS]
+
             # 3c. Sensitive data filter — redact before AI + storage
             if settings.sensitive_filter_enabled and ocr_text:
                 try:
@@ -416,7 +441,7 @@ class AnalysisWorker:
             #      it guesses a category ("coding"), and an empty display would
             #      count as work time. Also saves a GPU call per empty display.
             if (not capture.app_name and not capture.window_title
-                    and len((ocr_text or "").strip()) < _EMPTY_SCREEN_MAX_TEXT):
+                    and _screen_text_len(ocr_text) < _EMPTY_SCREEN_MAX_TEXT):
                 self._db.update_activity_analysis(
                     activity_id=activity_id,
                     analysis=ActivityRecord(
