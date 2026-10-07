@@ -67,9 +67,9 @@ def freeze(activity_id: int, name: str, source_db: Path, force: bool):
     open_image(src).convert("RGB").save(out / "screenshot.jpg", quality=92)
 
     # The capture-side app (detected_app). app_name is what analysis wrote, so it
-    # is only a fallback for old rows where detected_app was never set (NULL).
-    app = row["detected_app"] if row["detected_app"] is not None else row["app_name"]
-    app = app or None
+    # is only a fallback for rows that have a window title but no detected_app.
+    # No app and no title is an empty display: keep it unlabeled.
+    app = row["detected_app"] or (row["app_name"] if row["window_title"] else None)
     keys = row.keys()
     # Text with no OCR boxes came from a11y at capture time: replay it as a11y input.
     a11y = row["ocr_text"] if row["ocr_text"] and not row["ocr_boxes"] else None
