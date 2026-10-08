@@ -22,6 +22,7 @@ from screenmind.storage.database import Database
 from screenmind.workers.capture_worker import CaptureWorker
 from screenmind.workers.analysis_worker import AnalysisWorker
 from screenmind.workers.audio_worker import AudioWorker
+from screenmind.workers.retention import Retention
 from screenmind.api.server import create_app
 from screenmind.watchdog import Watchdog, start_shutdown_deadline
 
@@ -182,12 +183,9 @@ async def main():
     stale = db.cleanup_stale_meetings()
     if stale:
         logger.info(f"Cleaned up {stale} stale meeting(s) from previous session")
-    # Auto-cleanup old data based on retention setting
-    if settings.retention_days > 0:
-        cleaned = db.cleanup_old_data(settings.retention_days)
-        if cleaned["activities"] > 0 or cleaned["meetings"] > 0:
-            logger.info(f"Retention cleanup: removed {cleaned['activities']} activities, "
-                  f"{cleaned['meetings']} meetings older than {settings.retention_days} days")
+    # Delete data older than retention_days now, and again each day (G24)
+    retention = Retention(db)
+    retention.run_if_due()
 
     # ── Processing queue ─────────────────────────────────────────────
     processing_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
@@ -288,6 +286,7 @@ async def main():
 
     capture_task = asyncio.create_task(capture_worker.run())
     analysis_task = asyncio.create_task(analysis_worker.run())
+    retention_task = asyncio.create_task(retention.run())
 
     # Logs where a stuck part waits; restarts a stuck UI-event enricher
     watchdog = Watchdog(capture_worker=capture_worker, analysis_worker=analysis_worker,
@@ -315,9 +314,10 @@ async def main():
     capture_task.cancel()
     # Abandons a Gemma call in flight; its frame stays 'pending' for backfill
     analysis_task.cancel()
+    retention_task.cancel()
 
     try:
-        await asyncio.gather(capture_task, analysis_task, return_exceptions=True)
+        await asyncio.gather(capture_task, analysis_task, retention_task, return_exceptions=True)
     except asyncio.CancelledError:
         pass
 
