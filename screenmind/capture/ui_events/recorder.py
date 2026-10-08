@@ -59,6 +59,7 @@ TRIGGER_DELAYS = {
     "click": 1.5,
     "typing_pause": 0.5,
     "page_change": 1.0,
+    "clipboard": 0.5,
 }
 
 
@@ -462,6 +463,7 @@ class UiEventRecorder:
         text = text.strip()[:MAX_CLIPBOARD_CHARS]
         self._add(EventType.CLIPBOARD, now, app_name,
                   self._front.title if self._front else None, text=text)
+        self._trigger("clipboard")
 
     # ── Helpers ──────────────────────────────────────────────────────
 

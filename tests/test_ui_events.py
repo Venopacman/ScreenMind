@@ -427,6 +427,7 @@ class TestRecorder:
         r.flush_for_capture()
         [e] = stored(db)
         assert (e.type, e.text) == (EventType.CLIPBOARD, "copied text")
+        cw.request_capture.assert_called_once_with("clipboard", 0.5)
 
     def test_secret_clipboard_skipped(self, rec):
         r, b, db, cw = rec
@@ -435,6 +436,17 @@ class TestRecorder:
         r._tick(None, 102.0)
         r.flush_for_capture()
         assert stored(db) == []
+        cw.request_capture.assert_not_called()
+
+    def test_clipboard_in_blocked_app_no_trigger(self, rec, monkeypatch):
+        r, b, db, cw = rec
+        monkeypatch.setattr(settings, "blocked_apps", "slack")
+        b.clip_count = 1
+        b.clip_text = "copied text"
+        r._tick(None, 102.0)
+        r.flush_for_capture()
+        assert stored(db) == []
+        cw.request_capture.assert_not_called()
 
     def test_no_trigger_when_event_capture_off(self, rec, monkeypatch):
         r, b, db, cw = rec

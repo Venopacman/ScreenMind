@@ -148,7 +148,7 @@ td.gid, th.gid { font-family: var(--font-mono); white-space: nowrap; font-varian
 <!-- 1 -->
 <section id="flow">
   <h2><span class="n">1</span>Data flow</h2>
-  <p>Three workers run side by side. <code>CaptureWorker</code> takes screenshots and reads window info, a11y text and the URL at the moment of the grab. <code>AnalysisWorker</code> picks frames from a queue, runs OCR and Gemma, and writes the results. <code>AudioWorker</code> watches for calls on its own thread. <code>UiEventRecorder</code> records clicks and app switches by default; it can be turned off.</p>
+  <p>Three workers run side by side. <code>CaptureWorker</code> takes screenshots and reads window info, a11y text and the URL at the moment of the grab. <code>AnalysisWorker</code> picks frames from a queue, runs OCR and Gemma, and writes the results. <code>AudioWorker</code> watches for calls on its own thread. <code>UiEventRecorder</code> records clicks, app switches, typed text and the clipboard by default; it can be turned off.</p>
   <p class="hint">Click a diagram to open it full screen. Zoom with the wheel, a pinch or the + and − buttons. Drag to move.</p>
   <div class="diagram" data-title="Data flow" tabindex="0" role="button" aria-label="Open the data flow diagram full screen">
 <button type="button" class="expand-btn" tabindex="-1">Open full screen</button>
@@ -338,7 +338,7 @@ flowchart TB
   <ul>
     <li><b>Active:</b> a "periodic" grab at <code>CAPTURE_INTERVAL</code> (default 10 s on every machine, range 10-120). With a longer interval, a "change" grab once 10 s passed since the last saved frame.</li>
     <li><b>Idle:</b> after 3 ticks in a row with no new frame, only the periodic grab. Once <code>CAPTURE_INTERVAL</code> has passed with no saved frame, every 5 s tick grabs until one is saved. So the interval only sets how soon after a save the grabs start; at 10 s that is the same as the active mode.</li>
-    <li><b>Event-driven</b>, only with UI events on: <code>request_capture()</code> after an app switch (1.0 s delay), every click (1.5 s), a click into a text field included, Enter in a text field (0.5 s) or a page change (1.0 s). Requests within 3 s merge into one grab and grabs are at least 3 s apart, so a burst of clicks is one frame. The merged grab takes the latest reason, but a click is never replaced: a click followed by a typing pause stays a <code>click</code> grab (<code>[event:click]</code> in the log).</li>
+    <li><b>Event-driven</b>, only with UI events on: <code>request_capture()</code> after an app switch (1.0 s delay), every click (1.5 s), a click into a text field included, Enter in a text field (0.5 s), a page change (1.0 s) or a recorded clipboard copy (0.5 s). Requests within 3 s merge into one grab and grabs are at least 3 s apart, so a burst of clicks is one frame. The merged grab takes the latest reason, but a click is never replaced: a click followed by a typing pause stays a <code>click</code> grab (<code>[event:click]</code> in the log).</li>
   </ul>
   <p>Every grab, including the periodic and the click ones, goes through dedup. A screen that does not change gets no new row (G4), and the duplicate JPEG is deleted at once. A click on an unchanged screen gives no frame; its event goes to the next frame of its app (4.7).</p>
   <div class="note"><p><b>Cost</b>, measured on the Windows laptop on 2026-10-08 (2.4 active hours, one display, already at 10 s): 97 frames per active hour, 256 KB per JPEG (about 25 MB per active hour). 10 s instead of 40 s adds at most 9% frames (the ones saved 20-40 s after the previous one). Of 207 clicks, 81 were in a burst with an earlier click, 24 were on a screen dedup found unchanged, and 9 went into a text field (no grab before 2026-10-08).</p></div>
@@ -434,7 +434,7 @@ flowchart TB
   </ul>
 
   <h3 id="d-ui">4.7 UI events</h3>
-  <p>On by default (<code>UI_EVENTS_ENABLED=true</code>) with <code>UI_EVENTS_TYPES=click,app_switch</code>. Typed text, clipboard and <code>window_focus</code> are opt-in, because text and clipboard can hold private content (G31). A <code>settings.json</code> saved before this default keeps its own value.</p>
+  <p>On by default (<code>UI_EVENTS_ENABLED=true</code>) with <code>UI_EVENTS_TYPES=click,app_switch,text,clipboard</code> (typed text and clipboard since 2026-10-08, the user's call). <code>window_focus</code> is opt-in. Text and clipboard can hold private content: the sensitive-data filter and the password-field rules apply, but there is no PII detection (G31). A <code>settings.json</code> that lists its own types keeps them.</p>
   <pre class="flow">OS hook thread -&gt; queue.SimpleQueue -&gt; enricher thread -&gt; ui_events table
                                               +-&gt; CaptureWorker.request_capture()</pre>
   <div class="cols">
@@ -461,7 +461,7 @@ flowchart TB
   <h4>Shared recorder (<code>UiEventRecorder</code>)</h4>
   <ul>
     <li>Front window polled every 0.5 s. New pid or app = <code>app_switch</code>. Title change with a new browser URL = <code>window_focus</code>, even when that type is off.</li>
-    <li>Captures: every click asks for a grab (<code>request_capture("click", 1.5)</code>), a click into a text field too. So do an app switch, a page change and Enter in a text field. See 4.1 for the merge. A click grab is deduped like any other.</li>
+    <li>Captures: every click asks for a grab (<code>request_capture("click", 1.5)</code>), a click into a text field too. So do an app switch, a page change, a typing pause or Enter in a text field, and a recorded clipboard copy (0.5 s). See 4.1 for the merge. A click grab is deduped like any other.</li>
     <li>Typing kept only in text inputs (<code>TEXT_INPUT_ROLES</code>) that are not read-only. <code>TextBuffer</code> groups keys per field; Enter, Tab, arrows, Escape, a click, an app switch or 2 s idle end a chunk; max 500 chars.</li>
     <li>Password fields store <code>[password field]</code>.</li>
     <li>Nothing is recorded while capture is paused or in <code>BLOCKED_APPS</code>. Skips are counted (<code>status()["skipped"]</code>).</li>
@@ -634,7 +634,7 @@ flowchart TB
       <tr data-s="lnx" data-new="1"><td class="gid">G27</td><td>No UI events backend, no browser URL, no mic info on Linux.</td><td><span class="chip lnx">Linux</span></td><td><span class="chip new">new</span></td></tr>
       <tr data-s="mac"><td class="gid">G28</td><td>macOS may show a periodic "still recording your screen" reminder; not seen yet.</td><td><span class="chip mac">macOS</span></td><td>sck-capture.md "macOS still recording your screen reminder"</td></tr>
       <tr data-s="lnx"><td class="gid">G29</td><td>Wayland hides window positions: no window list, no active display, no per-display labels.</td><td><span class="chip lnx">Linux</span></td><td>multi-display-capture.md (Wayland note)</td></tr>
-      <tr data-s="both"><td class="gid">G31</td><td>Typed text and clipboard are opt-in, because there is no PII detection before they are stored.</td><td><span class="chip both">both</span></td><td>ui-events.md "PII detection before storing typed text and clipboard"</td></tr>
+      <tr data-s="both"><td class="gid">G31</td><td>Typed text and clipboard are on by default (2026-10-08), with no PII detection before they are stored. Only the sensitive-data filter (cards, SSNs, API keys, JWTs, passwords) and the password-field rules apply.</td><td><span class="chip both">both</span></td><td>ui-events.md "PII detection before storing typed text and clipboard"</td></tr>
       <tr data-s="win" data-new="1"><td class="gid">G33</td><td><code>performance_mode=balanced</code> starts llama-server with <code>-ngl 15</code>. On the Windows laptop (8 GB GPU) Gemma then runs mostly on the CPU: about 26 s per new frame, about 8 cores busy, and about half the frames are skipped as backlog while the user is active. Parked: the long-term aim is the lowest resource use.</td><td><span class="chip win">Windows</span></td><td>windows.md "G33" (parked)</td></tr>
       <tr data-s="win" data-new="1"><td class="gid">G34</td><td>Electron apps (Claude desktop): the Windows walker reads the web Document, and buttons inside it are kept ("Copy", "Fork from here", "Hide sidebar"). The type filter covers native controls only. Parked: telling labels from content is left to the LLM.</td><td><span class="chip win">Windows</span></td><td>windows.md "G34" (parked)</td></tr>
       <tr data-s="win" data-new="1"><td class="gid">G35</td><td>Windows shell surfaces are saved as activities: Task View, Task Switching, Start, Search, notifications. Their a11y text is only "Task Switching | DesktopWindowXamlSource". Parked until it hurts.</td><td><span class="chip win">Windows</span></td><td>windows.md "G35" (parked)</td></tr>

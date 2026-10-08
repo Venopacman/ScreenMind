@@ -72,10 +72,10 @@ def messages(caplog, level=logging.INFO):
 
 
 class TestDefaults:
-    def test_clicks_and_app_switches_on_by_default(self):
+    def test_clicks_app_switches_text_and_clipboard_on_by_default(self):
         fields = Settings.model_fields
         assert fields["ui_events_enabled"].default is True
-        assert fields["ui_events_types"].default == "click,app_switch"
+        assert fields["ui_events_types"].default == "click,app_switch,text,clipboard"
 
 
 class TestRecorderLogs:

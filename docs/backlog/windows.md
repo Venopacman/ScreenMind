@@ -25,7 +25,7 @@ Since `c377a8c` (G39) the code defaults are the shared settings, and the dashboa
 
 The user decided on 2026-10-08 which non-default values both machines keep:
 - `capture_interval: 10`: the code default since 2026-10-08, so the key has no effect once the main instance runs that code, and can go then.
-- `ui_events_types: "click,app_switch,text,clipboard"` (not the default `click,app_switch`): typed text and clipboard stay on, with the sensitive-data filter and password redaction. G31 stays open.
+- `ui_events_types: "click,app_switch,text,clipboard"`: the code default since 2026-10-08 (the user's call on G31), so this key too can go once the main instance runs that code. No Mac step. Typed text and clipboard stay on, with the sensitive-data filter and password redaction. G31 stays open.
 - `performance_mode`: Windows follows the default (`balanced`). The Mac keeps `maximum` on purpose: with `balanced`, Apple Silicon ran Gemma on about 4 CPU cores and took 10.5 s per frame against 6.2 s on the GPU. This is the one key where the machines differ.
 
 Windows `~/.screenmind/settings.json`, whole file:

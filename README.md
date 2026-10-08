@@ -33,7 +33,7 @@ Based on [ayushh0110/ScreenMind](https://github.com/ayushh0110/ScreenMind). This
 - **Accessibility text.** Text of the focused window, read through the OS accessibility API.
 - **Browser URL.** The URL the browser reports, cleaned by `privacy/url_filter.py` before storage.
 - **OCR.** RapidOCR on ONNX Runtime, CPU only. It runs when the accessibility text is not real content.
-- **UI events (macOS and Windows).** Clicks and app switches by default. Typed text and clipboard are opt-in. Password fields are never recorded. Code: `screenmind/capture/ui_events/`.
+- **UI events (macOS and Windows).** Clicks, app switches, typed text and clipboard by default. Password fields are never recorded; secrets are redacted by the sensitive-data filter, but there is no PII detection yet. Code: `screenmind/capture/ui_events/`.
 - **Calls.** Zoom, Teams, Meet, Webex, Slack and Discord calls are tracked with start, end, app and room URL. Optional: Gemma transcribes the audio and writes a summary per call.
 
 The detailed map of what is collected per OS, and how, is [docs/architecture/capture.md](docs/architecture/capture.md).
@@ -234,7 +234,7 @@ The full description is in [architecture.md](architecture.md). The per-OS captur
                │ • grab / display │  │ recorder        │  │ • call detection │
                │ • pHash dedup    │  │ • clicks, apps  │  │ • transcription  │
                │ • window, a11y,  │  │ • text, clip    │  │   + summary      │
-               │   URL            │  │   (opt-in)      │  │   (optional)     │
+               │   URL            │  │                 │  │   (optional)     │
                └────────┬─────────┘  └────────┬────────┘  └────────┬─────────┘
                         │ queue               │                    │
                         ▼                     │                    │
@@ -307,8 +307,8 @@ The defaults below are the settings for every machine. Change one only when a ma
 | `ENCRYPTION_ENABLED` | `false` | Encrypt screenshots at rest |
 | `SENSITIVE_FILTER_ENABLED` | `true` | Redact credit cards, SSNs, API keys, passwords |
 | `CAPTURE_PAUSED` | `true` | Capture state, kept across restarts |
-| `UI_EVENTS_ENABLED` | `true` | Record clicks and app switches, plus typed text and clipboard if listed in `UI_EVENTS_TYPES` (macOS, Windows) |
-| `UI_EVENTS_TYPES` | `click,app_switch` | Which UI event types to record (`text`, `clipboard`, `window_focus` also available) |
+| `UI_EVENTS_ENABLED` | `true` | Record the UI event types listed in `UI_EVENTS_TYPES` (macOS, Windows) |
+| `UI_EVENTS_TYPES` | `click,app_switch,text,clipboard` | Which UI event types to record (`window_focus` also available) |
 | `EVENT_TRIGGERED_CAPTURE` | `true` | Capture right after app switches, clicks and typing pauses |
 | `SCREENMIND_LOG_LEVEL` | `INFO` | Log verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` (environment variable only, not `.env`) |
 | `SCREENMIND_LOG_FILE` | `<data dir>/screenmind.log` | Log file, written on every start (rotating, 1 MB × 3 backups; environment variable only) |

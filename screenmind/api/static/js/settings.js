@@ -101,13 +101,13 @@ async function renderSettings(el) {
 
   + '<div class="settings-card" id="ui-events-card"><div class="settings-card-header"><div><div class="settings-title">UI Events <span style="background:var(--accent-primary);color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px;vertical-align:middle">Beta</span></div><div class="settings-desc">Record clicks, typed text, app switches and clipboard through OS accessibility APIs. Gives the AI exact context for each screenshot.</div></div>'
   + _sw('ui-events-enabled', cfg.ui_events_enabled) + '</div>'
-  + '<div class="settings-note">Clicks and app switches are on by default. Typed text and clipboard are off by default, because they can hold private content. If you turn them on, password fields are never recorded, and the Sensitive Data Filter runs on all text. Paused capture and blocked apps stop recording too. Works on macOS and Windows.</div>'
+  + '<div class="settings-note">Clicks, app switches, typed text and clipboard are on by default. Typed text and clipboard can hold private content: password fields are never recorded, and the Sensitive Data Filter runs on all text. Paused capture and blocked apps stop recording too. Works on macOS and Windows.</div>'
   + '<div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px">'
   + [['click','Clicks'],['app_switch','App switches'],['window_focus','Window changes'],['text','Typed text'],['clipboard','Clipboard']].map(function(t) {
       var checked = (cfg.ui_events_types || '').split(',').indexOf(t[0]) >= 0 ? 'checked' : '';
       return '<label style="display:flex;align-items:center;gap:8px;font-size:0.82rem;color:var(--text-secondary);cursor:pointer"><input type="checkbox" class="ui-event-type-cb" value="' + t[0] + '" ' + checked + ' style="accent-color:var(--accent)"> ' + t[1] + '</label>';
     }).join('') + '</div>'
-  + '<div class="settings-toggle-row" style="margin-top:8px"><div><div class="settings-toggle-label">Capture on events</div><div class="settings-toggle-desc">Take a screenshot right after app switches, clicks and typing pauses (at most one every 3s)</div></div>'
+  + '<div class="settings-toggle-row" style="margin-top:8px"><div><div class="settings-toggle-label">Capture on events</div><div class="settings-toggle-desc">Take a screenshot right after app switches, clicks, typing pauses and copies (at most one every 3s)</div></div>'
   + _sw('event-triggered-capture', cfg.event_triggered_capture) + '</div>'
   + '<div id="ui-events-status" class="settings-note" style="margin-top:8px"></div></div>'
 

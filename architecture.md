@@ -170,7 +170,7 @@ Output (organized_text):
 
 ### 3.5 UI Events
 
-`capture/ui_events/`. macOS and Windows only. Clicks and app switches are on by default. Typed text, clipboard and window focus are opt-in. Password fields are never read.
+`capture/ui_events/`. macOS and Windows only. Clicks, app switches, typed text and clipboard are on by default. Window focus is opt-in. Password fields are never read.
 
 ```
 OS hook thread → queue → enricher thread → ui_events table

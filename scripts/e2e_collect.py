@@ -80,9 +80,9 @@ CHECKS = [
     ("browser_url", "Browser URL", {"macos": ["G8", "G9"], "windows": ["G7"]}),
     ("ui_click", "UI event: click with element role/name", {"macos": ["G20"], "windows": ["G20", "G25"]}),
     ("ui_app_switch", "UI event: app switch", {"macos": ["G20"], "windows": ["G20"]}),
-    # Typed text and clipboard are opt-in (G31); the check turns them on for its run
-    ("ui_text", "UI event: typed text (opt-in)", {"macos": ["G20", "G31"], "windows": ["G20", "G31"]}),
-    ("ui_clipboard", "UI event: clipboard (opt-in)", {"macos": ["G20", "G31"], "windows": ["G20", "G31"]}),
+    # Typed text and clipboard are on by default; no PII detection yet (G31)
+    ("ui_text", "UI event: typed text", {"macos": ["G20", "G31"], "windows": ["G20", "G31"]}),
+    ("ui_clipboard", "UI event: clipboard", {"macos": ["G20", "G31"], "windows": ["G20", "G31"]}),
     ("ui_linked", "UI events linked to frames", {"macos": ["G21", "G36"], "windows": ["G21", "G36"]}),
     ("redact_typed", "Typed secret is redacted", {"macos": [], "windows": []}),
     ("password_field", "Password field is not stored", {"macos": [], "windows": []}),

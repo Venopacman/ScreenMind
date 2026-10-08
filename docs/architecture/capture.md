@@ -23,7 +23,7 @@ Contents:
 
 ## 1. Data flow
 
-Three workers run side by side. `CaptureWorker` takes screenshots and reads window info, a11y text and the URL at the moment of the grab. `AnalysisWorker` picks frames from a queue, runs OCR and Gemma, and writes the results. `AudioWorker` watches for calls on its own thread. `UiEventRecorder` records clicks and app switches by default; it can be turned off.
+Three workers run side by side. `CaptureWorker` takes screenshots and reads window info, a11y text and the URL at the moment of the grab. `AnalysisWorker` picks frames from a queue, runs OCR and Gemma, and writes the results. `AudioWorker` watches for calls on its own thread. `UiEventRecorder` records clicks, app switches, typed text and the clipboard by default; it can be turned off.
 
 ```mermaid
 flowchart TB
@@ -191,7 +191,7 @@ SCK needs `pyobjc-framework-ScreenCaptureKit` (a macOS dependency in `pyproject.
 
 - Active: a "periodic" grab at `CAPTURE_INTERVAL` (default 10 s on every machine, range 10-120). With a longer interval, a "change" grab once 10 s passed since the last saved frame.
 - Idle: after 3 ticks in a row with no new frame, only the periodic grab. Once `CAPTURE_INTERVAL` has passed with no saved frame, every 5 s tick grabs until one is saved. So the interval only sets how soon after a save the grabs start; at 10 s that is the same as the active mode.
-- Event-driven, only with UI events on: `request_capture()` after an app switch (1.0 s delay), every click (1.5 s), a click into a text field included, Enter in a text field (0.5 s) or a page change (1.0 s). Requests within 3 s merge into one grab, and grabs are at least 3 s apart, so a burst of clicks is one frame. The merged grab takes the latest reason, but a click is never replaced: a click followed by a typing pause stays a `click` grab (`[event:click]` in the log).
+- Event-driven, only with UI events on: `request_capture()` after an app switch (1.0 s delay), every click (1.5 s), a click into a text field included, Enter in a text field (0.5 s), a page change (1.0 s) or a recorded clipboard copy (0.5 s). Requests within 3 s merge into one grab, and grabs are at least 3 s apart, so a burst of clicks is one frame. The merged grab takes the latest reason, but a click is never replaced: a click followed by a typing pause stays a `click` grab (`[event:click]` in the log).
 
 Every grab, including the periodic and the click ones, goes through dedup. A screen that does not change gets no new row (G4), and the duplicate JPEG is deleted at once. A click on an unchanged screen gives no frame; its event goes to the next frame of its app (4.7).
 
@@ -288,7 +288,7 @@ Known holes: Chrome ignores `AXManualAccessibility`. After a reboot, with no oth
 
 ### 4.7 UI events
 
-`screenmind/capture/ui_events/`. On by default (`UI_EVENTS_ENABLED=true`) with `UI_EVENTS_TYPES=click,app_switch`. Typed text (`text`), `clipboard` and `window_focus` are opt-in, because text and clipboard can hold private content (G31). A `settings.json` saved before this default keeps its own value.
+`screenmind/capture/ui_events/`. On by default (`UI_EVENTS_ENABLED=true`) with `UI_EVENTS_TYPES=click,app_switch,text,clipboard` (typed text and clipboard since 2026-10-08, the user's call). `window_focus` is opt-in. Text and clipboard can hold private content: the sensitive-data filter and the password-field rules apply, but there is no PII detection (G31). A `settings.json` that lists its own types keeps them.
 
 ```
 OS hook thread -> queue.SimpleQueue -> enricher thread -> ui_events table
@@ -313,7 +313,7 @@ OS hook thread -> queue.SimpleQueue -> enricher thread -> ui_events table
 **Shared recorder** (`UiEventRecorder`):
 
 - Front window polled every 0.5 s (`adapter().get_front_window()`). A new pid or app name is an `app_switch`. A title change with a new browser URL is a `window_focus`, even when `window_focus` is not in `UI_EVENTS_TYPES`.
-- Captures: every click asks for a grab (`request_capture("click", 1.5)`), a click into a text field too. So do an app switch, a page change and Enter in a text field. See 4.1 for the merge. A click grab is deduped like any other.
+- Captures: every click asks for a grab (`request_capture("click", 1.5)`), a click into a text field too. So do an app switch, a page change, a typing pause or Enter in a text field, and a recorded clipboard copy (0.5 s). See 4.1 for the merge. A click grab is deduped like any other.
 - Typing is kept only when the focused element is a text input (`TEXT_INPUT_ROLES`) and is not read-only. `TextBuffer` groups keys per field. Enter, Tab, arrows, Escape, a click, an app switch or 2 s idle end a chunk. Max 500 chars.
 - Password fields store `[password field]`, never the text.
 - Nothing is recorded while capture is paused or the app is in `BLOCKED_APPS`. These skips are counted (`status()["skipped"]`).
@@ -473,7 +473,7 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G27 | No UI events backend, no browser URL, no mic info on Linux. | Linux | new |
 | G28 | macOS may show a periodic "still recording your screen" reminder; not seen yet. | macOS | [sck-capture.md](../backlog/sck-capture.md) "macOS still recording your screen reminder" |
 | G29 | Wayland hides window positions: no window list, no active display, no per-display labels. | Linux | [multi-display-capture.md](../backlog/multi-display-capture.md) (Wayland note) |
-| G31 | Typed text and clipboard are opt-in, because there is no PII detection before they are stored. | both | [ui-events.md](../backlog/ui-events.md) "PII detection before storing typed text and clipboard" |
+| G31 | Typed text and clipboard are on by default (2026-10-08), with no PII detection before they are stored. Only the sensitive-data filter (cards, SSNs, API keys, JWTs, passwords) and the password-field rules apply. | both | [ui-events.md](../backlog/ui-events.md) "PII detection before storing typed text and clipboard" |
 | G33 | `performance_mode=balanced` starts llama-server with `-ngl 15`. On the Windows laptop (8 GB GPU) Gemma then runs mostly on the CPU: about 26 s per new frame, about 8 cores busy, and about half the frames are skipped as backlog while the user is active. Parked: the long-term aim is the lowest resource use. | Windows | [windows.md](../backlog/windows.md) "G33" (parked) |
 | G34 | Electron apps (Claude desktop): the Windows walker reads the web Document, and buttons inside it are kept ("Copy", "Fork from here", "Hide sidebar"). The type filter covers native controls only. Parked: telling labels from content is left to the LLM. | Windows | [windows.md](../backlog/windows.md) "G34" (parked) |
 | G35 | Windows shell surfaces are saved as activities: Task View, Task Switching, Start, Search, notifications. Their a11y text is only "Task Switching \| DesktopWindowXamlSource". Parked until it hurts. | Windows | [windows.md](../backlog/windows.md) "G35" (parked) |

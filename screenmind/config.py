@@ -227,18 +227,19 @@ class Settings(BaseSettings):
     # ── UI Events (accessibility) ───────────────────────────────────────
     ui_events_enabled: bool = Field(
         default=True,
-        description="Record clicks, app switches and (opt-in) typed text and clipboard via OS "
+        description="Record clicks, app switches, typed text and clipboard via OS "
                     "accessibility APIs. macOS and Windows.",
     )
-    # Typed text and clipboard hold private content, so they stay opt-in
-    # until there is PII detection (docs/backlog/ui-events.md).
+    # Typed text and clipboard are on by default (the user's call, 2026-10-08).
+    # They can hold private content: the sensitive-data filter and the
+    # password-field rules apply, but there is no PII detection yet (G31).
     ui_events_types: str = Field(
-        default="click,app_switch",
+        default="click,app_switch,text,clipboard",
         description="Comma-separated UI event types to record: click, app_switch, window_focus, text, clipboard",
     )
     event_triggered_capture: bool = Field(
         default=True,
-        description="Take a screenshot right after app switches, clicks and typing pauses "
+        description="Take a screenshot right after app switches, clicks, typing pauses and copies "
                     "(only when ui_events_enabled is on)",
     )
 

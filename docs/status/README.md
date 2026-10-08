@@ -44,7 +44,7 @@ A run takes about 3 to 5 minutes. Most of it is waiting for Gemma.
 
 ## What a run does
 
-1. Starts ScreenMind with a temp data dir and a free port in 7900-7999. It never uses `~/.screenmind` or port 7777, so the main instance is not touched. For this run only, it turns on all UI event types, including typed text and clipboard. Those two are opt-in by default (G31), so the rows marked "(opt-in)" say whether they work when turned on.
+1. Starts ScreenMind with a temp data dir and a free port in 7900-7999. It never uses `~/.screenmind` or port 7777, so the main instance is not touched. For this run only, it turns on all UI event types, `window_focus` included.
 2. Before startup, puts 30-day-old rows into the temp DB, to test retention.
 3. Opens `https://example.com/` in the default browser (and in `--browsers`, if given).
 4. Opens a scratch text file in TextEdit or Notepad.
@@ -83,8 +83,8 @@ Results, one row per data point:
 | Browser URL (name) | A frame of that browser has `active_url` on example.com. One row per browser seen. |
 | UI event: click | A `click` event in the editor, with an element role. |
 | UI event: app switch | An `app_switch` event to the editor. |
-| UI event: typed text (opt-in) | A `text` event with the typed marker. |
-| UI event: clipboard (opt-in) | A `clipboard` event with the clipboard marker. |
+| UI event: typed text | A `text` event with the typed marker. |
+| UI event: clipboard | A `clipboard` event with the clipboard marker. |
 | UI events linked to frames | `activities.user_actions` is set on some frames. |
 | Typed secret is redacted | The value after `password:` is in no text column of any table. |
 | Password field is not stored | The password box secret is in no text column. `[password field]` was recorded instead. |
