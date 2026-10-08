@@ -336,15 +336,16 @@ flowchart TB
   <h4>Timing (<code>CaptureWorker.run()</code>)</h4>
   <p>The loop wakes every 0.5 s and acts about every 5 s.</p>
   <ul>
-    <li><b>Active:</b> a "change" grab if 10 s passed since the last saved frame. A "periodic" grab at <code>CAPTURE_INTERVAL</code> (default 40 s, range 10-120).</li>
-    <li><b>Idle:</b> after 3 ticks in a row with no new frame, only the periodic grab.</li>
-    <li><b>Event-driven</b>, only with UI events on: <code>request_capture()</code> after an app switch (1.0 s delay), click (1.5 s), Enter in a text field (0.5 s) or a page change (1.0 s). Requests within 3 s merge into one grab; grabs are at least 3 s apart.</li>
+    <li><b>Active:</b> a "periodic" grab at <code>CAPTURE_INTERVAL</code> (default 10 s on every machine, range 10-120). With a longer interval, a "change" grab once 10 s passed since the last saved frame.</li>
+    <li><b>Idle:</b> after 3 ticks in a row with no new frame, only the periodic grab. Once <code>CAPTURE_INTERVAL</code> has passed with no saved frame, every 5 s tick grabs until one is saved. So the interval only sets how soon after a save the grabs start; at 10 s that is the same as the active mode.</li>
+    <li><b>Event-driven</b>, only with UI events on: <code>request_capture()</code> after an app switch (1.0 s delay), every click (1.5 s), a click into a text field included, Enter in a text field (0.5 s) or a page change (1.0 s). Requests within 3 s merge into one grab and grabs are at least 3 s apart, so a burst of clicks is one frame. The merged grab takes the latest reason, but a click is never replaced: a click followed by a typing pause stays a <code>click</code> grab (<code>[event:click]</code> in the log).</li>
   </ul>
-  <p>Every grab, including the periodic one, goes through dedup. A screen that does not change gets no new row (G4).</p>
+  <p>Every grab, including the periodic and the click ones, goes through dedup. A screen that does not change gets no new row (G4), and the duplicate JPEG is deleted at once. A click on an unchanged screen gives no frame; its event goes to the next frame of its app (4.7).</p>
+  <div class="note"><p><b>Cost</b>, measured on the Windows laptop on 2026-10-08 (2.4 active hours, one display, already at 10 s): 97 frames per active hour, 256 KB per JPEG (about 25 MB per active hour). 10 s instead of 40 s adds at most 9% frames (the ones saved 20-40 s after the previous one). Of 207 clicks, 81 were in a burst with an earlier click, 24 were on a screen dedup found unchanged, and 9 went into a text field (no grab before 2026-10-08).</p></div>
   <p><b>Skips.</b> A display whose top app is in <code>BLOCKED_APPS</code> is not grabbed (exact name, lowercase). <code>AUTO_PAUSE_HEAVY_APPS</code> skips the whole tick when the focused app name contains a <code>HEAVY_APPS</code> substring.</p>
 
   <h3 id="d-dedup">4.2 Dedup</h3>
-  <p><code>capture/dedup.py</code>. One <code>ScreenDeduplicator</code> per display. Hamming distance of <code>imagehash.phash</code> to the last kept frame: 8 or less is a duplicate. The JPEG is deleted and no row is written.</p>
+  <p><code>capture/dedup.py</code>. One <code>ScreenDeduplicator</code> per display. Hamming distance of <code>imagehash.phash</code> to the last kept frame: 8 or less is a duplicate. The JPEG is deleted and no row is written. This holds for every grab, click-triggered ones included.</p>
   <p>The analysis worker has a second, per-app cache keyed by <code>(app, title[:100])</code>: distance 3 or less is "identical" (copy the last analysis, skip OCR and Gemma); 4-10 and younger than 240 s (chat apps) or 420 s (others) is "minor" (run OCR, reuse Gemma's analysis); more is "full".</p>
 
   <h3 id="d-windows">4.3 Window and app info</h3>
@@ -460,6 +461,7 @@ flowchart TB
   <h4>Shared recorder (<code>UiEventRecorder</code>)</h4>
   <ul>
     <li>Front window polled every 0.5 s. New pid or app = <code>app_switch</code>. Title change with a new browser URL = <code>window_focus</code>, even when that type is off.</li>
+    <li>Captures: every click asks for a grab (<code>request_capture("click", 1.5)</code>), a click into a text field too. So do an app switch, a page change and Enter in a text field. See 4.1 for the merge. A click grab is deduped like any other.</li>
     <li>Typing kept only in text inputs (<code>TEXT_INPUT_ROLES</code>) that are not read-only. <code>TextBuffer</code> groups keys per field; Enter, Tab, arrows, Escape, a click, an app switch or 2 s idle end a chunk; max 500 chars.</li>
     <li>Password fields store <code>[password field]</code>.</li>
     <li>Nothing is recorded while capture is paused or in <code>BLOCKED_APPS</code>. Skips are counted (<code>status()["skipped"]</code>).</li>
@@ -611,7 +613,7 @@ flowchart TB
     <tbody>
       <tr data-s="mac"><td class="gid">G1</td><td>Grabs from Claude-started processes: SCK never answers, mss hangs 30 s. Only <code>screencapture</code> works, so dev instances test the fallback only. They pay one 3 s stall at start; the 2 probes after it cost nothing.</td><td><span class="chip mac">macOS</span></td><td>sck-capture.md "Find out why grabs hang"</td></tr>
       <tr data-s="both"><td class="gid">G3</td><td>A blocked app skips the whole display. No per-window exclusion (SCK <code>SCContentFilter</code> could do it).</td><td><span class="chip both">both</span> (fix is macOS-only)</td><td>sck-capture.md "Leave windows out of screenshots"</td></tr>
-      <tr data-s="both" data-new="1"><td class="gid">G4</td><td>The periodic grab is deduped like the others. A static screen gets no rows, so time on it is not visible. The docstring says it forces a capture.</td><td><span class="chip both">both</span></td><td><span class="chip new">new</span></td></tr>
+      <tr data-s="both" data-new="1"><td class="gid">G4</td><td>The periodic grab is deduped like the others. A static screen gets no rows, so time on it is not visible.</td><td><span class="chip both">both</span></td><td><span class="chip new">new</span></td></tr>
       <tr data-s="lnx"><td class="gid">G5</td><td>No per-display app lookup on Linux. Unfocused displays have no app name.</td><td><span class="chip lnx">Linux</span></td><td>multi-display-capture.md "Linux: no per-display app lookup"</td></tr>
       <tr data-s="both"><td class="gid">G6</td><td>The capture side knows a display has no app window but does not pass that on. Desktops with widgets still go to Gemma.</td><td><span class="chip both">both</span></td><td>ui-events.md "Capture side should mark..."</td></tr>
       <tr data-s="both" data-new="1"><td class="gid">G7</td><td>a11y text and the URL are read only for the focused display. Other displays get OCR only and no URL, though macOS <code>get_window_url()</code> could read it.</td><td><span class="chip both">both</span></td><td><span class="chip new">new</span></td></tr>
@@ -654,7 +656,6 @@ flowchart TB
       <tr><td>ui-events.md "Windows: no browser URL": no <code>get_browser_url()</code>, so <code>active_url</code> and <code>ui_events.url</code> are NULL on Windows.</td><td><code>WindowsAdapter.get_browser_url()</code> exists since <code>16f933a</code> (UIA <code>Document</code> value). Only <code>meetings.url</code> is missing (G16).</td></tr>
       <tr><td>setup-ocr-and-upstream-prs.md "OCR known limits": EasyOCR <code>canvas_size</code>, <code>OCR_CANVAS_SIZE</code>, <code>_merge_readings</code>, extra Readers.</td><td>RapidOCR since <code>4cb9030</code>. <code>OCR_CANVAS_SIZE</code> and <code>_merge_readings</code> do not exist. One recognizer per frame (G14).</td></tr>
       <tr><td>docs/plans/ui-events.md Windows notes: a11y capped at 20,000 chars.</td><td>300,000 chars on both OSes since <code>87b058d</code>. Only the Gemma prompt is trimmed (8,000).</td></tr>
-      <tr><td><code>capture_worker.py</code> <code>run()</code> docstring: forces a capture every 30 s even with no change.</td><td><code>CAPTURE_INTERVAL</code> defaults to 40 s, and the periodic grab is deduped too (G4).</td></tr>
     </tbody>
   </table></div>
 </section>

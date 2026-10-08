@@ -238,11 +238,11 @@ class TestRecorder:
         assert (e.x, e.y) == (10, 20)
         cw.request_capture.assert_called_once_with("click", 1.5)
 
-    def test_click_in_text_field_does_not_trigger_capture(self, rec):
+    def test_click_in_text_field_triggers_capture(self, rec):
         r, b, db, cw = rec
         b.element = FIELD
         r._tick(RawEvent(kind="mouse_down", ts=101.0, x=1, y=1), 101.0)
-        cw.request_capture.assert_not_called()
+        cw.request_capture.assert_called_once_with("click", 1.5)
 
     def test_click_app_from_element_pid(self, rec):
         r, b, db, cw = rec
@@ -599,6 +599,29 @@ class TestCaptureTriggers:
         for _ in range(5):
             worker.request_capture("click", delay=10)
         assert worker._pending_trigger[0] <= first + 3.0 + 1e-6
+
+    @pytest.mark.parametrize("reasons", [
+        ["click", "typing_pause"],
+        ["app_switch", "click", "page_change"],
+    ])
+    def test_merge_keeps_click(self, worker, reasons):
+        """A later request in the same merge must not hide that a click
+        asked for this grab ([event:click] in the log)."""
+        for reason in reasons:
+            worker.request_capture(reason, delay=0.0)
+        assert worker._take_due_trigger() == "click"
+
+    def test_merge_without_click_takes_latest_reason(self, worker):
+        worker.request_capture("app_switch", delay=0.0)
+        worker.request_capture("page_change", delay=0.0)
+        assert worker._take_due_trigger() == "page_change"
+
+    def test_rate_limit_keeps_click(self, worker):
+        worker._last_save_time = time.time()
+        worker.request_capture("click", delay=0.0)
+        assert worker._take_due_trigger() is None
+        worker.request_capture("typing_pause", delay=0.0)
+        assert worker._pending_trigger[2] == "click"
 
     def test_paused_ignores_requests(self, worker):
         worker._paused = True

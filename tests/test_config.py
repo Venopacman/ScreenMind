@@ -5,7 +5,7 @@ from screenmind.config import Settings
 
 def test_default_settings():
     s = Settings(data_dir="/tmp/screenmind_test")
-    assert s.capture_interval == 40
+    assert s.capture_interval == 10
     assert s.screenshot_quality == 70
     assert s.api_port == 7777
 
@@ -88,14 +88,14 @@ def test_saving_the_default_value_removes_the_key(tmp_path):
     be frozen into settings.json, or they miss later default changes."""
     import json
     s = Settings(data_dir=str(tmp_path))
-    s.save_runtime_overrides({"capture_interval": 10, "performance_mode": "balanced",
+    s.save_runtime_overrides({"capture_interval": 25, "performance_mode": "balanced",
                               "sensitive_filter_types": "credit_card,ssn,api_key,jwt,password"})
-    assert json.loads(s.settings_json_path.read_text()) == {"capture_interval": 10}
-    assert s.capture_interval == 10
+    assert json.loads(s.settings_json_path.read_text()) == {"capture_interval": 25}
+    assert s.capture_interval == 25
 
-    s.save_runtime_overrides({"capture_interval": 40})
+    s.save_runtime_overrides({"capture_interval": 10})
     assert json.loads(s.settings_json_path.read_text()) == {}
-    assert s.capture_interval == 40
+    assert s.capture_interval == 10
 
 
 def test_saving_keeps_unknown_keys_and_compares_with_env_file(tmp_path, monkeypatch):
@@ -106,9 +106,9 @@ def test_saving_keeps_unknown_keys_and_compares_with_env_file(tmp_path, monkeypa
     env.write_text("CAPTURE_INTERVAL=25\n")
     s = Settings(_env_file=str(env), data_dir=str(tmp_path))
     s.settings_json_path.write_text(json.dumps({"bookmark_hotkey": "ctrl+shift+b"}))
-    s.save_runtime_overrides({"capture_interval": 40, "retention_days": "7"})
+    s.save_runtime_overrides({"capture_interval": 10, "retention_days": "7"})
     assert json.loads(s.settings_json_path.read_text()) == {
-        "bookmark_hotkey": "ctrl+shift+b", "capture_interval": 40}
+        "bookmark_hotkey": "ctrl+shift+b", "capture_interval": 10}
 
 
 def test_loading_does_not_rewrite_settings_json(tmp_path):
@@ -135,7 +135,7 @@ def test_non_defaults_name_their_source(tmp_path, monkeypatch):
     env.write_text("SCREENSHOT_QUALITY=50\n")
     s = Settings(_env_file=str(env), data_dir=str(tmp_path))
     s.settings_json_path.write_text(json.dumps({
-        "capture_interval": 10, "performance_mode": "balanced",  # the default: not listed
+        "capture_interval": 25, "performance_mode": "balanced",  # the default: not listed
         "capture_paused": False, "setup_complete": True,  # runtime state: not listed
     }))
     s.load_runtime_overrides()
@@ -144,9 +144,9 @@ def test_non_defaults_name_their_source(tmp_path, monkeypatch):
     assert found == {
         "retention_days": (3, "env"),
         "screenshot_quality": (50, ".env"),
-        "capture_interval": (10, "settings.json"),
+        "capture_interval": (25, "settings.json"),
     }
-    assert "capture_interval=10 (settings.json)" in s.describe_non_defaults()
+    assert "capture_interval=25 (settings.json)" in s.describe_non_defaults()
 
 
 def test_describe_non_defaults_none_and_long_values(monkeypatch):

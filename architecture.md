@@ -94,7 +94,7 @@ Two models:
 |---|---|
 | **Method** | macOS: ScreenCaptureKit, then `screencapture`, then mss. Windows: mss. Linux: mss on X11, grim or XDG Portal on Wayland |
 | **Displays** | One grab per display per tick (`CAPTURE_ALL_MONITORS`, on by default) |
-| **Timing** | Acts about every 5 s. A change grab if 10 s passed since the last saved frame. A periodic grab every `CAPTURE_INTERVAL` (default 40 s) |
+| **Timing** | Acts about every 5 s. A change grab if 10 s passed since the last saved frame. A periodic grab every `CAPTURE_INTERVAL` (default 10 s) |
 | **Event-driven** | With UI events on: a grab right after an app switch, click, Enter in a text field or page change |
 | **Deduplication** | pHash per display (`capture/dedup.py`). Hamming distance 8 or less is a duplicate: the JPEG is deleted, no row is written |
 | **Window info** | App name and window title per display |

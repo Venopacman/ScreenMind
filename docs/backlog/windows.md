@@ -24,7 +24,7 @@ Status: open (the user's step)
 Since `c377a8c` (G39) the code defaults are the shared settings, and the dashboard stores only values that differ from them. Existing files still hold the defaults of the day they were written, and ScreenMind never rewrites them at startup. Clean them up once, with ScreenMind stopped (it writes `settings.json` on pause and resume), then start it and check the log line "Settings that differ from the defaults" in `~/.screenmind/screenmind.log`.
 
 The user decided on 2026-10-08 which non-default values both machines keep:
-- `capture_interval: 10` (not the default 40): denser data for the workflows record.
+- `capture_interval: 10`: the code default since 2026-10-08, so the key has no effect once the main instance runs that code, and can go then.
 - `ui_events_types: "click,app_switch,text,clipboard"` (not the default `click,app_switch`): typed text and clipboard stay on, with the sensitive-data filter and password redaction. G31 stays open.
 - `performance_mode`: Windows follows the default (`balanced`). The Mac keeps `maximum` on purpose: with `balanced`, Apple Silicon ran Gemma on about 4 CPU cores and took 10.5 s per frame against 6.2 s on the GPU. This is the one key where the machines differ.
 

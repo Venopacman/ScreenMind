@@ -297,7 +297,7 @@ The defaults below are the settings for every machine. Change one only when a ma
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CAPTURE_INTERVAL` | `40` | Seconds between periodic captures |
+| `CAPTURE_INTERVAL` | `10` | Seconds between periodic captures (10-120). Every grab is deduped, so a screen that does not change gets no new frame |
 | `ANALYSIS_MODE` | `fast` | `fast` (~12s), `balanced` (~40s), or `merged` (~76s, accurate) |
 | `PERFORMANCE_MODE` | `balanced` | GPU layers: `minimal` / `balanced` / `maximum` |
 | `BLOCKED_APPS` | *(empty)* | Comma-separated apps to never capture |

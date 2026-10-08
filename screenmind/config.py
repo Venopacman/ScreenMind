@@ -111,7 +111,7 @@ class Settings(BaseSettings):
 
     # ── Capture ──────────────────────────────────────────────────────────
     capture_interval: int = Field(
-        default=40,
+        default=10,
         description="Seconds between screenshot captures",
         ge=10,
         le=120,

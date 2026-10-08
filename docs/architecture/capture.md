@@ -189,17 +189,19 @@ SCK needs `pyobjc-framework-ScreenCaptureKit` (a macOS dependency in `pyproject.
 
 **Timing** (`CaptureWorker.run()`). The loop wakes every 0.5 s and acts about every 5 s:
 
-- Active: a "change" grab if 10 s passed since the last saved frame. A "periodic" grab at `CAPTURE_INTERVAL` (default 40 s, range 10-120).
-- Idle: after 3 ticks in a row with no new frame, only the periodic grab.
-- Event-driven, only with UI events on: `request_capture()` after an app switch (1.0 s delay), click (1.5 s), Enter in a text field (0.5 s) or a page change (1.0 s). Requests within 3 s merge into one grab, and grabs are at least 3 s apart.
+- Active: a "periodic" grab at `CAPTURE_INTERVAL` (default 10 s on every machine, range 10-120). With a longer interval, a "change" grab once 10 s passed since the last saved frame.
+- Idle: after 3 ticks in a row with no new frame, only the periodic grab. Once `CAPTURE_INTERVAL` has passed with no saved frame, every 5 s tick grabs until one is saved. So the interval only sets how soon after a save the grabs start; at 10 s that is the same as the active mode.
+- Event-driven, only with UI events on: `request_capture()` after an app switch (1.0 s delay), every click (1.5 s), a click into a text field included, Enter in a text field (0.5 s) or a page change (1.0 s). Requests within 3 s merge into one grab, and grabs are at least 3 s apart, so a burst of clicks is one frame. The merged grab takes the latest reason, but a click is never replaced: a click followed by a typing pause stays a `click` grab (`[event:click]` in the log).
 
-Every grab, including the periodic one, goes through dedup. A screen that does not change gets no new row. See G4.
+Every grab, including the periodic and the click ones, goes through dedup. A screen that does not change gets no new row (G4), and the duplicate JPEG is deleted at once. A click on an unchanged screen gives no frame; its event goes to the next frame of its app (4.7).
+
+Cost, measured on the Windows laptop on 2026-10-08 (2.4 active hours, one display, already at 10 s): 97 frames per active hour, 256 KB per JPEG (about 25 MB per active hour). 10 s instead of 40 s adds at most 9% frames (the ones saved 20-40 s after the previous one). Of 207 clicks, 81 were in a burst with an earlier click, 24 were on a screen dedup found unchanged, and 9 went into a text field (no grab before 2026-10-08).
 
 **Skips.** A display whose top app is in `BLOCKED_APPS` is not grabbed (exact name match, lowercase). `AUTO_PAUSE_HEAVY_APPS` skips the whole tick when the focused app name contains a `HEAVY_APPS` substring (games, video editors).
 
 ### 4.2 Dedup
 
-`capture/dedup.py`. One `ScreenDeduplicator` per display. It compares the `imagehash.phash` of the new frame with the last kept one. Hamming distance 8 or less is a duplicate: the JPEG is deleted and no row is written.
+`capture/dedup.py`. One `ScreenDeduplicator` per display. It compares the `imagehash.phash` of the new frame with the last kept one. Hamming distance 8 or less is a duplicate: the JPEG is deleted and no row is written. This holds for every grab, click-triggered ones included.
 
 The analysis worker has a second, per-app cache keyed by `(app, title[:100])`:
 
@@ -311,6 +313,7 @@ OS hook thread -> queue.SimpleQueue -> enricher thread -> ui_events table
 **Shared recorder** (`UiEventRecorder`):
 
 - Front window polled every 0.5 s (`adapter().get_front_window()`). A new pid or app name is an `app_switch`. A title change with a new browser URL is a `window_focus`, even when `window_focus` is not in `UI_EVENTS_TYPES`.
+- Captures: every click asks for a grab (`request_capture("click", 1.5)`), a click into a text field too. So do an app switch, a page change and Enter in a text field. See 4.1 for the merge. A click grab is deduped like any other.
 - Typing is kept only when the focused element is a text input (`TEXT_INPUT_ROLES`) and is not read-only. `TextBuffer` groups keys per field. Enter, Tab, arrows, Escape, a click, an app switch or 2 s idle end a chunk. Max 500 chars.
 - Password fields store `[password field]`, never the text.
 - Nothing is recorded while capture is paused or the app is in `BLOCKED_APPS`. These skips are counted (`status()["skipped"]`).
@@ -449,7 +452,7 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 |---|---|---|---|
 | G1 | Grabs from Claude-started processes: SCK never answers, mss hangs 30 s. Only `screencapture` works, so dev instances test the fallback only. They pay one 3 s stall at start; the 2 probes after it cost nothing. | macOS | [sck-capture.md](../backlog/sck-capture.md) "Find out why grabs hang" |
 | G3 | A blocked app skips the whole display. No per-window exclusion (SCK `SCContentFilter` could do it). | both (fix is macOS-only) | [sck-capture.md](../backlog/sck-capture.md) "Leave windows out of screenshots" |
-| G4 | The "periodic" grab is deduped like the others. A static screen (reading a long page) gets no rows, so time on it is not visible. The docstring says it forces a capture. | both | new |
+| G4 | The "periodic" grab is deduped like the others. A static screen (reading a long page) gets no rows, so time on it is not visible. | both | new |
 | G5 | No per-display app lookup on Linux. Unfocused displays have no app name. | Linux | [multi-display-capture.md](../backlog/multi-display-capture.md) "Linux: no per-display app lookup" |
 | G6 | The capture side knows a display has no app window but does not pass that on. Desktops with widgets still go to Gemma. | both | [ui-events.md](../backlog/ui-events.md) "Capture side should mark..." |
 | G7 | a11y text and the browser URL are read only for the focused display. Other displays get OCR only and no URL, even though macOS `get_window_url()` could read it. | both | new |
@@ -489,7 +492,6 @@ The code wins in each case below. Backlog files belong to other sessions, so the
 | [ui-events.md](../backlog/ui-events.md) "Windows: no browser URL": `WindowsAdapter` has no `get_browser_url()`, so `active_url` and `ui_events.url` are NULL on Windows. | `WindowsAdapter.get_browser_url()` exists since `16f933a`. It reads the page's UIA `Document` value. Windows has `active_url` and `ui_events.url`. Only `meetings.url` is missing (G16). |
 | [setup-ocr-and-upstream-prs.md](../backlog/setup-ocr-and-upstream-prs.md) "OCR known limits": EasyOCR `canvas_size`, `OCR_CANVAS_SIZE`, `_merge_readings`, extra `Reader`s. | OCR is RapidOCR since `4cb9030`. `OCR_CANVAS_SIZE` and `_merge_readings` do not exist. One recognizer per frame (G14). |
 | [docs/plans/ui-events.md](../plans/ui-events.md) Windows notes: a11y total capped at 20,000 chars. | 300,000 chars on both OSes since `87b058d`. Only the Gemma prompt is trimmed (8,000 chars). |
-| `capture_worker.py` `run()` docstring: forces a capture every 30 s even with no change. | `CAPTURE_INTERVAL` defaults to 40 s, and the periodic grab is deduped too (G4). |
 
 ## 10. How to update
 

@@ -419,8 +419,8 @@ class UiEventRecorder:
                       element_name=element.name if element else None,
                       element_value=element.value if element else None,
                       x=raw.x, y=raw.y, url=url)
-        if not (element and element.is_text_input):
-            self._trigger("click")
+        # Every click asks for a frame, a click into a text field too
+        self._trigger("click")
 
     def _on_key(self, raw: RawEvent, now: float):
         if raw.shortcut and raw.shortcut_char in ("c", "x"):

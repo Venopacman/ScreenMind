@@ -450,6 +450,29 @@ class TestCaptureAllMonitors:
         assert second == []
         assert worker._consecutive_skips == 1
 
+    @pytest.mark.asyncio
+    async def test_click_on_unchanged_screen_saves_nothing(self, tmp_path):
+        """A click grab is deduped like any other: an unchanged screen gives
+        no frame, and the duplicate JPEGs are deleted at once."""
+        tops = {0: ("Google Chrome", "Meet"), 1512: ("Claude", "Claude")}
+        worker, patches = self._make_worker(tmp_path, tops, active=self.DELL)
+        try:
+            await worker._capture_tick()
+            first = await self._drain(worker)
+            frames = {i.filepath.name: i.image for i in first}
+            worker._screen.capture.side_effect = lambda monitor=None: (
+                tmp_path / f"{monitor['left']}.jpg", frames[f"{monitor['left']}.jpg"]
+            )
+            await worker._capture_tick(trigger="click")
+            clicked = await self._drain(worker)
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert clicked == []
+        assert worker._consecutive_skips == 1
+        assert not (tmp_path / "1512.jpg").exists() and not (tmp_path / "0.jpg").exists()
+
 
 class TestBacklogSkip:
     """Frames too old to analyze keep what was read at capture time."""

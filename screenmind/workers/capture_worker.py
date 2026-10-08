@@ -90,8 +90,10 @@ class CaptureWorker:
         """
         Main capture loop.
         Smart polling: checks every 5s, saves only on content change.
-        Forces a capture every 30s (capture_interval) even if no change.
-        Idle detection: if screen unchanged for 3+ checks, extends poll to 30s.
+        A periodic grab every capture_interval (default 10s), deduped like
+        the others, so an unchanged screen gets no new frame.
+        Idle detection: after 3+ unchanged checks, only the periodic grab.
+        UI events request extra grabs, deduped too.
         """
         self._running = True
         logger.info(
@@ -326,7 +328,9 @@ class CaptureWorker:
 
         Requests that arrive close together are merged: each new one pushes
         the capture back (so the screen settles), but never more than
-        EVENT_MERGE_WINDOW_S after the first request.
+        EVENT_MERGE_WINDOW_S after the first request. The merged request
+        takes the latest reason, except that a click is never replaced, so
+        the log shows which frames clicks asked for.
         """
         if self._paused:
             return
@@ -335,9 +339,9 @@ class CaptureWorker:
             if self._pending_trigger is None:
                 self._pending_trigger = (now + delay, now, reason)
             else:
-                _, first, _ = self._pending_trigger
+                _, first, pending = self._pending_trigger
                 due = min(now + delay, first + EVENT_MERGE_WINDOW_S)
-                self._pending_trigger = (due, first, reason)
+                self._pending_trigger = (due, first, "click" if pending == "click" else reason)
 
     def _trigger_due(self) -> bool:
         with self._trigger_lock:
