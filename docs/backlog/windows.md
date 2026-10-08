@@ -75,16 +75,20 @@ Open: moving capture off the event loop if the logs still show stalls (step 4), 
 Refs: `platform_support/windows.py` `UiaWorker`, `run_uia()`; `screenmind/watchdog.py`; `capture/ui_events/windows.py`; `capture/ui_events/recorder.py` `restart()`; [uptime.md](../plans/uptime.md).
 
 ### dev-instance.sh crashes on Windows without a console
-Status: open
+Status: fixed 2026-10-08 (`c5e2598`)
 
 Started with stdout redirected (from a Claude session, a scheduler, a pipe), `setup_llama.ensure_llama_server()` prints box-drawing characters to a cp1252 stdout and dies with `UnicodeEncodeError`. When stdin looks like a TTY, it offers to download llama-server instead, which a dev instance must never do (it shares the main one, `LLAMA_SERVER_SHARED`). Workaround (G37 session, 2026-10-08): `PYTHONIOENCODING=utf-8 ... scripts/dev-instance.sh </dev/null`. Fix: plain ASCII or a UTF-8-safe writer for that output, and no interactive prompt when `llama_server_shared` is set.
+
+Fixed: with `llama_server_shared`, `ensure_llama_server()` only logs and returns: no lookup, prompt or download, and `main()` adopts the shared server (before, a dev instance logged "Starting without Gemma 4" with it up). `setup_llama` prints ASCII, and `run()` sets stdout to `errors="backslashreplace"`. Live: `scripts/dev-instance.sh </dev/null > dev.log 2>&1` without `PYTHONIOENCODING` starts and analyzes. The cause of the prompt: a stdin of NUL (`</dev/null`) is a TTY to `isatty()` on Windows.
 
 Refs: `screenmind/setup_llama.py` `ensure_llama_server()`, `scripts/dev-instance.sh`, `73285fa`.
 
 ### A normal stop waits for a running Gemma call
-Status: open
+Status: fixed 2026-10-08 (`5e9dcef`)
 
 On `/api/shutdown`, `asyncio.run` waits for analysis calls still running in the default executor. Live (G37, 2026-10-08) a stop took about 40 s for that reason. A call over 45 s now ends in the forced exit (code 3), and the frame stays `pending` for backfill. Cancel or abandon the analysis executor on shutdown so stops are fast and exit 0.
+
+Fixed: OCR and Gemma calls run on a one-thread daemon executor (`workers/daemon_executor.py`) that a stop abandons. The cancelled frame keeps `pending`. Live, dev instance stopped during "Processing #": before 24.8 s, exit 0 (the call was short); after 1.2 s, exit 0 (twice), frame `pending`. The abandoned request still runs to its end on llama-server; a shared server stays busy that long.
 
 Refs: `workers/analysis_worker.py` (`run_in_executor` calls), `screenmind/main.py`, `screenmind/watchdog.py` `start_shutdown_deadline()`.
 
