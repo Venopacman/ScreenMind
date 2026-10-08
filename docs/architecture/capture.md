@@ -375,7 +375,9 @@ Everything lives under `DATA_DIR` (default `~/.screenmind`). Dev instances use `
 |---|---|
 | `screenmind.db` | SQLite, WAL mode, FTS5 |
 | `screenshots/YYYY-MM-DD/HH-MM-SS_mmm[_mN].jpg` | JPEG frames. `_mN` is the mss monitor index when all displays are grabbed. |
-| `settings.json` | Runtime overrides from the dashboard |
+| `settings.json` | Runtime overrides from the dashboard. Only values that differ from the default (or `.env`) are stored, so the rest follow later default changes. A file written before `c377a8c` can still hold defaults; they shrink on the next save. |
+| `screenmind.log`, `.1`-`.3` | Log of every app start, console or not (`main.run()`), rotating at 1 MB, INFO. Starts with "ScreenMind <version> starting" and "Settings that differ from the defaults: ..." with each value's source. `SCREENMIND_LOG_FILE` moves it. |
+| `crash.log` | Traceback of an error before logging starts, only for a start without stderr (`pythonw`, a detached `python.exe`) |
 | `models/` | GGUF models, `ocr/`. An old `embedder/` folder is no longer used and can be deleted. |
 | `.encryption_key` | Fernet key backup (also in the OS keyring) |
 
@@ -471,12 +473,10 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G34 | Electron apps (Claude desktop): the Windows walker reads the web Document, and buttons inside it are kept ("Copy", "Fork from here", "Hide sidebar"). The type filter covers native controls only. Parked: telling labels from content is left to the LLM. | Windows | [windows.md](../backlog/windows.md) "G34" (parked) |
 | G35 | Windows shell surfaces are saved as activities: Task View, Task Switching, Start, Search, notifications. Their a11y text is only "Task Switching \| DesktopWindowXamlSource". Parked until it hurts. | Windows | [windows.md](../backlog/windows.md) "G35" (parked) |
 | G37 | The `uiautomation` client is one per process, created on whichever thread calls UIA first, then used from other threads without COM marshaling. Suspected in the 2026-10-07 capture freeze. Since `d0ed3c2` and `0d385bb` a hang stops only UI events, not capture. | Windows | [windows.md](../backlog/windows.md) "G37" |
-| G38 | Started without a console (`launcher.vbs`, the launcher's `pythonw` child with output to `DEVNULL`), ScreenMind writes no log file. A hang or crash leaves nothing to read. | both (seen on Windows) | [windows.md](../backlog/windows.md) "G38" |
-| G39 | Machines run with different settings: the Mac has a `.env` (OCR languages, capture on start) and its own `settings.json`; the Windows laptop has no `.env` and other `settings.json` values (`capture_interval` 10, `performance_mode`, UI event types). Results and status files are not comparable. | both | [windows.md](../backlog/windows.md) "G39" |
 | G40 | `meetings.window_title` is the first matching window, front to back. For a Slack huddle found by mic use, that is whatever Slack window is in front, not the huddle (row 6 on 2026-10-07: a huddle with a DM contact saved as "* b2b-general (Channel) ... [Main]"). | both | new |
 | G41 | A call is kept as one row across a restart only if the restart takes less than `CALL_END_GRACE_S` and the call is not being transcribed. Inside one process, two Meet rooms back to back within the grace stay one row, because the room URL is read only once. | both | new |
 
-Closed while this map was written: G10 and G11 by `fa80d39` (Windows a11y reads the page, not the browser UI), G13 by `81277a8` (capture-time data kept on backlog skips), G20 by `399a565` (UI events on by default, live on the main instance since 2026-10-07). G2 (one SCK timeout disabled SCK until restart) by the SCK retry change on 2026-10-08. G19 (no global hotkeys on macOS) went away with the hotkeys themselves in `57cf0dd`. Their ids stay reserved.
+Closed while this map was written: G10 and G11 by `fa80d39` (Windows a11y reads the page, not the browser UI), G13 by `81277a8` (capture-time data kept on backlog skips), G20 by `399a565` (UI events on by default, live on the main instance since 2026-10-07). G2 (one SCK timeout disabled SCK until restart) by the SCK retry change on 2026-10-08. G38 (no log file without a console) and G39 (machines on different settings) by `c377a8c`: every start writes `screenmind.log`, the code defaults are the shared settings, the startup log and the e2e status header list what differs, and `.env` is read from the checkout root. Behaviour change: a dashboard value left at the default is no longer stored, so it follows later default changes. Each machine's existing `settings.json` needs a one-time cleanup ([windows.md](../backlog/windows.md) "Settings cleanup"). G19 (no global hotkeys on macOS) went away with the hotkeys themselves in `57cf0dd`. Their ids stay reserved.
 
 ## 9. Code vs backlog
 

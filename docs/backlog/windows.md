@@ -18,6 +18,35 @@ Status: open
 
 On 2026-10-08 the main instance still ran `0cac8fa` on the old pip `.venv` (Python 3.12). It needs `git pull`, `uv sync` (from the user's own terminal, see "Claude sessions and AppData" below) and a restart, which runs migration v11. A backup made with SQLite's backup API is at `~/.screenmind/screenmind.db.pre-v11` (schema v10, 495 activities, integrity ok).
 
+### Settings cleanup (both machines)
+Status: open (the user's step)
+
+Since `c377a8c` (G39) the code defaults are the shared settings, and the dashboard stores only values that differ from them. Existing files still hold the defaults of the day they were written, and ScreenMind never rewrites them at startup. Clean them up once, with ScreenMind stopped (it writes `settings.json` on pause and resume), then start it and check the log line "Settings that differ from the defaults" in `~/.screenmind/screenmind.log`.
+
+Windows `~/.screenmind/settings.json`, proposed whole file:
+
+```json
+{
+  "setup_complete": true,
+  "capture_paused": false
+}
+```
+
+What that drops, by key:
+- `capture_interval` 10 → default 40. Event-triggered capture already takes a frame on app switches, clicks and typing pauses; 40 s periodic means a quarter of the periodic grabs, OCR and analysis (lowest-resource principle).
+- `ui_events_types` `click,app_switch,text,clipboard` → default `click,app_switch`. Typed text and clipboard are opt-in until there is PII detection (G31). If you want them, keep this key and put the same line in the Mac's file, so both machines record the same.
+- `sensitive_filter_types` `credit_card,ssn,api_key,password` → default, which adds `jwt` (this file was missing it).
+- Equal to today's defaults, no effect now but frozen against later changes: `performance_mode`, `context_window`, `kv_cache_quant`, `flash_attention`, `analysis_mode`, `auto_pause_heavy_apps`, `heavy_apps`, `defer_analysis`, `capture_active_monitor`, `meeting_transcription`, `meeting_apps`, `retention_days`, `sensitive_filter_enabled`, `encryption_enabled`, `ui_events_enabled`, `event_triggered_capture`, `active_model`, `model_variants` (`Q4_0` is the default variant).
+- Keys of removed features, ignored since `cd95561`: `break_reminder_minutes`, `obsidian_*`, `notion_*`, `webhook_*`, `agents_*`, `auto_bookmark*`, `smart_notifications`, `distraction_minutes`, `dashboard_lock_timeout`, `*_hotkey`.
+- Kept: `setup_complete` and `capture_paused` are state, not settings.
+
+Mac: apply the same rules to `~/.screenmind/settings.json` (keep `setup_complete` and `capture_paused`, plus any key you chose on purpose and want on both machines). In the checkout's `.env`:
+- `OCR_LANGUAGES`: drop it once the G32 default `en,es,de,fr,ru` is on `custom`.
+- `CAPTURE_ON_START=true`: drop it. Both machines then restore the last capture state (`capture_paused`). The Windows laptop has never had it.
+- Since `c377a8c` the `.env` is read from the checkout root, so a start at login (LaunchAgent, cwd `/`) now loads it too. Until now such a start ran without it.
+
+Then run the e2e check on both machines: the status header row "Settings not at default" should match (empty, or the same keys).
+
 ## Fix now
 
 ### G32: OCR reads Latin only on Windows
@@ -33,20 +62,6 @@ Status: open
 `uiautomation`'s `_AutomationClient.instance()` is process-wide. Whichever thread calls UIA first (event loop, an executor thread or the UI-event enricher) creates it in its own COM apartment (`ComInit`, STA by default), and `set_uia_timeouts()` swaps in a `CUIAutomation8` on that thread. Other threads then use the raw pointer without marshaling. If the creating thread ends or stops pumping, calls can stall or fail. Suspected in the 2026-10-07 freeze (capture stopped after activity 175; shutdown hung). Since `d0ed3c2` (recorder lock) and `0d385bb` (5 s link timeout) a hang stops only UI events. Goal: a design that keeps capture, UI events and analysis up, and recovers by itself (a dedicated UIA thread, or one client per thread, plus a health check that restarts a stuck part).
 
 Refs: `platform_support/windows.py` `_uia()`, `set_uia_timeouts()`, `capture/ui_events/windows.py`, `capture/ui_events/recorder.py`.
-
-### G38: No log file without a console
-Status: open
-
-`launcher.vbs` and `launcher.start_screenmind()` start `pythonw -m screenmind` with stdout and stderr to `DEVNULL`. `config._setup_logging()` writes `screenmind.log` only when `sys.stderr` is `None`, which is not the case with `DEVNULL`. So the usual start has no log. Diagnosing the 2026-10-07 freeze needed a manual restart with `SCREENMIND_LOG_FILE`.
-
-Refs: `screenmind/config.py` `_setup_logging()`, `screenmind/launcher.py`, `~/.screenmind/launcher.vbs`, `startup.py`.
-
-### G39: Machines run with different settings
-Status: open
-
-The Mac main instance loads a `.env` (OCR languages, capture on start). The Windows laptop has none, and its `settings.json` differs (`capture_interval` 10, `performance_mode` balanced, `ui_events_types` with text and clipboard). The user wants both machines on the same parameters, or at least the same meaning and results. Make the defaults the shared source, and keep per-machine overrides few and visible (for example in the status file header).
-
-Refs: `config.py`, `.env.example`, `~/.screenmind/settings.json`, `scripts/e2e_collect.py` (header), `scripts/dev-instance.sh`.
 
 ## Parked
 
