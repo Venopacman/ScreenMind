@@ -55,10 +55,10 @@ The empty-display rule in `analysis_worker` skips Gemma only when a frame has no
 
 Refs: `CaptureWorker._label_monitor()`, `_capture_monitor()`, `analysis_worker._screen_text_len()`, activity 690.
 
-### Events go to the first frame of a tick, not the matching display
+### Same app on two displays: events without a point go to the first frame
 Status: idea
 
-With several displays, `_link_ui_events()` attaches all pending events to the first frame saved in a tick. A click on display 2 can end up on display 1's frame. Better: link by app or by the window bounds of the event.
+Events link by app, and clicks by position (G36 fix). With the same app on several displays, events without a point (typing, app switches, clipboard) still go to the first frame of that app saved in a tick (G21). Better: prefer the focused display, or the window the event came from.
 
 Refs: `CaptureWorker._capture_monitor()`, `Database.attach_ui_events()`.
 

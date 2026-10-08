@@ -27,13 +27,6 @@ Status: open
 
 Refs: `config.py` `ocr_languages`, `engine/ocr.py` `_rec_model()`, `.env.example`.
 
-### G36: UI events linked to another app's frame
-Status: open
-
-`attach_ui_events()` links every unlinked event up to the frame's time, whatever its app. Typing in Notepad++ at 14:00:42 had no Notepad++ frame after it (the app switch flushed the chunk but did not trigger a capture), so Claude frame 194 got it: "typed … (notepad++)" went into that frame's `user_actions`, its Gemma prompt and the search index. Link an event only to a frame of the same app (and display), or leave it unlinked with its own timestamp so later analysis can match it by time.
-
-Refs: `CaptureWorker._link_ui_events()`, `Database.attach_ui_events()`, `capture/ui_events/models.py` `format_user_actions()`; G21 (several displays).
-
 ### G37: One UIA client shared across threads
 Status: open
 

@@ -173,6 +173,20 @@ def describe_event(
     return f"{type_} in {app}"
 
 
+def app_key(name: Optional[str]) -> Optional[str]:
+    """App name in the form used to match a UI event with a frame.
+
+    Frames and events take their app name from the same OS call on each OS,
+    so this only evens out case, spaces and a ".exe" suffix.
+    """
+    if not name:
+        return None
+    key = name.strip().casefold()
+    if key.endswith(".exe"):
+        key = key[:-len(".exe")]
+    return key or None
+
+
 def _url_host(url: Optional[str]) -> Optional[str]:
     if not url:
         return None

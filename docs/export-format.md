@@ -118,6 +118,14 @@ Screenshot: screenshots/1290_16-46-02_118_m2.jpg
 Screen text:
 ```
 
+UI events that no frame of their app followed have no `activity_id`. They are in the timeline at their own time, one block per gap between two frames (at most 50 lines, `UNLINKED_ACTIONS_MAX_LINES`; all of them are in `ui_events.jsonl`):
+
+```
+### 14:00:42 | actions without a screenshot
+- typed "draft" in text field (notepad++)
+- switched to explorer: Task Switching
+```
+
 Screen text is `organized_text` if there is one, else `ocr_text` (a11y or OCR text). It is cut at 4,000 characters, with a note that the full text is in `activities.jsonl`. When it is the same as the previous activity's text, the block says "Screen text: same as above." Meeting transcripts are cut at 20,000 characters.
 
 ### `sessions.json`

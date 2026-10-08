@@ -158,6 +158,27 @@ def test_export_only_ok_rows(db):
     assert "kept" in md and "skipped row" not in md
 
 
+def test_session_md_shows_unlinked_events_at_their_time(db):
+    """Events no frame of their app followed (G36) stay in the timeline, between the frames."""
+    first = _add_activity(db, _ts(9, 0), summary="first frame", user_actions='- typed "linked" in element (Chrome)')
+    _add_activity(db, _ts(9, 2), summary="second frame")
+    _add_ui_event(db, _ts(9, 0, 30), activity_id=first, text="linked")
+    _add_ui_event(db, _ts(9, 1), text="between")
+    _add_ui_event(db, _ts(9, 1, 5), text="also between")
+
+    _, zf, root = _export(db, screenshots=False)
+    day = f"{root}/2026-10-06"
+    md = zf.read(f"{day}/sessions/01_0900-0902.md").decode()
+    block = "### 09:01:00 | actions without a screenshot\n" \
+            '- typed "between" in element (Chrome)\n- typed "also between" in element (Chrome)\n'
+    assert block in md
+    assert md.index("first frame") < md.index(block) < md.index("second frame")
+    assert md.count('typed "linked"') == 1
+    events = _jsonl(zf, f"{day}/ui_events.jsonl")
+    assert [(e["text"], e["activity_id"]) for e in events] == [
+        ("linked", first), ("between", None), ("also between", None)]
+
+
 def test_export_cleans_urls_and_text_again(db):
     # Rows from before the URL filter existed hold raw tokens.
     _add_activity(

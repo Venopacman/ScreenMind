@@ -476,12 +476,61 @@ class TestDatabase:
             _ev(t0 + timedelta(seconds=30), element_name="Later"),
         ])
         aid = db.insert_activity(ScreenshotEntry(timestamp=t0 + timedelta(seconds=10), screenshot_path="x"))
-        assert db.attach_ui_events(aid, t0 + timedelta(seconds=10)) == 2
+        assert db.attach_ui_events(aid, t0 + timedelta(seconds=10), app_name="Slack") == 2
         rows = db.get_ui_events(aid)
         assert [r["type"] for r in rows] == ["click", "text"]
         # Already-linked events are not moved to the next frame
         aid2 = db.insert_activity(ScreenshotEntry(timestamp=t0 + timedelta(seconds=40), screenshot_path="y"))
-        assert db.attach_ui_events(aid2, t0 + timedelta(seconds=40)) == 1
+        assert db.attach_ui_events(aid2, t0 + timedelta(seconds=40), app_name="Slack") == 1
+
+    def test_attach_only_the_frames_app(self, db):
+        """G36: typing in Notepad++ must not land on a Claude frame."""
+        t0 = datetime(2026, 10, 7, 14, 0, 40)
+        db.insert_ui_events([
+            _ev(t0, EventType.TEXT, app_name="notepad++", text="draft"),
+            _ev(t0 + timedelta(seconds=4), EventType.APP_SWITCH, app_name="claude"),
+        ])
+        aid = db.insert_activity(ScreenshotEntry(timestamp=t0 + timedelta(seconds=6), screenshot_path="x"))
+        assert db.attach_ui_events(aid, t0 + timedelta(seconds=6), app_name="claude") == 1
+        assert [r["type"] for r in db.get_ui_events(aid)] == ["app_switch"]
+        left = db.get_ui_events_range(t0.isoformat(), t0.isoformat())
+        assert left[0]["activity_id"] is None
+        assert left[0]["timestamp"] == t0.isoformat()
+
+    def test_attach_matches_app_names_loosely(self, db):
+        t0 = datetime(2026, 10, 7, 14, 0, 0)
+        db.insert_ui_events([_ev(t0, app_name="Notepad++.exe"), _ev(t0, app_name=" NOTEPAD++ ")])
+        aid = db.insert_activity(ScreenshotEntry(timestamp=t0, screenshot_path="x"))
+        assert db.attach_ui_events(aid, t0, app_name="notepad++") == 2
+
+    def test_attach_needs_an_app(self, db):
+        t0 = datetime(2026, 10, 7, 14, 0, 0)
+        db.insert_ui_events([_ev(t0, app_name=None), _ev(t0)])
+        aid = db.insert_activity(ScreenshotEntry(timestamp=t0, screenshot_path="x"))
+        assert db.attach_ui_events(aid, t0, app_name=None) == 0
+        assert db.attach_ui_events(aid, t0, app_name="Slack") == 1
+
+    def test_attach_skips_events_before_since(self, db):
+        """Events older than the previous frame on the display stay unlinked."""
+        t0 = datetime(2026, 10, 7, 14, 0, 0)
+        db.insert_ui_events([_ev(t0, element_name="old"), _ev(t0 + timedelta(seconds=10), element_name="new")])
+        aid = db.insert_activity(ScreenshotEntry(timestamp=t0, screenshot_path="x"))
+        assert db.attach_ui_events(aid, t0 + timedelta(seconds=20), app_name="Slack",
+                                   since=t0 + timedelta(seconds=5)) == 1
+        assert [r["element_name"] for r in db.get_ui_events(aid)] == ["new"]
+
+    def test_attach_clicks_by_display(self, db):
+        """A click links only to the frame of the display it was on; typing has no point."""
+        t0 = datetime(2026, 10, 7, 14, 0, 0)
+        right = {"left": 1512, "top": 0, "width": 2288, "height": 1287}
+        db.insert_ui_events([
+            _ev(t0, element_name="left", x=100, y=100),
+            _ev(t0, element_name="right", x=2000, y=100),
+            _ev(t0, EventType.TEXT, text="hi"),
+        ])
+        aid = db.insert_activity(ScreenshotEntry(timestamp=t0, screenshot_path="x"))
+        assert db.attach_ui_events(aid, t0, app_name="Slack", bounds=right) == 2
+        assert [r["element_name"] or r["text"] for r in db.get_ui_events(aid)] == ["right", "hi"]
 
     def test_range_query(self, db):
         t0 = datetime(2026, 10, 6, 10, 0, 0)
@@ -507,7 +556,7 @@ class TestDatabase:
         t0 = datetime.now()
         db.insert_ui_events([_ev(t0)])
         aid = db.insert_activity(ScreenshotEntry(timestamp=t0, screenshot_path="x"))
-        db.attach_ui_events(aid, t0)
+        db.attach_ui_events(aid, t0, app_name="Slack")
         conn = db._get_conn()
         conn.execute("DELETE FROM activities WHERE id = ?", (aid,))
         conn.commit()
@@ -563,7 +612,7 @@ class TestCaptureTriggers:
         aid = db.insert_activity(ScreenshotEntry(timestamp=datetime.now(), screenshot_path="x"))
         worker._db = db
         worker._ui_recorder = MagicMock()
-        text = await worker._link_ui_events(aid, datetime.now())
+        text = await worker._link_ui_events(aid, datetime.now(), app_name="Slack")
         worker._ui_recorder.flush_for_capture.assert_called_once()
         assert text == '- clicked button "Send" in Slack'
         assert db.get_activity_by_id(aid)["user_actions"] == text

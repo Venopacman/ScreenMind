@@ -80,6 +80,11 @@ class CaptureWorker:
         self._trigger_lock = threading.Lock()
         self._pending_trigger = None  # (due_ts, first_request_ts, reason)
         self._stuck_link = None  # executor future of a UI-event link that timed out
+        # Time of the last frame saved per display. A frame links only the
+        # events after it, so older ones never jump to a later frame. Events
+        # from before this run (still unlinked) are never linked.
+        self._link_floor: dict = {}
+        self._started_at = datetime.now()
 
     async def run(self):
         """
@@ -259,9 +264,14 @@ class CaptureWorker:
             )
             activity_id = self._db.insert_activity(entry)
 
-        # UI events go to the first frame saved after them; with several
-        # displays the later frames of the same tick find nothing left to link.
-        user_actions = await self._link_ui_events(activity_id, now)
+        # A UI event goes to the first frame saved after it on a display,
+        # if that frame shows the event's app. Otherwise it stays unlinked.
+        floor_key = "focused" if monitor is None else f"{monitor['left']},{monitor['top']}"
+        since = self._link_floor.get(floor_key, self._started_at)
+        self._link_floor[floor_key] = now
+        user_actions = await self._link_ui_events(
+            activity_id, now, app_name=app_name, since=since, bounds=monitor,
+        )
 
         capture_result = CaptureResult(
             filepath=filepath,
@@ -345,9 +355,12 @@ class CaptureWorker:
             self._pending_trigger = None
             return reason
 
-    async def _link_ui_events(self, activity_id: Optional[int], now: datetime) -> Optional[str]:
-        """Attach UI events recorded up to `now` to this frame and return
-        them as bullet lines for the analyzer."""
+    async def _link_ui_events(self, activity_id: Optional[int], now: datetime, *,
+                              app_name: Optional[str] = None, since: Optional[datetime] = None,
+                              bounds: Optional[dict] = None) -> Optional[str]:
+        """Attach this frame's UI events and return them as bullet lines for
+        the analyzer: events of `app_name` after `since` up to `now`, and on
+        this display (`bounds`) for clicks. See Database.attach_ui_events()."""
         if not activity_id or not self._db or not self._ui_recorder or not settings.ui_events_enabled:
             return None
         if self._stuck_link is not None:
@@ -358,7 +371,8 @@ class CaptureWorker:
 
         def _link():
             self._ui_recorder.flush_for_capture()
-            if not self._db.attach_ui_events(activity_id, now):
+            if not self._db.attach_ui_events(activity_id, now, app_name=app_name,
+                                             since=since, bounds=bounds):
                 return None
             from screenmind.capture.ui_events.models import format_user_actions
             text = format_user_actions(self._db.get_ui_events(activity_id))

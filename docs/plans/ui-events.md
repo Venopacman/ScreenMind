@@ -131,7 +131,7 @@ CREATE INDEX IF NOT EXISTS idx_ui_events_activity ON ui_events(activity_id);
 New `Database` methods:
 
 - `insert_ui_events(events: list[UiEvent])`: one batch insert. The enricher flushes every 2s or every 50 events.
-- `attach_ui_events(activity_id, until_ts)`: sets `activity_id` on all events with `activity_id IS NULL AND timestamp <= until_ts`. `CaptureWorker` calls this right after `insert_activity`.
+- `attach_ui_events(activity_id, until, app_name=, since=, bounds=)`: sets `activity_id` on the unlinked events after `since` (the previous frame on that display) up to `until`, of the frame's app only, with clicks inside `bounds`. Other events stay unlinked (G36). `CaptureWorker` calls this right after `insert_activity`.
 - `get_ui_events(activity_id)` and `get_ui_events_range(start, end)`.
 - `cleanup_old_data()` also deletes old `ui_events` rows.
 
@@ -269,7 +269,7 @@ What changed compared to the plan above:
 Checked end to end on macOS with a separate instance (port 7778, separate data dir):
 
 - The event tap installs, and clicks, app switches and typing arrive.
-- Events link to the next saved frame, and `user_actions` is filled in.
+- Events link to the next saved frame of their app, and `user_actions` is filled in.
 - `[event:click]` captures fire.
 - The timeline shows the Actions list.
 - The Settings toggle starts and stops the recorder.

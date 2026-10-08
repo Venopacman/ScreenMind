@@ -601,7 +601,7 @@ class TestFocusConsistency:
         db_insert = db.insert_activity
         db.insert_activity = lambda entry: (calls.append("insert"), db_insert(entry))[1]
 
-        async def link(activity_id, now):
+        async def link(activity_id, now, **kw):
             calls.append("link")
             return None
         worker._link_ui_events = link
@@ -619,6 +619,88 @@ class TestFocusConsistency:
         assert db.get_activity_by_id(item.activity_id)["window_title"] == item.window_title
         # The raw titles still match, so the focus check keeps the reads
         assert item.a11y_text == "page text"
+
+
+class TestUiEventLinking:
+    """A frame gets only the UI events of its own app and display (G36, G21)."""
+
+    LEFT = {"left": 0, "top": 0, "width": 1000, "height": 800}
+    RIGHT = {"left": 1000, "top": 0, "width": 1000, "height": 800}
+
+    @pytest.fixture
+    def worker(self, db, tmp_path, monkeypatch):
+        from PIL import Image
+
+        monkeypatch.setattr(settings_mod.settings, "ui_events_enabled", True)
+        worker = CaptureWorker(queue=asyncio.Queue(maxsize=100), database=db)
+        worker._started_at = datetime(2026, 10, 7, 14, 0, 0)
+        worker._ui_recorder = MagicMock()
+        shot = tmp_path / "shot.jpg"
+        Image.new("RGB", (8, 8)).save(shot)
+        worker._screen = MagicMock()
+        worker._screen.capture.return_value = (shot, Image.open(shot))
+        worker._dedup_for = lambda monitor: MagicMock(is_duplicate=MagicMock(return_value=False))
+        return worker
+
+    async def _frame(self, worker, app, at, monitor=None):
+        """Save one frame showing `app` at time `at`; return its user_actions."""
+        with patch("screenmind.workers.capture_worker.datetime") as dt:
+            dt.now.return_value = at
+            assert await worker._capture_monitor(monitor, app, app, False, "change", active_title=app)
+        return (await worker._queue.get()).user_actions
+
+    @staticmethod
+    def _events(db, *events):
+        from screenmind.capture.ui_events.models import EventType, UiEvent
+        db.insert_ui_events([
+            UiEvent(timestamp=datetime(2026, 10, 7, 14, 0, s), type=EventType(t), app_name=app, **kw)
+            for s, t, app, kw in events
+        ])
+
+    async def test_typing_before_a_switch_stays_unlinked(self, worker, db):
+        """2026-10-07: typing in Notepad++ went into the next frame, a Claude one."""
+        self._events(
+            db,
+            (33, "click", "notepad++", {"element_name": "Edit"}),
+            (42, "text", "notepad++", {"text": "draft"}),
+            (45, "app_switch", "explorer", {}),
+            (46, "app_switch", "claude", {}),
+            (50, "app_switch", "notepad++", {}),
+        )
+        await self._frame(worker, "notepad++", datetime(2026, 10, 7, 14, 0, 27))
+        assert await self._frame(worker, "claude", datetime(2026, 10, 7, 14, 0, 48)) == "- switched to claude"
+        # Back in Notepad++: the earlier typing is not moved to this frame either
+        assert await self._frame(worker, "notepad++", datetime(2026, 10, 7, 14, 0, 51)) == \
+            "- switched to notepad++"
+        rows = db.get_ui_events_range("2026-10-07T14:00:00", "2026-10-07T14:01:00")
+        assert {r["type"]: r["activity_id"] for r in rows if r["app_name"] == "notepad++"
+                and r["type"] != "app_switch"} == {"click": None, "text": None}
+
+    async def test_events_wait_for_a_frame_of_their_app(self, worker, db):
+        """A skipped grab (duplicate) does not orphan events; the next frame of the app gets them."""
+        self._events(db, (5, "text", "Slack", {"text": "hello"}))
+        assert await self._frame(worker, "Slack", datetime(2026, 10, 7, 14, 0, 20)) == \
+            '- typed "hello" in element (Slack)'
+
+    async def test_events_from_before_this_run_are_not_linked(self, worker, db):
+        worker._started_at = datetime(2026, 10, 7, 14, 0, 10)
+        self._events(db, (5, "text", "Slack", {"text": "old run"}))
+        assert await self._frame(worker, "Slack", datetime(2026, 10, 7, 14, 0, 20)) is None
+
+    async def test_several_displays(self, worker, db):
+        """G21: each display's frame gets its own app's events, and clicks by position."""
+        self._events(
+            db,
+            (1, "text", "Slack", {"text": "hi"}),
+            (2, "click", "chrome", {"element_name": "Docs", "x": 100, "y": 100}),
+            (3, "click", "chrome", {"element_name": "Mail", "x": 1500, "y": 100}),
+        )
+        at = datetime(2026, 10, 7, 14, 0, 10)
+        assert await self._frame(worker, "chrome", at, self.LEFT) == '- clicked element "Docs" in chrome'
+        assert await self._frame(worker, "chrome", at, self.RIGHT) == '- clicked element "Mail" in chrome'
+        # Slack is on no display this tick: its typing stays unlinked
+        rows = db.get_ui_events_range("2026-10-07T14:00:00", "2026-10-07T14:01:00", event_type="text")
+        assert rows[0]["activity_id"] is None
 
 
 class TestUiEventLinkGuard:

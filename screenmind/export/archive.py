@@ -35,6 +35,9 @@ MAX_TEXT_FILE_BYTES = 900_000
 # Screen text per activity in the session .md files. Full text is in activities.jsonl.
 SCREEN_TEXT_MAX_CHARS = 4000
 MEETING_TRANSCRIPT_MAX_CHARS = 20_000
+# UI events with no frame of their app, per gap between two frames in the .md
+# files. All of them are in ui_events.jsonl.
+UNLINKED_ACTIONS_MAX_LINES = 50
 
 # Always applied on export, on top of what the user turned on in settings.
 _DEFAULT_FILTER_TYPES = ["credit_card", "ssn", "api_key", "jwt", "password"]
@@ -273,6 +276,19 @@ def _activity_block(a: Dict[str, Any], prev_text: Optional[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _unlinked_block(events: List[Dict[str, Any]]) -> Optional[str]:
+    """UI events that no screenshot of their app followed, in time order."""
+    from screenmind.capture.ui_events.models import format_user_actions
+    text = format_user_actions(
+        [{**e, "app_name": e["app"]} for e in events],
+        max_lines=UNLINKED_ACTIONS_MAX_LINES, max_chars=SCREEN_TEXT_MAX_CHARS,
+    )
+    if not text:
+        return None
+    return (f"### {events[0]['_ts'].strftime('%H:%M:%S')} | actions without a screenshot\n"
+            f"{text}\n")
+
+
 def _meeting_block(m: Dict[str, Any]) -> str:
     end = f"-{_hm(m['_end'])}" if m.get("_end") else ""
     lines = [f"### {_hm(m['_ts'])}{end} | {m['app'] or 'call'} | {round(m['duration_minutes'] or 0)} min"]
@@ -314,9 +330,17 @@ def render_session_md(s: Session, user: str) -> List[str]:
         blocks.extend(_meeting_block(m) for m in s.meetings)
     blocks.append("\n## Timeline\n")
     prev = None
+    # Events without a frame go between the frames, at their own time.
+    unlinked = [e for e in s.ui_events if e["activity_id"] is None]
     for a in s.activities:
+        n = sum(1 for e in unlinked if e["_ts"] < a["_ts"])
+        if n:
+            blocks.extend(filter(None, [_unlinked_block(unlinked[:n])]))
+            unlinked = unlinked[n:]
         blocks.append(_activity_block(a, prev))
         prev = a["organized_text"] or a["screen_text"] or prev
+    if unlinked:
+        blocks.extend(filter(None, [_unlinked_block(unlinked)]))
 
     # Room for the header, which is short and does not grow with the data.
     budget = MAX_TEXT_FILE_BYTES - 4096

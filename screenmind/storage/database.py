@@ -843,16 +843,40 @@ class Database:
         conn.commit()
         return len(events)
 
-    def attach_ui_events(self, activity_id: int, until: datetime) -> int:
-        """Link all not-yet-linked events up to `until` to this activity."""
+    def attach_ui_events(
+        self, activity_id: int, until: datetime, *, app_name: Optional[str],
+        since: Optional[datetime] = None, bounds: Optional[Dict[str, int]] = None,
+    ) -> int:
+        """Link this frame's UI events to it. Returns the number linked.
+
+        A frame gets the not-yet-linked events after `since` (the previous
+        frame saved on the same display) up to `until`, and only those of its
+        own app. A click also has to be on the frame's display (`bounds`, an
+        mss monitor dict) when it is known. Events of other apps stay
+        unlinked, with their own timestamp.
+        """
+        from screenmind.capture.ui_events.models import app_key
+        key = app_key(app_name)
+        if key is None:
+            return 0
         conn = self._get_conn()
-        cursor = conn.execute(
-            "UPDATE ui_events SET activity_id = ? "
-            "WHERE activity_id IS NULL AND timestamp <= ?",
-            (activity_id, until.isoformat()),
+        sql = "SELECT id, app_name, x, y FROM ui_events WHERE activity_id IS NULL AND timestamp <= ?"
+        params: list = [until.isoformat()]
+        if since is not None:
+            sql += " AND timestamp > ?"
+            params.append(since.isoformat())
+        ids = [
+            r["id"] for r in conn.execute(sql, params).fetchall()
+            if app_key(r["app_name"]) == key and _on_display(r["x"], r["y"], bounds)
+        ]
+        if not ids:
+            return 0
+        conn.execute(
+            f"UPDATE ui_events SET activity_id = ? WHERE id IN ({','.join('?' * len(ids))})",
+            [activity_id, *ids],
         )
         conn.commit()
-        return cursor.rowcount
+        return len(ids)
 
     def get_ui_events(self, activity_id: int) -> List[Dict[str, Any]]:
         """Events linked to one activity, oldest first."""
@@ -888,3 +912,16 @@ class Database:
         if hasattr(self._local, "conn") and self._local.conn:
             self._local.conn.close()
             self._local.conn = None
+
+
+def _on_display(x: Optional[int], y: Optional[int], bounds: Optional[Dict[str, int]]) -> bool:
+    """Whether a point is on this display. Events without a point, and frames
+    without bounds (single-display path), always pass.
+
+    Click points and mss monitor rects share one coordinate space on each OS:
+    physical pixels on Windows, points on macOS.
+    """
+    if bounds is None or x is None or y is None:
+        return True
+    return (bounds["left"] <= x < bounds["left"] + bounds["width"]
+            and bounds["top"] <= y < bounds["top"] + bounds["height"])
