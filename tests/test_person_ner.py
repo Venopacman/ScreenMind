@@ -150,6 +150,12 @@ def _bare():
     ("Atlassian Rovo", False),
     ("ivan", False),          # names start with a capital
     ("X", False),
+    ("DM", False),
+    ("Ian", True),
+    ("Fridav", False),        # OCR typo of a weekday
+    ("Yesterdav", False),
+    ("Goog", False),          # cut-off product name
+    ("Olga", True),
 ])
 def test_is_name(span, ok):
     assert _bare().is_name(span) is ok
@@ -183,8 +189,21 @@ def test_model_time_per_call_is_capped(monkeypatch):
     # Lines over the cap were not cached, so the model gets them next time.
     ner.find(lines)
     assert ran[-1] == ["Line C mentions Ivan Petrov", "No names"]
-    assert ner.find(lines) == [[(0, 11)], [], [], []]
+    assert ner.find(lines) == [[(0, 11)], [], [(16, 27)], []]
     assert len(ran) == 2
+
+
+def test_known_names_and_their_parts_match_everywhere():
+    ner = _bare()
+    ner._run = lambda lines: [[(0, 16)] if line.startswith("Aleksandr Mangin") else [] for line in lines]
+    ner.find(["Aleksandr Mangin joined"])
+    # The model found nothing in these lines; the known name and its parts match.
+    assert ner.find(["Kick off [Ivan + Mangin]", "Ask Aleksandr Mangin", "Mangina Street", "Load Mark"]) == [
+        [(17, 23)], [(4, 20)], [], []]
+    # A part that is a common word ("Mark") is not learned.
+    ner.find(["Mark Mangin"])
+    assert ner._known.keys() >= {"Aleksandr Mangin", "Aleksandr", "Mangin"}
+    assert "Mark" not in ner._known
 
 
 def test_cache_skips_the_model_for_seen_lines():

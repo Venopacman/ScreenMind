@@ -6,7 +6,7 @@ Person names were added to the sensitive-data filter on 2026-10-08 (`privacy/per
 - Marker: `[REDACTED:person]`, like the other types.
 - Postal addresses: skipped. Only 7 of 1,593 snapshot frames had street-like text.
 
-Measured on the EDA snapshot (400 frames, Mac, 1 thread): about +120 MB footprint, CPU mean 45 ms per frame, median 45 ms, p90 120 ms, max 1.2 s per call (capped). On a synthetic set of 20 name lines and 21 non-name lines (`tests/test_person_ner.py`): recall 1.00, precision 1.00.
+Measured on the EDA snapshot (400 frames, Mac, 1 thread): about +120 MB footprint, CPU mean 33 ms per frame, median 32 ms, p90 65 ms, max 0.8 s per call (capped at about 1 s). On a dev instance with real screens (Chrome meeting notes, Slack), names were replaced and the lines kept their meaning. On a synthetic set of 20 name lines and 21 non-name lines (`tests/test_person_ner.py`): recall 1.00, precision 1.00.
 
 ## Items
 
@@ -18,9 +18,9 @@ Gemma reads the raw screenshot, so `summary`, `details`, `scene_description` and
 Refs: `analysis_worker._process()`, `Database.update_activity_analysis()`.
 
 ### The filter blocks the analysis event loop
-Status: open, after the Gemma removal merge
+Status: fixed on branch `claude/practical-dijkstra-f83cbe` (`b5a8da5`, `analysis_worker._redact()`), not merged yet
 
-`analysis_worker._process()` calls `filter_sensitive()` and `filter_ocr_boxes()` directly in the coroutine. With names on, a call takes up to about 1.2 s on a screen full of new text, and the loop waits. Run both in the executor, like OCR. Wait for the Gemma removal rewrite of `analysis_worker.py`, so the two changes don't conflict.
+`analysis_worker._process()` calls `filter_sensitive()` and `filter_ocr_boxes()` directly in the coroutine. With names on, a call takes up to about 1 s on a screen full of new text, and the loop waits. Run both in the executor, like OCR. Wait for the Gemma removal rewrite of `analysis_worker.py`, so the two changes don't conflict.
 
 Refs: `analysis_worker._process()` step 3c, `person_ner._MAX_WINDOWS_PER_CALL`.
 
@@ -40,7 +40,7 @@ Rows from before this change still hold names in `ocr_text`, `ocr_boxes`, `organ
 Status: idea
 
 - A first name alone that is also a common word stays ("Mark", "Will", "Anna"). Full names are caught.
-- Product names the model tags as people are kept by a stoplist (`person_ner._NOT_NAMES`). OCR typos of product names ("Outlcok") are not in it, so they may be redacted as names.
+- Product names the model tags as people are kept by a stoplist (`person_ner._NOT_NAMES`). Unknown products ("Truto", 126 lines in the snapshot), project names ("Distillery") and OCR typos ("Outlcok", "Ladded") are redacted as names. Idea: a user keep-list setting, or learn product names from window titles and URLs.
 - Lines over the per-call cap get only names already found. The model checks them on a later frame, but the row of this frame keeps that weaker result.
 
 ### Same placeholder for every person

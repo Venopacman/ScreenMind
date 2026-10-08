@@ -11,7 +11,7 @@ Resources (Mac, 1 thread, 400 snapshot frames, measured 2026-10-08):
 - About +120 MB memory footprint. The weights are saved once as external
   data, which onnxruntime maps from disk. Loaded from the single .onnx file,
   the same model costs about +400 MB.
-- CPU mean 45 ms per frame (p90 120 ms). Results are cached per line, and
+- CPU mean 35 ms per frame (p90 65 ms). Results are cached per line, and
   most lines repeat from frame to frame. One call runs the model for about
   1 s at most; lines over that get the names found so far, and the model on
   a later call.
@@ -24,7 +24,12 @@ Product names ("Claude", "Slack") and common words at the start of a line
 ("Ran", "Load") are tagged as names too often. A span is dropped if one of its
 words is in _NOT_NAMES, or if it is one word that is also a lowercase word in
 the model's vocabulary. That also drops a lone "Mark" or "Will", but not
-"Mark Brown".
+"Mark Brown". Single words under 3 letters, OCR typos of weekdays and months
+("Fridav") and cut-off product names ("Goog") are dropped too. Unknown
+products ("Truto") are still taken for names.
+
+Names found once are then matched as plain text on every line, with the
+parts of full names: "Mangin" alone is caught after "Aleksandr Mangin".
 
 The model is downloaded in a background thread the first time it is needed.
 Until it is ready, names are not detected (the other filters still run).
@@ -83,6 +88,20 @@ _NOT_NAMES = {
     "dropbox", "spotify", "youtube", "linkedin", "twitter", "reddit", "amazon",
     "aws", "azure", "huddle", "eval",
 }
+
+# OCR misreads these ("Fridav", "Yesterdav"), and the model then tags them.
+# A single word one letter away from one of them is not a name.
+_DATE_WORDS = {
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "january", "february", "march", "april", "june", "july", "august",
+    "september", "october", "november", "december", "yesterday", "today", "tomorrow",
+}
+
+
+def _one_letter_off(word: str, targets) -> bool:
+    w = word.lower()
+    return any(len(t) == len(w) and sum(a != b for a, b in zip(t, w)) <= 1 for t in targets)
+
 
 _enabled = True  # tests turn it off; see tests/conftest.py
 
@@ -195,51 +214,70 @@ class PersonNer:
         self._known_re = None
 
     def find(self, lines: List[str]) -> List[List[Tuple[int, int]]]:
-        """Name spans (start, end) per line, after the _NOT_NAMES rules."""
-        out: List[Optional[List[Tuple[int, int]]]] = [None] * len(lines)
+        """Name spans (start, end) per line, after the _NOT_NAMES rules.
+
+        Two sources: the model, and names it found before, matched as plain
+        text on every line. The second catches a surname alone ("Mangin")
+        once the full name was seen, and lines over the per-call cap.
+        """
+        out: List[List[Tuple[int, int]]] = [[] for _ in lines]
         todo = []
         with self._lock:
             for i, line in enumerate(lines):
                 if not _CAPITAL.search(line):
-                    out[i] = []
-                elif line in self._cache:
+                    continue
+                if line in self._cache:
                     self._cache.move_to_end(line)
                     out[i] = self._cache[line]
                 else:
                     todo.append(i)
             if todo:
                 # Model time per call is capped; a whole terminal scrollback
-                # (250k chars) would take half a minute. Lines over the cap get
-                # the names found so far, and the model on a later call.
-                now, later, windows = [], [], 0
+                # (250k chars) would take half a minute. Lines over the cap go
+                # to the model on a later call.
+                now, windows = [], 0
                 for line in dict.fromkeys(lines[i] for i in todo):
                     windows += 1 + len(line) // _CHARS_PER_WINDOW
-                    (now if windows <= _MAX_WINDOWS_PER_CALL or not now else later).append(line)
+                    if windows > _MAX_WINDOWS_PER_CALL and now:
+                        break
+                    now.append(line)
                 new = dict(zip(now, self._run(now)))
                 self._cache.update(new)
                 while len(self._cache) > _CACHE_LINES:
                     self._cache.popitem(last=False)
-                for spans_line, spans in new.items():
+                for line, spans in new.items():
                     for a, b in spans:
-                        self._known[spans_line[a:b]] = None
-                        self._known.move_to_end(spans_line[a:b])
-                while len(self._known) > _KNOWN_NAMES:
-                    self._known.popitem(last=False)
-                if later:
-                    self._known_re = None
-                    new.update((line, self._known_spans(line)) for line in later)
+                        self._learn(line[a:b])
                 for i in todo:
-                    out[i] = new[lines[i]]
+                    out[i] = new.get(lines[i], [])
+            if self._known:
+                for i, line in enumerate(lines):
+                    if _CAPITAL.search(line):
+                        out[i] = self._add_known(line, out[i])
         return out
 
-    def _known_spans(self, line: str) -> List[Tuple[int, int]]:
-        """Names found before, matched as plain text (no model)."""
-        if not self._known:
-            return []
+    def _learn(self, name: str):
+        """Remember a found name, and the parts of a full name that are not
+        common words ("Aleksandr Mangin" -> "Aleksandr", "Mangin")."""
+        parts = [name] + [w for w in name.split() if len(w) >= 3 and w != name and self.is_name(w)]
+        for p in parts:
+            if p not in self._known:
+                self._known_re = None
+            self._known[p] = None
+            self._known.move_to_end(p)
+        while len(self._known) > _KNOWN_NAMES:
+            self._known.popitem(last=False)
+            self._known_re = None
+
+    def _add_known(self, line: str, spans: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+        """spans plus known names in the line that don't overlap them or a marker."""
         if self._known_re is None:
             names = sorted(self._known, key=len, reverse=True)
             self._known_re = re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, names)) + r")(?!\w)")
-        return [m.span() for m in self._known_re.finditer(line)]
+        taken = list(spans) + [m.span() for m in _MARKER.finditer(line)]
+        extra = [m.span() for m in self._known_re.finditer(line)
+                 if not any(m.start() < b and a < m.end() for a, b in taken)]
+        return sorted(spans + extra) if extra else spans
 
     def _run(self, lines: List[str]) -> List[List[Tuple[int, int]]]:
         import numpy as np
@@ -303,8 +341,14 @@ class PersonNer:
             return False
         if any(w.lower() in _NOT_NAMES for w in words):
             return False
-        if len(words) == 1 and (len(span) < 2 or self._tok.token_to_id(span.lower()) is not None):
-            return False
+        if len(words) == 1:
+            w = span.lower()
+            if len(span) < 3 or self._tok.token_to_id(w) is not None:
+                return False  # "DM"; common words ("Ran", "Mark")
+            if _one_letter_off(w, _DATE_WORDS):
+                return False
+            if len(w) >= 4 and any(n.startswith(w) for n in _NOT_NAMES):
+                return False  # cut-off product name ("Goog")
         return True
 
 

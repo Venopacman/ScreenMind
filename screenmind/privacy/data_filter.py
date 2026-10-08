@@ -364,7 +364,7 @@ def filter_sensitive_text(
             details.append({"type": ptype, "count": count})
 
     if total_redacted > 0:
-        logger.info(f"Redacted {total_redacted} sensitive item(s): {', '.join(types_found)}")
+        logger.debug(f"Redacted {total_redacted} sensitive item(s): {', '.join(types_found)}")
 
     return {
         "clean_text": clean,
