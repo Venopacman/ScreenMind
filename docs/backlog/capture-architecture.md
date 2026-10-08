@@ -74,14 +74,14 @@ Status: idea
 
 Refs: `screenmind/platform_support/linux.py`, `capture/ui_events/recorder.py` (`create_backend`).
 
-### G32: Call title is the front window, not the call window
+### G40: Call title is the front window, not the call window
 Status: open
 
 `match_call()` returns the first window that matches, front to back. For a Slack huddle found by mic use, every Slack window matches, so `meetings.window_title` is whatever Slack window is in front. Row 6 on 2026-10-07 was a huddle with a DM contact, saved as "* b2b-general (Channel) - Nebius - 2 new items - Slack [Main]". Ideas: prefer a window with "huddle" in the title; store the title with the markers removed (`normalize_title()`); or read the huddle name from the a11y tree.
 
 Refs: `call_detection.match_call()`, `AudioWorker._start_meeting()`.
 
-### G33: Calls still split in some cases
+### G41: Calls still split in some cases
 Status: idea
 
 Since the restart fix, a call keeps one row across a restart (`AudioWorker._resume_recent()`). It still splits when the restart takes longer than `CALL_END_GRACE_S`, or when the call is transcribed (the old row already started its summary). The other way round, inside one process two Meet rooms back to back within the grace stay one row, because the room URL is read once per call. Re-reading the URL every few minutes would catch that.

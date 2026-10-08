@@ -1,5 +1,9 @@
 # Working in this repo
 
+## Principle: lowest resource use
+
+ScreenMind runs all day on the user's machines (a Mac and a Windows laptop). Aim for the lowest CPU, RAM, GPU and battery use in the long term. Prefer changes that make it lighter. Don't make it heavier for better per-frame analysis (for example more GPU layers for Gemma); park such ideas in the backlog instead. The budget is in `docs/plans/packaging.md` ("Resource budget").
+
 ## Main instance vs worktrees
 
 The user's everyday ScreenMind runs from the main checkout (`/Users/pavel/projects/ScreenMind`, branch `custom`):
