@@ -56,7 +56,7 @@ The empty-display rule in `analysis_worker` skips Gemma only when a frame has no
 Refs: `CaptureWorker._label_monitor()`, `_capture_monitor()`, `analysis_worker._screen_text_len()`, activity 690.
 
 ### UI events linked to a frame hours later or of another app
-Status: fixed 2026-10-08, waiting for a restart of the main instance (migration v13)
+Status: done 2026-10-08. v13 ran on the main DB after the restart: 0 links to another app, max lag 5.0 min.
 
 `ui_events.activity_id` had no time limit, and builds before `cf72b8e` did not check the app. In the Mac DB on 2026-10-08, 424 of 974 linked events pointed to a frame of another app or one saved over 5 min later. The worst: a Terminal `app_switch` and `click` at 2026-10-07 18:58 linked to a Chrome frame at 09:49 the next day. Most of the rest were Chrome events (display 2) linked to a Slack frame (display 1). These links also went into `activities.user_actions`.
 
