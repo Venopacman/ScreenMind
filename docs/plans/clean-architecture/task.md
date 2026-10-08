@@ -159,7 +159,7 @@ This differs from the monorepo layout on purpose. There, a module folder holds a
 | `AccessibilityReader` | `PlatformAdapter.extract_a11y_text` | AX | UIA | no |
 | `UiEventSource` | `UiEventBackend` | CGEventTap + AX + NSPasteboard | LL hooks + UIA + clipboard | yes (setting) |
 | `MicUsage` | `PlatformAdapter.mic_apps` | CoreAudio | none yet | yes |
-| `LoginItem` | `startup.py` | LaunchAgent, later `SMAppService` | HKCU Run | no |
+| `LoginItem` | `startup.py` | LaunchAgent today. Later `SMAppService.agent(plistName:)` with a LaunchAgent plist in the bundle, so launchd restarts a crashed agent (`KeepAlive`, `SuccessfulExit=false`, [uptime.md](../uptime.md) step 5). `SMAppService.mainApp` has no `KeepAlive`. Not decided yet. | HKCU Run | no |
 | `ProcessSignals` (quit, shutdown) | `main.py`, `routes/settings.py:93`, `packaging/entry.py` `_watch_quit_event` (installer quit event, `25de57a`) | SIGTERM | named event / CTRL_C | no |
 | `TextRecognizer` | `engine/ocr.py` | `screenmind-ocr` | `screenmind-ocr` | yes, Null = no OCR |
 | `FrameLabeler` | `engine/analyzer.py` + `llm_client.py` | `screenmind-llm-local`, later a server or vendor adapter | same | yes, Null = no labels |
