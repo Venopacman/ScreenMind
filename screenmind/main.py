@@ -310,6 +310,7 @@ async def main():
     server.should_exit = True
 
     capture_task.cancel()
+    # Abandons a Gemma call in flight; its frame stays 'pending' for backfill
     analysis_task.cancel()
 
     try:

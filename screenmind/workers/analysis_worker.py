@@ -37,6 +37,7 @@ from screenmind.engine.ocr import OCRExtractor
 from screenmind.storage.database import Database
 from screenmind.storage.models import ScreenshotEntry, ActivityRecord
 from screenmind.workers.capture_worker import CaptureResult, filter_sensitive
+from screenmind.workers.daemon_executor import DaemonExecutor
 
 logger = logging.getLogger("screenmind.workers.analysis_worker")
 
@@ -185,6 +186,10 @@ class AnalysisWorker:
         # Rows backfill already tried in this run. A row that fails again stays
         # 'failed' and is not retried until restart, so one bad frame can't loop.
         self._backfill_tried: set[int] = set()
+        # OCR and Gemma calls run here, not in the default executor, so a stop
+        # does not wait for a call in flight. run() abandons it on exit; the
+        # cancelled _process writes nothing, so the frame stays 'pending'.
+        self._executor = DaemonExecutor("analysis")
 
         # Per-app analysis cache: (app_name, title) -> cached results
         # Avoids redundant Gemma calls for identical/similar screens
@@ -193,7 +198,14 @@ class AnalysisWorker:
         self._cache_skips = 0
 
     async def run(self):
-        """Main processing loop."""
+        """Main processing loop. Ends on stop() or when the task is cancelled."""
+        try:
+            await self._run()
+        finally:
+            # Leave a call in flight behind: the stop must not wait for Gemma
+            self._executor.shutdown(wait=False, cancel_futures=True)
+
+    async def _run(self):
         self._running = True
 
         logger.info("Started. Waiting for screenshots...")
@@ -369,8 +381,8 @@ class AnalysisWorker:
             # 3b. OCR — runs when a11y text is chrome-only or insufficient
             needs_ocr = not a11y_is_content or text_method == "none"
             if needs_ocr and self._ocr.is_available:
-                ocr_raw, ocr_boxes = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: self._ocr.extract_text_with_boxes(capture.image)
+                ocr_raw, ocr_boxes = await asyncio.get_running_loop().run_in_executor(
+                    self._executor, lambda: self._ocr.extract_text_with_boxes(capture.image)
                 )
 
                 if ocr_raw:
@@ -476,8 +488,8 @@ class AnalysisWorker:
                     max_retries = 3
                     for attempt in range(max_retries):
                         try:
-                            return await asyncio.get_event_loop().run_in_executor(
-                                None,
+                            return await asyncio.get_running_loop().run_in_executor(
+                                self._executor,
                                 lambda: analyze_fn(
                                     image=capture.image,
                                     window_title=capture.window_title,
