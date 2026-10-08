@@ -542,7 +542,7 @@ flowchart TB
   <div class="cols">
     <div>
       <h3>Retention</h3>
-      <p><code>RETENTION_DAYS</code> (default 7, 0 = forever). <code>cleanup_old_data()</code> deletes <code>activities</code> and their JPEGs, <code>ui_events</code> and <code>meetings</code> older than the cutoff. It runs once, at startup (G24).</p>
+      <p><code>RETENTION_DAYS</code> (default 7, 0 = forever). <code>cleanup_old_data()</code> deletes <code>activities</code> and their JPEGs, <code>ui_events</code> and <code>meetings</code> older than the cutoff. It runs at startup and again while the app runs: <code>workers/retention.py</code> checks once an hour and cleans up when the date or <code>retention_days</code> has changed.</p>
     </div>
     <div>
       <h3>Encryption</h3>
@@ -628,7 +628,6 @@ flowchart TB
       <tr data-s="both"><td class="gid">G21</td><td>With the same app on several displays, UI events without a point (typing, app switches, clipboard) go to the first frame of that app saved in the tick. Clicks go by position, other apps by name.</td><td><span class="chip both">both</span></td><td>ui-events.md "Same app on two displays"</td></tr>
       <tr data-s="mac"><td class="gid">G22</td><td>Permission prompts name Terminal or Python, not ScreenMind.</td><td><span class="chip mac">macOS</span></td><td>ui-events.md "macOS permission prompts name Terminal or Python"</td></tr>
       <tr data-s="both"><td class="gid">G23</td><td>The DB is plain text. Only screenshots can be encrypted, and that is off by default.</td><td><span class="chip both">both</span></td><td>ui-events.md "Encrypt the whole DB"</td></tr>
-      <tr data-s="both" data-new="1"><td class="gid">G24</td><td>Retention runs only at startup. An instance that runs for weeks keeps everything since its last start.</td><td><span class="chip both">both</span></td><td><span class="chip new">new</span></td></tr>
       <tr data-s="win" data-new="1"><td class="gid">G25</td><td>Elevated (admin) windows are probably not readable by UIA or the LL hooks from a normal process (UIPI). Not tested. Not a priority (2026-10-08).</td><td><span class="chip win">Windows</span></td><td><span class="chip new">new</span></td></tr>
       <tr data-s="mac"><td class="gid">G26</td><td><code>enable_full_a11y_tree()</code> sets <code>AXManualAccessibility</code> on every Electron and Chromium app. It may cost CPU in those apps.</td><td><span class="chip mac">macOS</span></td><td>ui-events.md "Electron full accessibility tree"</td></tr>
       <tr data-s="lnx" data-new="1"><td class="gid">G27</td><td>No UI events backend, no browser URL, no mic info on Linux.</td><td><span class="chip lnx">Linux</span></td><td><span class="chip new">new</span></td></tr>

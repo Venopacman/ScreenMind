@@ -53,13 +53,6 @@ Status: idea
 
 Refs: `AudioWorker._find_loopback_device()`, `_recording_loop()`.
 
-### G24: Retention runs only at startup
-Status: open
-
-`cleanup_old_data()` runs once in `main.py`. The main instance can run for weeks, and then nothing is deleted. Run it once a day from a worker loop too.
-
-Refs: `screenmind/main.py:175`, `Database.cleanup_old_data()`.
-
 ### G25: Elevated windows on Windows
 Status: idea (not tested)
 

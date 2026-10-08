@@ -88,7 +88,7 @@ CHECKS = [
     ("password_field", "Password field is not stored", {"macos": [], "windows": []}),
     ("calls", "Call detection", {"macos": [], "windows": ["G16", "G17"]}),
     ("analysis", "Analysis (Gemma)", {"macos": ["G15"], "windows": ["G15"]}),
-    ("retention", "Retention cleanup at startup", {"macos": ["G24"], "windows": ["G24"]}),
+    ("retention", "Retention cleanup at startup", {"macos": [], "windows": []}),
 ]
 CHECK_LABELS = {cid: label for cid, label, _ in CHECKS}
 CHECK_GAPS = {cid: gaps for cid, _, gaps in CHECKS}

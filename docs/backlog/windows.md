@@ -83,15 +83,6 @@ Fixed: with `llama_server_shared`, `ensure_llama_server()` only logs and returns
 
 Refs: `screenmind/setup_llama.py` `ensure_llama_server()`, `scripts/dev-instance.sh`, `73285fa`.
 
-### A normal stop waits for a running Gemma call
-Status: fixed 2026-10-08 (`5e9dcef`)
-
-On `/api/shutdown`, `asyncio.run` waits for analysis calls still running in the default executor. Live (G37, 2026-10-08) a stop took about 40 s for that reason. A call over 45 s now ends in the forced exit (code 3), and the frame stays `pending` for backfill. Cancel or abandon the analysis executor on shutdown so stops are fast and exit 0.
-
-Fixed: OCR and Gemma calls run on a one-thread daemon executor (`workers/daemon_executor.py`) that a stop abandons. The cancelled frame keeps `pending`. Live, dev instance stopped during "Processing #": before 24.8 s, exit 0 (the call was short); after 1.2 s, exit 0 (twice), frame `pending`. The abandoned request still runs to its end on llama-server; a shared server stays busy that long.
-
-Refs: `workers/analysis_worker.py` (`run_in_executor` calls), `screenmind/main.py`, `screenmind/watchdog.py` `start_shutdown_deadline()`.
-
 ## Parked
 
 ### G33: Gemma runs mostly on the CPU here

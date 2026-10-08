@@ -401,7 +401,7 @@ Migrations live in `Database._init_db()` as a list. Version = list index + 1. Th
 
 ### Retention
 
-`RETENTION_DAYS` (default 7, 0 = keep forever). `Database.cleanup_old_data()` deletes `activities` (and their JPEGs), `ui_events` and `meetings` older than the cutoff. It runs once, at startup in `main.py` (G24).
+`RETENTION_DAYS` (default 7, 0 = keep forever). `Database.cleanup_old_data()` deletes `activities` (and their JPEGs), `ui_events` and `meetings` older than the cutoff. It runs at startup and again while the app runs: `workers/retention.py` checks once an hour and cleans up when the date or `retention_days` has changed.
 
 ### Encryption
 
@@ -467,7 +467,6 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G21 | With the same app on several displays, UI events without a point (typing, app switches, clipboard) go to the first frame of that app saved in the tick. Clicks go by position, other apps by name. | both | [ui-events.md](../backlog/ui-events.md) "Same app on two displays" |
 | G22 | Permission prompts name Terminal or Python, not ScreenMind. | macOS | [ui-events.md](../backlog/ui-events.md) "macOS permission prompts name Terminal or Python" |
 | G23 | The DB is plain text. Only screenshots can be encrypted, and that is off by default. | both | [ui-events.md](../backlog/ui-events.md) "Encrypt the whole DB" |
-| G24 | Retention runs only at startup. An instance that runs for weeks keeps everything since its last start. | both | new |
 | G25 | Elevated (admin) windows are probably not readable by UIA or the LL hooks from a normal process (UIPI). Not tested. Not a priority (2026-10-08). | Windows | new |
 | G26 | `enable_full_a11y_tree()` sets `AXManualAccessibility` on every Electron and Chromium app. It may cost CPU in those apps. | macOS | [ui-events.md](../backlog/ui-events.md) "Electron full accessibility tree" |
 | G27 | No UI events backend, no browser URL, no mic info on Linux. | Linux | new |

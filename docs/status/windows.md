@@ -41,7 +41,7 @@ How to read it: [README.md](README.md).
 | Password field is not stored | **SKIP** | password box step did not run |  |
 | Call detection | **SKIP** | no call was active during the run | [G16](../architecture/capture.md#8-gaps), [G17](../architecture/capture.md#8-gaps) |
 | Analysis (Gemma) | **PASS** | status ok: 7; sample (chrome): category=browsing, summary 66 chars; summary set on 7 of 7 ok rows | [G15](../architecture/capture.md#8-gaps) |
-| Retention cleanup at startup | **PASS** | 30-day-old activity, ui_event, meeting and JPEG were deleted at startup | [G24](../architecture/capture.md#8-gaps) |
+| Retention cleanup at startup | **PASS** | 30-day-old activity, ui_event, meeting and JPEG were deleted at startup |  |
 
 ## Notes
 
