@@ -10,7 +10,7 @@ from screenmind.config import settings
 from screenmind.platform_support.macos_audio import app_name_from_path
 from screenmind.storage.database import Database
 from screenmind.workers import audio_worker as aw
-from screenmind.workers.call_detection import match_call
+from screenmind.workers.call_detection import match_call, normalize_title, same_call
 
 KEYWORDS = ["zoom", "teams", "meet", "webex", "slack", "discord"]
 
@@ -103,6 +103,7 @@ def test_app_name_from_helper_path():
 # ── State machine ──────────────────────────────────────────────────────
 
 T0 = datetime(2026, 10, 6, 16, 31, 0).timestamp()
+GRACE = 120
 
 
 @pytest.fixture
@@ -114,6 +115,7 @@ def db(tmp_path):
 def worker(db, monkeypatch):
     monkeypatch.setattr(settings, "meeting_transcription", False)
     monkeypatch.setattr(settings, "meeting_apps", ",".join(KEYWORDS))
+    monkeypatch.setattr(settings, "call_end_grace_s", GRACE)
     with patch.object(aw.AudioWorker, "_init_transcription"), \
             patch("screenmind.capture.window.get_window_url",
                   return_value="https://meet.google.com/dsv-einb-rbg?authuser=0&pli=1"):
@@ -149,9 +151,9 @@ class TestCallTracking:
 
         # Call over: window gone. Ends only after the grace, at the last sighting.
         tick(worker, 105, [FOCUSED_CLAUDE])
-        tick(worker, 100 + aw.END_GRACE_S, [FOCUSED_CLAUDE])
+        tick(worker, 100 + GRACE, [FOCUSED_CLAUDE])
         assert rows(db)[0]["end_time"] is None
-        tick(worker, 101 + aw.END_GRACE_S, [FOCUSED_CLAUDE])
+        tick(worker, 101 + GRACE, [FOCUSED_CLAUDE])
         [r] = rows(db)
         assert r["end_time"] == datetime.fromtimestamp(T0 + 100).isoformat()
         assert r["duration_minutes"] == pytest.approx(1.7, abs=0.05)
@@ -173,7 +175,7 @@ class TestCallTracking:
         assert worker.in_meeting
         tick(worker, 305, [other_tab], set())  # left the call: mic released
         assert worker.in_meeting
-        tick(worker, 301 + aw.END_GRACE_S, [other_tab], set())
+        tick(worker, 301 + GRACE, [other_tab], set())
         [r] = rows(db)
         assert r["end_time"] == datetime.fromtimestamp(T0 + 300).isoformat()
 
@@ -181,7 +183,7 @@ class TestCallTracking:
         for t in (0, 5, 10):
             tick(worker, t, [FOCUSED_CLAUDE, SLACK_CHANNEL], {"slack"})
         tick(worker, 15, [FOCUSED_CLAUDE, SLACK_CHANNEL], set())
-        tick(worker, 16 + aw.END_GRACE_S, [FOCUSED_CLAUDE, SLACK_CHANNEL], set())
+        tick(worker, 16 + GRACE, [FOCUSED_CLAUDE, SLACK_CHANNEL], set())
         [r] = rows(db)
         assert r["app_name"] == "Slack" and r["url"] is None
         assert r["window_title"] == "distillery-dev-team - Nebius - Slack"
@@ -223,6 +225,152 @@ class TestCallTracking:
             tick(worker, 5, [MEET_DAILY])
         assert worker.in_meeting and not worker.stats["recording"]
         assert rows(db)[0]["transcript"] is None
+
+
+class TestOneCallOneRow:
+    """One call stays one meetings row through short gaps and restarts
+    (2026-10-07: one Meet call was saved as rows 4 and 5 around a restart)."""
+
+    def test_speaking_marker_flapping_in_title(self, worker, db):
+        quiet = win("Google Chrome", "Meet - distillery daily #2", pid=20)
+        for t in range(0, 600, 5):
+            tick(worker, t, [FOCUSED_CLAUDE, MEET_DAILY if t % 10 else quiet])
+        [r] = rows(db)
+        assert r["end_time"] is None
+
+    def test_short_mic_drop_in_slack_huddle(self, worker, db):
+        for t in (0, 5, 10):
+            tick(worker, t, [SLACK_CHANNEL], {"slack"})
+        for t in range(15, 75, 5):  # muted: Slack lets go of the mic for a minute
+            tick(worker, t, [SLACK_CHANNEL], set())
+        tick(worker, 75, [SLACK_CHANNEL], {"slack"})
+        tick(worker, 80 + GRACE, [SLACK_CHANNEL], {"slack"})
+        [r] = rows(db)
+        assert r["end_time"] is None
+
+    def test_window_hidden_briefly(self, worker, db):
+        tick(worker, 0, [MEET_DAILY])
+        tick(worker, 5, [MEET_DAILY])
+        for t in range(10, 40, 5):
+            tick(worker, t, [FOCUSED_CLAUDE])
+        tick(worker, 40, [MEET_DAILY])
+        tick(worker, 45 + GRACE, [MEET_DAILY])
+        [r] = rows(db)
+        assert r["end_time"] is None
+
+    def test_gap_longer_than_grace_makes_two_rows(self, worker, db):
+        tick(worker, 0, [MEET_DAILY])
+        tick(worker, 5, [MEET_DAILY])
+        tick(worker, 10, [FOCUSED_CLAUDE])
+        tick(worker, 6 + GRACE, [FOCUSED_CLAUDE])  # call ended at t=5
+        tick(worker, 30 + GRACE, [MEET_DAILY])
+        tick(worker, 35 + GRACE, [MEET_DAILY])
+        first, second = rows(db)
+        assert first["end_time"] == datetime.fromtimestamp(T0 + 5).isoformat()
+        assert second["start_time"] == datetime.fromtimestamp(T0 + 30 + GRACE).isoformat()
+        assert second["end_time"] is None
+
+    def test_grace_is_a_setting(self, worker, db, monkeypatch):
+        monkeypatch.setattr(settings, "call_end_grace_s", 30)
+        tick(worker, 0, [MEET_DAILY])
+        tick(worker, 5, [MEET_DAILY])
+        tick(worker, 36, [FOCUSED_CLAUDE])
+        assert not worker.in_meeting
+
+    def test_restart_resumes_the_same_call(self, worker, db):
+        for t in range(0, 600, 5):
+            tick(worker, t, [MEET_DAILY])
+        worker.force_stop()  # shutdown
+        [r] = rows(db)
+        assert r["end_time"] == datetime.fromtimestamp(T0 + 595).isoformat()
+
+        restarted = aw.AudioWorker(database=db)
+        tick(restarted, 610, [MEET_DAILY])
+        tick(restarted, 615, [MEET_DAILY])
+        [r] = rows(db)
+        assert r["end_time"] is None and restarted.in_meeting
+        assert r["start_time"] == datetime.fromtimestamp(T0).isoformat()
+
+        tick(restarted, 900, [MEET_DAILY])
+        restarted.force_stop()
+        [r] = rows(db)
+        assert r["end_time"] == datetime.fromtimestamp(T0 + 900).isoformat()
+        assert r["duration_minutes"] == pytest.approx(15.0, abs=0.05)
+
+    def test_restart_after_a_crash_resumes_too(self, worker, db):
+        for t in range(0, 125, 5):
+            tick(worker, t, [MEET_DAILY])
+        # Crashed: the next start closes the row from the saved duration
+        db.cleanup_stale_meetings()
+        restarted = aw.AudioWorker(database=db)
+        tick(restarted, 150, [MEET_DAILY])
+        tick(restarted, 155, [MEET_DAILY])
+        [r] = rows(db)
+        assert r["end_time"] is None
+
+    def test_restart_after_the_grace_makes_a_new_row(self, worker, db):
+        tick(worker, 0, [MEET_DAILY])
+        tick(worker, 5, [MEET_DAILY])
+        worker.force_stop()
+        restarted = aw.AudioWorker(database=db)
+        tick(restarted, 10 + GRACE, [MEET_DAILY])
+        tick(restarted, 15 + GRACE, [MEET_DAILY])
+        assert len(rows(db)) == 2
+
+    def test_restart_into_another_meet_room_makes_a_new_row(self, worker, db):
+        tick(worker, 0, [MEET_DAILY])
+        tick(worker, 5, [MEET_DAILY])
+        worker.force_stop()
+        restarted = aw.AudioWorker(database=db)
+        with patch("screenmind.capture.window.get_window_url",
+                   return_value="https://meet.google.com/abc-defg-hij"):
+            tick(restarted, 20, [MEET_DAILY])
+            tick(restarted, 25, [MEET_DAILY])
+        first, second = rows(db)
+        assert second["url"] == "https://meet.google.com/abc-defg-hij"
+
+    def test_restart_into_another_app_makes_a_new_row(self, worker, db):
+        tick(worker, 0, [MEET_DAILY])
+        tick(worker, 5, [MEET_DAILY])
+        worker.force_stop()
+        restarted = aw.AudioWorker(database=db)
+        tick(restarted, 20, [SLACK_CHANNEL], {"slack"})
+        tick(restarted, 25, [SLACK_CHANNEL], {"slack"})
+        assert [r["app_name"] for r in rows(db)] == ["Google Meet", "Slack"]
+
+    def test_recorded_call_is_not_resumed(self, worker, db):
+        db.insert_meeting(start_time=datetime.fromtimestamp(T0), app_name="Google Meet",
+                          transcript="hello", summary="", window_title=MEET_DAILY["title"],
+                          url="https://meet.google.com/dsv-einb-rbg")
+        db.end_meeting(1, datetime.fromtimestamp(T0 + 60), 1.0)
+        tick(worker, 70, [MEET_DAILY])
+        tick(worker, 75, [MEET_DAILY])
+        assert len(rows(db)) == 2
+
+
+class TestSameCall:
+    def test_normalize_title_drops_markers(self):
+        assert normalize_title("Meet - distillery daily #2 🔊") == "meet - distillery daily #2"
+        assert normalize_title("* b2b-general (Channel) - Nebius - 2 new items - Slack [Main]") \
+            == "b2b-general (channel) - nebius - slack"
+        assert normalize_title("dev-review (Channel) - Nebius - 1 new item - Slack") \
+            == "dev-review (channel) - nebius - slack"
+        assert normalize_title(None) == ""
+
+    def test_url_decides_when_both_known(self):
+        row = {"app_name": "Google Meet", "url": "https://meet.google.com/a", "window_title": "Meet - A"}
+        assert same_call("Google Meet", "https://meet.google.com/a", "Meet - B", True, row)
+        assert not same_call("Google Meet", "https://meet.google.com/b", "Meet - A", True, row)
+
+    def test_browser_title_decides_without_url(self):
+        row = {"app_name": "Google Meet", "url": None, "window_title": "Meet - Daily 🔊"}
+        assert same_call("Google Meet", None, "Meet - Daily", True, row)
+        assert not same_call("Google Meet", None, "Meet - Retro", True, row)
+
+    def test_native_app_title_does_not_matter(self):
+        row = {"app_name": "Slack", "url": None, "window_title": "dev-general (Channel) - Nebius - Slack"}
+        assert same_call("Slack", None, "Parker Veroff - Nebius - Slack", False, row)
+        assert not same_call("Zoom", None, None, False, row)
 
 
 def test_migration_v10_adds_meeting_columns(db):

@@ -727,6 +727,19 @@ class Database:
         )
         conn.commit()
 
+    def get_latest_meeting(self) -> Optional[Dict[str, Any]]:
+        """The most recent meetings row, or None."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM meetings ORDER BY start_time DESC, id DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
+
+    def reopen_meeting(self, meeting_id: int):
+        """Mark an ended call as running again (it came back within the grace)."""
+        conn = self._get_conn()
+        conn.execute("UPDATE meetings SET end_time = NULL WHERE id = ?", (meeting_id,))
+        conn.commit()
+
     def update_meeting(self, meeting_id: int, end_time=None, duration_minutes=0,
                        transcript="", summary=""):
         """Update a meeting with end time, transcript, and summary."""

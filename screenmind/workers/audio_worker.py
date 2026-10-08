@@ -18,7 +18,7 @@ import numpy as np
 
 from screenmind.config import settings
 from screenmind.storage.database import Database
-from screenmind.workers.call_detection import CallMatch, match_call, owner_on_mic
+from screenmind.workers.call_detection import CallMatch, match_call, owner_on_mic, same_call
 
 logger = logging.getLogger("screenmind.workers.audio_worker")
 
@@ -29,10 +29,12 @@ CHECK_INTERVAL_S = 5
 # A call starts after this many detections in a row (CHECK_INTERVAL_S apart). Filters
 # out a window flashing past and short mic use like Slack voice clips.
 CONFIRM_CHECKS = 2
-# A call ends when neither its window nor its mic use was seen for this
-# long. Covers switching browser tabs away from Meet while muted. The end
-# time saved is the last time the call was seen, not when the grace ran out.
-END_GRACE_S = 120
+# A call ends when neither its window nor its mic use was seen for
+# settings.call_end_grace_s. Covers switching browser tabs away from Meet
+# while muted. The end time saved is the last time the call was seen, not
+# when the grace ran out. A call that starts again within the grace of the
+# last row's end, and is the same call (same_call), resumes that row: this
+# keeps one row across a restart of ScreenMind.
 # While a call runs, save its duration this often so a crash keeps it.
 DURATION_SAVE_EVERY_S = 60
 # How often to retry reading the room URL when the first try failed.
@@ -158,7 +160,7 @@ class AudioWorker:
                     # A different call took over: close this one, confirm the new one
                     logger.info(f"Call switched from {self._meeting_app} to {match.app}")
                     self._stop_meeting(end=self._last_seen)
-                elif now - self._last_seen > END_GRACE_S:
+                elif now - self._last_seen > settings.call_end_grace_s:
                     self._stop_meeting(end=self._last_seen)
                     return
                 else:
@@ -224,6 +226,8 @@ class AudioWorker:
         self._last_duration_save = now
 
         self._recording = self._can_record()
+        if not self._recording and self._resume_recent(match, start):
+            return
         self._meeting_id = self._db.insert_meeting(
             start_time=self._session_start,
             app_name=match.app,
@@ -244,6 +248,34 @@ class AudioWorker:
             target=self._recording_loop, daemon=True
         )
         self._recording_thread.start()
+
+    def _resume_recent(self, match: CallMatch, start: float) -> bool:
+        """Continue the last meetings row if it is this call and it ended
+        less than the grace before this start (a restart of ScreenMind).
+        Only rows tracked without a transcript: a recorded row has its
+        summary already started."""
+        try:
+            row = self._db.get_latest_meeting()
+            if not row or not row.get("end_time") or row.get("transcript") is not None:
+                return False
+            ended = datetime.fromisoformat(row["end_time"]).timestamp()
+            if not (0 <= start - ended <= settings.call_end_grace_s):
+                return False
+            if not same_call(match.app, self._meeting_url, match.title, match.is_browser, row):
+                return False
+            self._db.reopen_meeting(row["id"])
+            self._db.update_meeting_call_info(
+                row["id"], window_title=match.title, url=self._meeting_url)
+        except Exception as e:
+            logger.warning(f"Could not resume the last call: {e}")
+            return False
+        self._meeting_id = row["id"]
+        self._session_start = datetime.fromisoformat(row["start_time"])
+        self._meeting_title = row.get("window_title") or match.title
+        self._meeting_url = row.get("url") or self._meeting_url
+        logger.info(f"Call resumed ({match.app}, row {row['id']}, "
+                    f"gap {start - ended:.0f}s)")
+        return True
 
     def _can_record(self) -> bool:
         """Transcription is on and the active model can take audio."""
@@ -589,9 +621,10 @@ If a section has no content, write "None discussed."
             )
 
     def force_stop(self):
-        """End the current call now (e.g., on shutdown or delete)."""
+        """End the current call (e.g., on shutdown or delete) at the last
+        time it was seen, so a restart can resume it (_resume_recent)."""
         if self._in_meeting:
-            self._stop_meeting()
+            self._stop_meeting(end=self._last_seen or None)
 
     @property
     def stats(self) -> dict:

@@ -112,7 +112,7 @@ Gap ids (G1, G2...) point to [section 8](#8-gaps).
 | Browser URL | Page URL of the focused browser window | `AXURL` of the one top-level `AXWebArea` (`_ax_page_url`) | UIA `Document` value (`pick_page_document`) | none | `activities.active_url`, `ui_events.url`, `meetings.url` (sanitized) | G8, G9, G16 |
 | OCR text | Text from pixels | RapidOCR (ONNX Runtime, CPU) | same | same | `activities.ocr_text`, `ocr_boxes`, `organized_text` | G14 |
 | UI events | Clicks, typed text, app switches, tab/page changes, clipboard | `CGEventTap` (listen-only) + `AXUIElement` + `NSPasteboard` | `WH_KEYBOARD_LL` / `WH_MOUSE_LL` hooks + UIA + Win32 clipboard | none | `ui_events`, `activities.user_actions` | G21, G22, G25, G27, G31 |
-| Call start/end | App, title, room URL, duration | Window rules + CoreAudio "is running input" per process | Window rules only (no mic info) | Window rules on the focused window only | `meetings` | G16, G17, G27 |
+| Call start/end | App, title, room URL, duration | Window rules + CoreAudio "is running input" per process | Window rules only (no mic info) | Window rules on the focused window only | `meetings` | G16, G17, G27, G32, G33 |
 | Call audio | Mic + system audio, transcript, summary | `sounddevice` mic; system audio only with a virtual loopback device | `sounddevice` mic + a device named "loopback" / "Stereo Mix" | `sounddevice` mic | `meetings.transcript`, `meetings.summary` | G18 |
 | Analysis | Category, summary, scene, layout | Gemma 4 E2B (llama-server) | same | same | `activities.app_name`, `category`, `summary`, `details`, `visible_text`, `mood`, `confidence`, `scene_description` | G15 |
 
@@ -333,7 +333,8 @@ OS hook thread -> queue.SimpleQueue -> enricher thread -> ui_events table
   - Discord: Discord on the mic only.
   - Any other keyword: owner or title contains it.
   - Native apps on the mic count even with no visible window.
-- A call starts after 2 detections in a row. It ends 120 s after it was last seen (window or mic). The stored end time is the last time it was seen.
+- A call starts after 2 detections in a row. It ends when it was not seen (window or mic) for `CALL_END_GRACE_S` (default 120 s). The stored end time is the last time it was seen. While a call runs, a title change (Meet's 🔊 speaking marker), a mute or a hidden window shorter than the grace keeps the same row.
+- Restarts: shutdown ends the call at the last time it was seen. When a call starts, `_resume_recent()` looks at the last `meetings` row. If that row ended less than the grace before, has no transcript, and `same_call()` says it is this call, the row is reopened (`end_time` back to NULL) and keeps its start. `same_call()`: same `app_name`; then the room URL decides if both are known; else, for browser calls, the title without markers (`normalize_title()` drops emoji, "* ", " - N new items", " [Main]"); else the app alone. This fixed one Meet call saved as two rows (ids 4 and 5) around a restart on 2026-10-07.
 - Stored: `meetings.start_time`, `end_time`, `app_name` (label like "Google Meet"), `window_title`, `url` (v10), `duration_minutes` (saved every 60 s). For browser calls the room URL comes from `get_window_url()` and `sanitize_url()`, retried every 30 s.
 
 **Transcription**, only when on and the active model has an audio encoder (`model_manager.is_audio_capable()`):
@@ -454,7 +455,7 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G14 | OCR reads one script per frame. With `en,es,de,fr,ru` the Cyrillic model reads all Latin text, and accents may suffer. | both | new |
 | G15 | Gemma gets the screen text as an alphabetically sorted bag of unique words (8,000 chars) and a 768 px image. Line order and structure are lost. | both | [questionnaire-data-source.md](../backlog/questionnaire-data-source.md) "Slack summaries are generic" (related) |
 | G16 | No `get_window_url()` on Windows, so `meetings.url` is always NULL there. | Windows | new |
-| G17 | No mic-in-use signal on Windows. Discord calls are never detected. Slack needs "huddle" in the title. A call whose window is hidden ends after 120 s. | Windows | new |
+| G17 | No mic-in-use signal on Windows. Discord calls are never detected. Slack needs "huddle" in the title. A call whose window is hidden ends after `CALL_END_GRACE_S` (120 s). | Windows | new |
 | G18 | System audio is recorded only from a device named "loopback" or "Stereo Mix". macOS has none by default, so transcripts have the mic side only. | both (macOS always) | new |
 | G21 | With several displays, all UI events go to the first frame saved in the tick. | both | [ui-events.md](../backlog/ui-events.md) "Events go to the first frame of a tick" |
 | G22 | Permission prompts name Terminal or Python, not ScreenMind. | macOS | [ui-events.md](../backlog/ui-events.md) "macOS permission prompts name Terminal or Python" |
@@ -466,6 +467,8 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G28 | macOS may show a periodic "still recording your screen" reminder; not seen yet. | macOS | [sck-capture.md](../backlog/sck-capture.md) "macOS still recording your screen reminder" |
 | G29 | Wayland hides window positions: no window list, no active display, no per-display labels. | Linux | [multi-display-capture.md](../backlog/multi-display-capture.md) (Wayland note) |
 | G31 | Typed text and clipboard are opt-in, because there is no PII detection before they are stored. | both | [ui-events.md](../backlog/ui-events.md) "PII detection before storing typed text and clipboard" |
+| G32 | `meetings.window_title` is the first matching window, front to back. For a Slack huddle found by mic use, that is whatever Slack window is in front, not the huddle (row 6 on 2026-10-07: a huddle with a DM contact saved as "* b2b-general (Channel) ... [Main]"). | both | new |
+| G33 | A call is kept as one row across a restart only if the restart takes less than `CALL_END_GRACE_S` and the call is not being transcribed. Inside one process, two Meet rooms back to back within the grace stay one row, because the room URL is read only once. | both | new |
 
 Closed while this map was written: G10 and G11 by `fa80d39` (Windows a11y reads the page, not the browser UI), G13 by `81277a8` (capture-time data kept on backlog skips), G20 by `399a565` (UI events on by default, live on the main instance since 2026-10-07). G19 (no global hotkeys on macOS) went away with the hotkeys themselves in `57cf0dd`. Their ids stay reserved.
 

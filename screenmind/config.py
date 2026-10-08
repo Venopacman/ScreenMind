@@ -73,7 +73,7 @@ _ALLOWED_OVERRIDES = {
     "analysis_mode",
     "auto_pause_heavy_apps", "heavy_apps",
     "defer_analysis", "meeting_transcription",
-    "meeting_apps",
+    "meeting_apps", "call_end_grace_s",
     "active_model", "model_variants", "retention_days",
     "sensitive_filter_enabled", "sensitive_filter_types",
     "encryption_enabled",
@@ -196,6 +196,13 @@ class Settings(BaseSettings):
         default="zoom,teams,meet,webex,slack,discord",
         description="Call apps to detect. Built-in rules for zoom, teams, meet, webex, slack, "
                     "discord; any other entry matches a window owner or title containing it",
+    )
+    call_end_grace_s: int = Field(
+        default=120,
+        ge=10,
+        le=1800,
+        description="A call ends after it has not been seen for this many seconds. A call "
+                    "seen again within this time (also after a restart) keeps its row",
     )
     # ── UI Events (accessibility) ───────────────────────────────────────
     ui_events_enabled: bool = Field(

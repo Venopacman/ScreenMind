@@ -118,3 +118,39 @@ def match_call(windows: Iterable[dict], mic_apps: Optional[Set[str]],
 def owner_on_mic(owner: Optional[str], mic_apps: Optional[Set[str]]) -> bool:
     """Whether this app is still capturing the mic (call still running)."""
     return bool(owner) and bool(mic_apps) and owner.lower() in mic_apps
+
+
+# Bits of a call window title that come and go while the call stays the
+# same: Meet's speaking icon (🔊), Slack's unread marker ("* "), unread count
+# (" - 2 new items") and window tag (" [Main]").
+_TITLE_NOISE = (
+    re.compile("[\U0001F000-\U0001FAFF☀-➿️‍]"),
+    re.compile(r"\s*[-–—]\s*\d+\s+new\s+items?\b", re.IGNORECASE),
+    re.compile(r"^\s*\*\s*"),
+    re.compile(r"\s*\[main\]\s*$", re.IGNORECASE),
+)
+
+
+def normalize_title(title: Optional[str]) -> str:
+    """Call window title without the markers that change during a call."""
+    t = title or ""
+    for pattern in _TITLE_NOISE:
+        t = pattern.sub("", t)
+    return " ".join(t.split()).lower()
+
+
+def same_call(app: str, url: Optional[str], title: Optional[str], is_browser: bool,
+              row: dict) -> bool:
+    """Whether a call seen now is the call in this meetings row.
+
+    The room URL decides when both are known (Meet room). Otherwise a
+    browser call compares titles, which name the meeting there ("Meet -
+    Daily sync"). A native app's window title follows whatever the user has
+    open (Slack channel), so the app alone decides."""
+    if row.get("app_name") != app:
+        return False
+    if url and row.get("url"):
+        return url == row["url"]
+    if is_browser and title and row.get("window_title"):
+        return normalize_title(title) == normalize_title(row["window_title"])
+    return True
