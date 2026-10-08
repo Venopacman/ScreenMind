@@ -112,6 +112,19 @@ def _a11y_is_content(text: Optional[str], window_title: Optional[str] = None,
     return sum(len(l) for l in content) >= _A11Y_MIN_CONTENT_CHARS
 
 
+def _redact(text: Optional[str], boxes: Optional[list]) -> Optional[str]:
+    """Sensitive-data filter on the frame's text and, in place, its OCR boxes.
+    Runs in the worker's executor: a filter call can take about a second."""
+    text = filter_sensitive(text)
+    if boxes and settings.sensitive_filter_enabled:
+        try:
+            from screenmind.privacy.data_filter import filter_ocr_boxes, parse_enabled_types
+            filter_ocr_boxes(boxes, parse_enabled_types(settings.sensitive_filter_types))
+        except Exception as e:
+            logger.warning(f"Sensitive filter error (OCR boxes): {e}")
+    return text
+
+
 class AnalysisWorker:
     """
     Background worker that processes queued screenshots through the pipeline:
@@ -195,9 +208,11 @@ class AnalysisWorker:
                 if age_seconds > 180:
                     if capture.activity_id:
                         # Keep what was read at capture time; no OCR.
+                        a11y_text = await asyncio.get_running_loop().run_in_executor(
+                            self._executor, filter_sensitive, capture.a11y_text)
                         self._db.mark_skipped(
                             capture.activity_id,
-                            ocr_text=filter_sensitive(capture.a11y_text),
+                            ocr_text=a11y_text,
                             active_url=capture.browser_url,
                         )
                     self._cache_skips += 1
@@ -331,13 +346,8 @@ class AnalysisWorker:
 
             # 2c. Sensitive data filter — redact before storage. The boxes
             #     too: they are stored and organized_text is built from them.
-            ocr_text = filter_sensitive(ocr_text)
-            if ocr_boxes and settings.sensitive_filter_enabled:
-                try:
-                    from screenmind.privacy.data_filter import filter_ocr_boxes, parse_enabled_types
-                    filter_ocr_boxes(ocr_boxes, parse_enabled_types(settings.sensitive_filter_types))
-                except Exception as e:
-                    logger.warning(f"Sensitive filter error (OCR boxes): {e}")
+            ocr_text = await asyncio.get_running_loop().run_in_executor(
+                self._executor, _redact, ocr_text, ocr_boxes)
             if ocr_boxes:
                 ocr_boxes_json = json.dumps(ocr_boxes)
 
