@@ -8,8 +8,13 @@ from fastapi import APIRouter, HTTPException, Query
 
 from screenmind.config import settings
 from screenmind.api.dependencies import db
+from screenmind.workers.daemon_executor import DaemonExecutor
 
 router = APIRouter(prefix="/api", tags=["timeline"])
+
+# Re-analysis runs its Gemma call here, not in the default executor: the
+# interpreter joins those threads at exit, so a stop would wait for the call.
+_reanalyze_executor = DaemonExecutor("reanalyze")
 
 
 @router.get("/timeline")
@@ -108,8 +113,8 @@ async def reanalyze_activity(activity_id: int):
             }
             analyze_fn = _MODE_MAP.get(app_settings.analysis_mode, analyzer.analyze_screenshot_fast)
             record, layout_regions = await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(
-                    None,
+                asyncio.get_running_loop().run_in_executor(
+                    _reanalyze_executor,
                     lambda: analyze_fn(
                         image=img,
                         window_title=window_title,
