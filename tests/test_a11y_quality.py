@@ -1,6 +1,7 @@
 """Tests for a11y text quality: content detection, walk limits, browser URL, Electron titles."""
 
 import sys
+import types
 from unittest.mock import patch
 
 import pytest
@@ -206,7 +207,7 @@ class TestWalk:
         win = FakeEl("AXWindow", children=[FakeEl("AXGroup", children=[devtools, page, panel])])
         assert mac._ax_page_areas(win) == [page]
 
-    def test_browser_reads_only_the_page(self, mac):
+    def test_browser_reads_only_the_page(self, mac, monkeypatch):
         """Not the tab strip or the address bar (raw URL, not sanitized)."""
         page = FakeEl("AXWebArea", title="Example", AXURL="https://example.com/",
                       children=[FakeEl("AXStaticText", value="the page text people read")])
@@ -215,9 +216,15 @@ class TestWalk:
             FakeEl("AXRadioButton", title="Other tab title"),
             FakeEl("AXGroup", children=[page]),
         ])
-        with patch("ApplicationServices.AXUIElementCreateApplication"), \
-             patch("ApplicationServices.AXUIElementCopyAttributeValue", return_value=(0, win)), \
-             patch.object(MacOSAdapter, "_is_browser", return_value=True), \
+        # Fake frameworks, so this runs on any OS (CI is Windows).
+        ax = types.ModuleType("ApplicationServices")
+        ax.AXUIElementCreateApplication = lambda pid: None
+        ax.AXUIElementCopyAttributeValue = lambda el, attr, _: (0, win)
+        for name in ("FocusedWindow", "Children", "Value", "Title", "Role"):
+            setattr(ax, f"kAX{name}Attribute", f"AX{name}")
+        monkeypatch.setitem(sys.modules, "ApplicationServices", ax)
+        monkeypatch.setitem(sys.modules, "Quartz", types.ModuleType("Quartz"))
+        with patch.object(MacOSAdapter, "_is_browser", return_value=True), \
              patch.object(MacOSAdapter, "enable_full_a11y_tree"):
             text, source = mac.extract_a11y_text(7)
         assert text == "Example\nthe page text people read" and source == "a11y"

@@ -180,6 +180,8 @@ def _fake_sck(monkeypatch, displays, shot="ok"):
         SCScreenshotManager=SCScreenshotManager,
     )
     monkeypatch.setitem(sys.modules, "ScreenCaptureKit", module)
+    # SCKGrabber imports Quartz too; a fake keeps these running on any OS (CI is Windows).
+    monkeypatch.setitem(sys.modules, "Quartz", types.ModuleType("Quartz"))
     monkeypatch.setattr(sck, "cgimage_to_pil", lambda img: Image.new("RGB", (img[1], img[2])))
     return sck.SCKGrabber(timeout=0.05), calls
 
