@@ -19,11 +19,11 @@ Status: open
 On 2026-10-08 the main instance still ran `0cac8fa` on the old pip `.venv` (Python 3.12). It needs `git pull`, `uv sync` (from the user's own terminal, see "Claude sessions and AppData" below) and a restart, which runs migration v11. A backup made with SQLite's backup API is at `~/.screenmind/screenmind.db.pre-v11` (schema v10, 495 activities, integrity ok).
 
 ### Settings cleanup (both machines)
-Status: open (the user's step)
+Status: Windows done 2026-10-08 (11:51 start logs only `capture_interval` and `ui_events_types`, both code defaults since `8313d26`/`5c419f8`, so they go away once the main instance runs that code); Mac open
 
 Since `c377a8c` (G39) the code defaults are the shared settings, and the dashboard stores only values that differ from them. Existing files still hold the defaults of the day they were written, and ScreenMind never rewrites them at startup. Clean them up once, with ScreenMind stopped (it writes `settings.json` on pause and resume), then start it and check the log line "Settings that differ from the defaults" in `~/.screenmind/screenmind.log`.
 
-The user decided on 2026-10-08 which non-default values both machines keep:
+The user's decisions of 2026-10-08, per key:
 - `capture_interval: 10`: the code default since 2026-10-08, so the key has no effect once the main instance runs that code, and can go then.
 - `ui_events_types: "click,app_switch,text,clipboard"`: the code default since 2026-10-08 (the user's call on G31), so this key too can go once the main instance runs that code. No Mac step. Typed text and clipboard stay on, with the sensitive-data filter and password redaction. G31 stays open.
 - `performance_mode`: Windows follows the default (`balanced`). The Mac keeps `maximum` on purpose: with `balanced`, Apple Silicon ran Gemma on about 4 CPU cores and took 10.5 s per frame against 6.2 s on the GPU. This is the one key where the machines differ.
@@ -53,6 +53,13 @@ Mac `~/.screenmind/settings.json` gets the same file without `setup_complete` (t
 Then run the e2e check on both machines: the status header row "Settings not at default" should match (empty, or the same keys).
 
 ## Fix now
+
+### Misleading warning on a normal stop
+Status: open
+
+On `/api/shutdown` (2026-10-08 11:51:15) the recorder logs `WARNING: UI events: the input hook stopped. Clicks and keys are no longer recorded. Restart ScreenMind.` right after "Input hooks removed". The hook health check should not warn when the hook was stopped on purpose.
+
+Refs: `capture/ui_events/recorder.py` (hook health warnings), `capture/ui_events/windows.py` `stop()`.
 
 
 ### G37: No overall time limit on UIA reads
