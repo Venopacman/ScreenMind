@@ -275,7 +275,8 @@ Known holes: Chrome ignores `AXManualAccessibility`. After a reboot, with no oth
 `engine/ocr.py`, `OCRExtractor`. RapidOCR on ONNX Runtime, CPU only. EasyOCR is gone since `4cb9030`.
 
 - Detection: PP-OCRv6 tiny. Recognition: PP-OCRv5 mobile, one model per frame.
-- `OCR_LANGUAGES` (default `en`) picks the recognizer with `_rec_model()`. English only: `en`. Any other code: its script model. Mixed scripts: a Cyrillic model wins, because it also reads Latin. So one script per frame (G14).
+- `OCR_LANGUAGES` picks the recognizer with `_rec_model()`. English only: `en`. Any other code: its script model. Mixed scripts: a Cyrillic model wins, because it also reads Latin. So one script per frame (G14).
+- The default is `en,es,de,fr,ru` on every machine, so the Mac and Windows read the same text without a `.env`. It is not taken from the OS languages, because those differ between machines and say little about the text on screen. It gives the East Slavic model (`eslav`): the English model's characters (accented Latin such as é, ü, ñ, ç included) plus Cyrillic, at the same cost per frame as `en`.
 - Readings under 0.5 confidence are dropped. With a Cyrillic model, `_fix_lookalikes()` makes each mixed word one script.
 - Models (~15 MB) download to `~/.screenmind/models/ocr` on first use.
 - onnxruntime options (`_session_options()`): memory pattern and memory arena off, `OCR_THREADS` threads (default 2). RapidOCR has no setting for the memory pattern, so `_tune_sessions()` loads its models again with these options. Same text as the defaults, with less memory and about 40% less CPU per frame. Each frame takes about 45% longer.
@@ -453,7 +454,7 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G8 | Chrome ignores `AXManualAccessibility`. After a reboot, no page tree: no URL and no a11y page text from Chrome. | macOS | [ui-events.md](../backlog/ui-events.md) "Chrome shows its page tree only after..." |
 | G9 | Firefox URL and page text are untested. | macOS | [ui-events.md](../backlog/ui-events.md) "Firefox: probably no URL on macOS" |
 | G12 | a11y text has no column. It is merged into `ocr_text`, and the source is not stored: `analysis_method` holds the analysis tier (`full:fast`), not `a11y`/`ocr`. Only `ocr_boxes` being set shows that OCR ran. | both | new |
-| G14 | OCR reads one script per frame. With `en,es,de,fr,ru` the Cyrillic model reads all Latin text, and accents may suffer. | both | new |
+| G14 | OCR reads one script per frame. With the default `en,es,de,fr,ru` the East Slavic model reads all Latin text. It has the English model's characters, but not ß, œ, š, č, ł, ą, ę. On a French page it read à as a or á. | both | new |
 | G15 | Gemma gets the screen text as an alphabetically sorted bag of unique words (8,000 chars) and a 768 px image. Line order and structure are lost. | both | [questionnaire-data-source.md](../backlog/questionnaire-data-source.md) "Slack summaries are generic" (related) |
 | G16 | No `get_window_url()` on Windows, so `meetings.url` is always NULL there. | Windows | new |
 | G17 | No mic-in-use signal on Windows. Discord calls are never detected (Discord is out of scope for now, 2026-10-08). Slack needs "huddle" in the title. A call whose window is hidden ends after `CALL_END_GRACE_S` (120 s). | Windows | new |
@@ -468,7 +469,6 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G28 | macOS may show a periodic "still recording your screen" reminder; not seen yet. | macOS | [sck-capture.md](../backlog/sck-capture.md) "macOS still recording your screen reminder" |
 | G29 | Wayland hides window positions: no window list, no active display, no per-display labels. | Linux | [multi-display-capture.md](../backlog/multi-display-capture.md) (Wayland note) |
 | G31 | Typed text and clipboard are opt-in, because there is no PII detection before they are stored. | both | [ui-events.md](../backlog/ui-events.md) "PII detection before storing typed text and clipboard" |
-| G32 | `OCR_LANGUAGES` defaults to `en`. The Windows laptop has no `.env`, so it reads Latin only, while the Mac reads `en,es,de,fr,ru`. Cyrillic on Windows comes out as lookalike Latin ("Работа" -> "Pa6ota"). | Windows (default: both) | [windows.md](../backlog/windows.md) "G32" |
 | G33 | `performance_mode=balanced` starts llama-server with `-ngl 15`. On the Windows laptop (8 GB GPU) Gemma then runs mostly on the CPU: about 26 s per new frame, about 8 cores busy, and about half the frames are skipped as backlog while the user is active. Parked: the long-term aim is the lowest resource use. | Windows | [windows.md](../backlog/windows.md) "G33" (parked) |
 | G34 | Electron apps (Claude desktop): the Windows walker reads the web Document, and buttons inside it are kept ("Copy", "Fork from here", "Hide sidebar"). The type filter covers native controls only. Parked: telling labels from content is left to the LLM. | Windows | [windows.md](../backlog/windows.md) "G34" (parked) |
 | G35 | Windows shell surfaces are saved as activities: Task View, Task Switching, Start, Search, notifications. Their a11y text is only "Task Switching \| DesktopWindowXamlSource". Parked until it hurts. | Windows | [windows.md](../backlog/windows.md) "G35" (parked) |

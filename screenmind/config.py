@@ -243,11 +243,15 @@ class Settings(BaseSettings):
     )
 
     # ── OCR ───────────────────────────────────────────────────────────────
+    # One fixed default rather than one from the OS languages, so every machine
+    # gets the same recognizer and the same text (G32). It selects the East
+    # Slavic model, which reads English and the same accented Latin as the
+    # English one, plus Cyrillic, at the same cost per frame.
     ocr_languages: str = Field(
-        default="en",
+        default="en,es,de,fr,ru",
         description="Comma-separated language codes, e.g. 'en,ru' or 'en,es,de'. OCR reads one "
-                    "script per frame, picked by the first non-English code (ru/uk/be: East Slavic, "
-                    "es/de/fr...: Latin). Every script model also reads English.",
+                    "script per frame: a Cyrillic code wins, else the first non-English code "
+                    "(ru/uk/be: East Slavic, es/de/fr...: Latin). Every script model also reads English.",
     )
     ocr_threads: int = Field(
         default=2,
@@ -315,9 +319,9 @@ class Settings(BaseSettings):
 
     @property
     def ocr_languages_list(self) -> List[str]:
-        """Parsed list of OCR language codes (always non-empty)."""
+        """Parsed list of OCR language codes; empty means the default."""
         langs = [l.strip() for l in self.ocr_languages.split(",") if l.strip()]
-        return langs or ["en"]
+        return langs or type(self).model_fields["ocr_languages"].default.split(",")
 
     @property
     def blocked_apps_list(self) -> List[str]:

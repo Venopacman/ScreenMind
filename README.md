@@ -301,7 +301,7 @@ The defaults below are the settings for every machine. Change one only when a ma
 | `ANALYSIS_MODE` | `fast` | `fast` (~12s), `balanced` (~40s), or `merged` (~76s, accurate) |
 | `PERFORMANCE_MODE` | `balanced` | GPU layers: `minimal` / `balanced` / `maximum` |
 | `BLOCKED_APPS` | *(empty)* | Comma-separated apps to never capture |
-| `OCR_LANGUAGES` | `en` | OCR languages, for example `en,ru` |
+| `OCR_LANGUAGES` | `en,es,de,fr,ru` | OCR languages. One script per frame; the default reads Latin and Cyrillic |
 | `MEETING_TRANSCRIPTION` | `false` | Transcribe calls with Gemma |
 | `RETENTION_DAYS` | `7` | Delete data older than N days (0 = forever) |
 | `ENCRYPTION_ENABLED` | `false` | Encrypt screenshots at rest |

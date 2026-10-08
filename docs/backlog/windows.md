@@ -49,12 +49,6 @@ Then run the e2e check on both machines: the status header row "Settings not at 
 
 ## Fix now
 
-### G32: OCR reads Latin only on Windows
-Status: open
-
-`OCR_LANGUAGES` defaults to `en`, and this laptop has no `.env`, so Cyrillic is read by the Latin model ("Работа" -> "Pa6ota", "GitHub — Википедия" -> "WGitHub —BukuneAna"; activities 183, 198, 2026-10-07). The Mac uses `en,es,de,fr,ru`. Pick a default that matches across machines (for example from the OS UI languages), within the one-recognizer-per-frame limit (G14).
-
-Refs: `config.py` `ocr_languages`, `engine/ocr.py` `_rec_model()`, `.env.example`.
 
 ### G37: One UIA client shared across threads
 Status: open

@@ -62,7 +62,10 @@ def _rec_model(langs: list) -> str:
         return "en"
     models = [_REC_MODELS.get(l, "latin") for l in others]
     chosen = next((m for m in models if m in _CYRILLIC_MODELS), models[0])
-    if len(set(models)) > 1:
+    dropped = set(models) - {chosen}
+    if chosen in _CYRILLIC_MODELS:
+        dropped.discard("latin")  # read by the Cyrillic model too
+    if dropped:
         logger.warning(f"OCR reads one script at a time; using '{chosen}' "
                        f"(configured: {', '.join(others)})")
     return chosen

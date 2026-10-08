@@ -76,7 +76,7 @@ CHECKS = [
     ("app_name", "App name", {"macos": [], "windows": []}),
     ("window_title", "Window title", {"macos": [], "windows": []}),
     ("a11y_text", "Screen text from accessibility", {"macos": ["G7", "G12"], "windows": ["G7", "G12"]}),
-    ("ocr", "OCR text", {"macos": ["G14"], "windows": ["G14", "G32"]}),
+    ("ocr", "OCR text", {"macos": ["G14"], "windows": ["G14"]}),
     ("browser_url", "Browser URL", {"macos": ["G8", "G9"], "windows": ["G7"]}),
     ("ui_click", "UI event: click with element role/name", {"macos": ["G20"], "windows": ["G20", "G25"]}),
     ("ui_app_switch", "UI event: app switch", {"macos": ["G20"], "windows": ["G20"]}),

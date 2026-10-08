@@ -7,10 +7,35 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from screenmind.config import Settings
 from screenmind.engine import ocr
 from screenmind.engine.ocr import OCRExtractor, _fix_lookalikes, _rec_model
 
 BOX = [[0.0, 0.0], [10.5, 0.0], [10.5, 10.0], [0.0, 10.0]]
+
+
+class TestDefaultLanguages:
+    """G32: without OCR_LANGUAGES every machine reads the same scripts."""
+
+    def _defaults(self, monkeypatch, **kw):
+        monkeypatch.delenv("OCR_LANGUAGES", raising=False)
+        return Settings(_env_file=None, data_dir="/tmp/test", **kw)
+
+    def test_default_reads_latin_and_cyrillic(self, monkeypatch):
+        s = self._defaults(monkeypatch)
+        assert s.ocr_languages_list == ["en", "es", "de", "fr", "ru"]
+        # The one recognizer that also reads English and accented Latin
+        assert _rec_model(s.ocr_languages_list) == "eslav"
+
+    def test_empty_value_means_default(self, monkeypatch):
+        s = self._defaults(monkeypatch, ocr_languages=" , ")
+        assert s.ocr_languages_list == ["en", "es", "de", "fr", "ru"]
+
+    def test_env_still_overrides(self, monkeypatch):
+        monkeypatch.setenv("OCR_LANGUAGES", "en")
+        s = Settings(_env_file=None, data_dir="/tmp/test")
+        assert s.ocr_languages_list == ["en"]
+        assert _rec_model(s.ocr_languages_list) == "en"
 
 
 class TestRecModel:
@@ -36,6 +61,14 @@ class TestRecModel:
         assert _rec_model(["en", "es", "bg"]) == "cyrillic"
         # Without a Cyrillic model the first code still wins
         assert _rec_model(["en", "ja", "ko"]) == "ch"
+
+    def test_warns_only_when_a_script_is_dropped(self, caplog):
+        with caplog.at_level("WARNING", logger="screenmind.engine.ocr"):
+            _rec_model(["en", "es", "de", "fr", "ru"])  # Latin is read by eslav
+        assert not caplog.records
+        with caplog.at_level("WARNING", logger="screenmind.engine.ocr"):
+            _rec_model(["en", "ru", "ja"])
+        assert "one script at a time" in caplog.text
 
 
 class TestLookalikes:
@@ -88,6 +121,17 @@ def test_engine_uses_v6_detector_and_language_recognizer(fake_rapidocr, monkeypa
     assert p["Rec.ocr_version"].value == "PP-OCRv5"
     assert p["Rec.lang_type"].value == "eslav"
     assert p["Global.model_root_dir"] == "/tmp/ocr-models"
+
+
+def test_default_engine_reads_cyrillic(fake_rapidocr, monkeypatch):
+    # The Windows case of G32: "Работа" came out as "Pa6ota" with the English model
+    _with_langs(monkeypatch, Settings.model_fields["ocr_languages"].default)
+    fake_rapidocr.result = types.SimpleNamespace(
+        boxes=np.array([BOX, BOX]), txts=("Работа", "MCР server"), scores=(0.9, 0.9))
+    o = OCRExtractor()
+    text = o.extract_text(Image.new("RGB", (20, 20)))
+    assert fake_rapidocr.built[0].params["Rec.lang_type"].value == "eslav"
+    assert text == "Работа\nMCP server"
 
 
 def test_engine_failure_disables_ocr(fake_rapidocr, monkeypatch):
