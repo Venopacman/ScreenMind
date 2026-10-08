@@ -99,9 +99,30 @@ _ALLOWED_OVERRIDES = {
 # Runtime state, not configuration: left out of the non-default settings list
 _STATE_KEYS = {"setup_complete", "capture_paused"}
 
-# The checkout's .env, not the current directory's: a start at login runs in
-# another directory (/ for the macOS LaunchAgent) and missed it
-_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+def is_frozen() -> bool:
+    """True inside the PyInstaller app (ScreenMind.exe, ScreenMind.app).
+
+    There is no Python checkout there: sys.executable is the app itself and
+    the package lives inside the bundle. See docs/plans/packaging.md (F1-F5).
+    """
+    return bool(getattr(sys, "frozen", False))
+
+
+def _env_file() -> Path:
+    """The .env to read.
+
+    From source: the checkout's .env, not the current directory's: a start at
+    login runs in another directory (/ for the macOS LaunchAgent) and missed it.
+    In the app: the data dir's .env (optional), never one from the cwd or the
+    bundle. The data dir is DATA_DIR from the environment, else ~/.screenmind.
+    """
+    if is_frozen():
+        data_dir = os.environ.get("DATA_DIR") or os.environ.get("data_dir") or "~/.screenmind"
+        return Path(os.path.expanduser(data_dir)) / ".env"
+    return Path(__file__).resolve().parents[1] / ".env"
+
+
+_ENV_FILE = _env_file()
 
 # Lock to prevent concurrent read-modify-write races on settings.json
 _settings_lock = threading.Lock()

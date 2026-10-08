@@ -47,7 +47,28 @@ def start_screenmind() -> None:
 
     Its output goes to DEVNULL. ScreenMind writes its own rotating log,
     screenmind.log in the data dir (main.run()).
+
+    In the app (frozen) it starts the app's own executable: there is no
+    Python to run `-m screenmind` with.
     """
+    if getattr(sys, "frozen", False):
+        if sys.platform == "win32":
+            subprocess.Popen(
+                [sys.executable],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=0x08000000,  # CREATE_NO_WINDOW
+            )
+        else:
+            subprocess.Popen(
+                [sys.executable],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        return
     if sys.platform == "win32":
         pythonw = sys.executable.replace("python.exe", "pythonw.exe")
         if not Path(pythonw).exists():

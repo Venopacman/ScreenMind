@@ -32,21 +32,43 @@ logger = logging.getLogger("screenmind.setup_llama")
 
 GITHUB_API_LATEST = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
 
-# Detect dev mode vs pip install: if package is inside site-packages, use user data dir
-_site_packages = Path(sysconfig.get_path("purelib"))
-_pkg_dir = Path(__file__).parent  # screenmind/
+def _is_frozen() -> bool:
+    """True inside the PyInstaller app. Same as config.is_frozen()."""
+    return bool(getattr(sys, "frozen", False))
 
-if _pkg_dir.is_relative_to(_site_packages):
-    # pip install mode: use ~/.screenmind/
-    PROJECT_ROOT = Path.home() / ".screenmind"
-else:
-    # Dev mode / editable install: use project root
-    PROJECT_ROOT = _pkg_dir.parent
 
+def _project_root() -> Path:
+    """Where llama/ is installed: ~/.screenmind or the checkout.
+
+    The app (frozen) and a pip install use ~/.screenmind/. A checkout or an
+    editable install uses the project root. The app must never write inside
+    its own bundle: that breaks the signature and may not be writable.
+    """
+    if _is_frozen():
+        return Path.home() / ".screenmind"
+    if Path(__file__).parent.is_relative_to(Path(sysconfig.get_path("purelib"))):
+        return Path.home() / ".screenmind"
+    return Path(__file__).parent.parent
+
+
+PROJECT_ROOT = _project_root()
+
+# Install target, and the first place to look outside the app
 LLAMA_DIR = PROJECT_ROOT / "llama"
 
 # Binary name per platform
 LLAMA_SERVER_BIN = "llama-server.exe" if sys.platform == "win32" else "llama-server"
+
+
+def llama_search_dirs() -> list[Path]:
+    """Folders to look in for llama-server, before PATH.
+
+    From source: LLAMA_DIR. In the app: a binary shipped next to the
+    executable (<exe dir>/llama/) first, then LLAMA_DIR (~/.screenmind/llama).
+    """
+    if _is_frozen():
+        return [Path(sys.executable).resolve().parent / "llama", LLAMA_DIR]
+    return [LLAMA_DIR]
 
 # Minimum free disk space required (1 GB) before attempting download
 MIN_DISK_SPACE_BYTES = 1024 ** 3
@@ -59,13 +81,15 @@ def find_llama_server() -> str | None:
     Check if llama-server is available. Returns the path if found, None otherwise.
 
     Search order:
-      1. Project's llama/ folder (highest priority — self-contained)
+      1. llama_search_dirs(): the project's llama/ folder; in the app, the
+         bundled binary, then ~/.screenmind/llama/
       2. System PATH (e.g. installed via brew, winget, or manually)
     """
-    # 1. Project-local binary
-    local_bin = LLAMA_DIR / LLAMA_SERVER_BIN
-    if local_bin.exists():
-        return str(local_bin)
+    # 1. Project-local (or bundled) binary
+    for folder in llama_search_dirs():
+        local_bin = folder / LLAMA_SERVER_BIN
+        if local_bin.exists():
+            return str(local_bin)
 
     # 2. System PATH
     system_bin = shutil.which("llama-server")

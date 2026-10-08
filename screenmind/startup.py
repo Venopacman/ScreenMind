@@ -13,7 +13,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from screenmind.config import settings
+from screenmind.config import is_frozen, settings
 
 
 # ── Command Construction ─────────────────────────────────────────────────────
@@ -22,9 +22,15 @@ def _get_startup_command() -> str:
     """
     Build the command that the OS should run at login.
 
+    App (frozen): the app's own executable, quoted, no arguments. On Windows
+             that is "<install dir>\\ScreenMind.exe", the same value the
+             installer writes under HKCU Run\\ScreenMind, so the two agree.
+             On macOS it is ScreenMind.app/Contents/MacOS/ScreenMind.
     Windows: Always use pythonw to avoid console flash.
     Unix:    Prefer pip-installed 'screenmind' console script (survives Python upgrades).
     """
+    if is_frozen():
+        return f'"{sys.executable}"'
     if sys.platform == "win32":
         # Always use pythonw on Windows to avoid brief console flash at boot
         pythonw = sys.executable.replace("python.exe", "pythonw.exe")
@@ -108,15 +114,24 @@ def _install_macos() -> bool:
     """Register as a macOS LaunchAgent."""
     try:
         cmd = _get_startup_command()
-        # Split command into program + args for plist
-        # Handle both quoted and unquoted paths
-        parts = cmd.replace('"', '').split()
-        program = parts[0]
-        args = parts[1:] if len(parts) > 1 else []
+        if is_frozen():
+            # The app binary, unsplit: its path may hold spaces. SMAppService
+            # replaces this plist in a later milestone (docs/plans/packaging.md).
+            program, args = sys.executable, []
+        else:
+            # Split command into program + args for plist
+            # Handle both quoted and unquoted paths
+            parts = cmd.replace('"', '').split()
+            program = parts[0]
+            args = parts[1:] if len(parts) > 1 else []
 
         args_xml = "\n".join(f"        <string>{a}</string>" for a in args)
 
         log_path = settings.data_path / "screenmind.log"
+        # The app writes screenmind.log itself (rotating); launchd appending
+        # to the same file would double each line. Keep its output apart.
+        if is_frozen():
+            log_path = settings.data_path / "launchd.log"
 
         plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

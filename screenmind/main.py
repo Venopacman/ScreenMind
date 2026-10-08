@@ -17,7 +17,7 @@ from pathlib import Path
 
 import uvicorn
 
-from screenmind.config import settings, setup_file_log
+from screenmind.config import is_frozen, settings, setup_file_log
 from screenmind.storage.database import Database
 from screenmind.workers.capture_worker import CaptureWorker
 from screenmind.workers.analysis_worker import AnalysisWorker
@@ -168,7 +168,10 @@ async def main():
         logger.warning("Starting without Gemma 4 -- screenshots will be captured")
         logger.warning("but NOT analyzed until llama-server is available.")
         logger.warning("The dashboard and API will still work with existing data.")
-        if not llama_binary_available:
+        if not llama_binary_available and is_frozen():
+            from screenmind.setup_llama import LLAMA_DIR
+            logger.info(f"Put llama-server in {LLAMA_DIR} or on PATH to get analysis.")
+        elif not llama_binary_available:
             logger.info("Run 'python -m screenmind.setup_llama' to install llama-server.")
         _safe_print()
     _safe_print()
@@ -324,7 +327,14 @@ async def main():
 
 
 def _install_desktop_shortcut() -> None:
-    """Create a desktop shortcut for ScreenMind (cross-platform)."""
+    """Create a desktop shortcut for ScreenMind (cross-platform).
+
+    Not in the app (frozen): the installer makes the shortcuts, and the
+    launcher.vbs / launcher.py it would point at do not exist there.
+    """
+    if is_frozen():
+        logger.info("Desktop shortcut skipped: the app's installer creates shortcuts")
+        return
     desktop = Path.home() / "Desktop"
     if not desktop.exists():
         desktop = Path.home()
@@ -438,7 +448,23 @@ def run():
         # The child writes the log file itself (setup_file_log below)
         log_path = os.environ.get("SCREENMIND_LOG_FILE") or settings.data_path / "screenmind.log"
 
-        if sys.platform == "win32":
+        if is_frozen():
+            # The app is its own start command: no pythonw, no `-m screenmind`
+            if sys.platform == "win32":
+                subprocess.Popen(
+                    [sys.executable],
+                    stdin=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+                )
+            else:
+                subprocess.Popen(
+                    [sys.executable],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+        elif sys.platform == "win32":
             # Try pythonw (no console window)
             pythonw = sys.executable.replace("python.exe", "pythonw.exe")
             if Path(pythonw).exists():

@@ -310,6 +310,138 @@ def list_models() -> list:
 
 
 
+# ── One file download: a child process from source, a thread in the app ──
+
+_HF_DOWNLOAD_CODE = (
+    "import sys; from huggingface_hub import hf_hub_download; "
+    "hf_hub_download(repo_id=sys.argv[1], filename=sys.argv[2], local_dir=sys.argv[3])"
+)
+
+
+class _ProcessDownload:
+    """hf_hub_download in a child Python (`python -c`). Used when running from source.
+
+    stdout goes to DEVNULL (progress is polled from the folder size). stderr
+    goes to a temp file, so error messages are kept without risking a PIPE
+    deadlock: HF writes progress bars to stderr continuously, which can fill
+    the 64KB OS pipe buffer and hang.
+    """
+
+    def __init__(self, repo_id: str, filename: str, local_dir: Path, keep_stderr: bool = True):
+        # Use sys.argv for paths — avoids injection if username has quotes
+        cmd = [sys.executable, "-c", _HF_DOWNLOAD_CODE, repo_id, filename, str(local_dir)]
+        self._err_file = tempfile.TemporaryFile() if keep_stderr else None
+        self._proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,   # prevent hangs from HF auth prompts
+            stdout=subprocess.DEVNULL,
+            stderr=self._err_file if keep_stderr else subprocess.DEVNULL,
+        )
+
+    def poll(self) -> Optional[int]:
+        return self._proc.poll()
+
+    def wait(self, timeout: float) -> int:
+        """Return code. Raises subprocess.TimeoutExpired if still running."""
+        return self._proc.wait(timeout=timeout)
+
+    def kill(self) -> None:
+        try:
+            self._proc.kill()
+            self._proc.wait(timeout=10)
+        except Exception:
+            pass  # Already dead — fine
+        self.close()
+
+    def error(self) -> str:
+        if not self._err_file:
+            return ""
+        self._err_file.seek(0)
+        return self._err_file.read().decode(errors="replace")[:200]
+
+    def close(self) -> None:
+        if self._err_file:
+            try:
+                self._err_file.close()
+            except Exception:
+                pass
+
+
+class _DownloadCancelled(Exception):
+    """Raised inside hf_hub_download's progress bar to stop a thread download."""
+
+
+class _ThreadDownload:
+    """hf_hub_download in a thread of this process. Used in the app (frozen).
+
+    In the app sys.executable is ScreenMind itself: `-c` would start a second
+    ScreenMind, which exits on "port in use" (F2 in docs/plans/packaging.md).
+    Same interface as _ProcessDownload. A thread cannot be killed, so kill()
+    asks the download to stop: the progress bar raises on its next update,
+    and a Xet transfer is aborted through huggingface_hub.
+    """
+
+    def __init__(self, repo_id: str, filename: str, local_dir: Path, keep_stderr: bool = True):
+        from huggingface_hub import hf_hub_download  # also tells PyInstaller to bundle it
+        from tqdm.auto import tqdm
+
+        self._cancel = threading.Event()
+        self._exc: Optional[BaseException] = None
+        cancel = self._cancel
+
+        class _CancellableTqdm(tqdm):
+            def update(self, n=1):
+                if cancel.is_set():
+                    raise _DownloadCancelled()
+                return super().update(n)
+
+        def run():
+            try:
+                hf_hub_download(repo_id=repo_id, filename=filename, local_dir=str(local_dir),
+                                tqdm_class=_CancellableTqdm)
+            except BaseException as e:  # noqa: BLE001 — reported through error()
+                self._exc = e
+
+        self._thread = threading.Thread(target=run, name=f"hf-download-{filename}", daemon=True)
+        self._thread.start()
+
+    def poll(self) -> Optional[int]:
+        if self._thread.is_alive():
+            return None
+        return 1 if self._exc else 0
+
+    def wait(self, timeout: float) -> int:
+        """Return code. Raises subprocess.TimeoutExpired if still running."""
+        self._thread.join(timeout)
+        if self._thread.is_alive():
+            raise subprocess.TimeoutExpired("hf_hub_download", timeout)
+        return self.poll()
+
+    def kill(self) -> None:
+        self._cancel.set()
+        try:
+            from huggingface_hub.utils._xet import abort_xet_session
+            abort_xet_session()
+        except Exception as e:  # older or newer huggingface_hub: the progress bar still stops it
+            logger.debug(f"Xet abort not available: {e}")
+        self._thread.join(30)
+        if self._thread.is_alive():
+            logger.warning("Model download thread did not stop within 30s after cancel")
+
+    def error(self) -> str:
+        return f"{type(self._exc).__name__}: {self._exc}"[:200] if self._exc else ""
+
+    def close(self) -> None:
+        pass
+
+
+def _start_file_download(repo_id: str, filename: str, local_dir: Path, keep_stderr: bool = True):
+    """Start one hf_hub_download: a thread in the app, a child process from source."""
+    from screenmind.config import is_frozen
+    job_class = _ThreadDownload if is_frozen() else _ProcessDownload
+    return job_class(repo_id, filename, local_dir, keep_stderr=keep_stderr)
+
+
 def _do_download(key: str, hf_file: str, quant: str) -> bool:
     """
     Internal: download a model GGUF + mmproj from HuggingFace.
@@ -334,39 +466,17 @@ def _do_download(key: str, hf_file: str, quant: str) -> bool:
 
     logger.info(f"Downloading {info['name']} ({quant}) from {info['hf_repo']}...")
 
+    job = None
     try:
-        # Use sys.argv for paths — avoids injection if username has quotes
-        cmd = [
-            sys.executable, "-c",
-            "import sys; from huggingface_hub import hf_hub_download; "
-            "hf_hub_download(repo_id=sys.argv[1], filename=sys.argv[2], local_dir=sys.argv[3])",
-            info["hf_repo"], hf_file, str(variant_dir),
-        ]
+        job = _start_file_download(info["hf_repo"], hf_file, variant_dir)
 
-        # Redirect stdout to DEVNULL (progress is polled from dir size).
-        # Capture stderr to a temp file so we keep error messages without
-        # risking a PIPE deadlock — HF writes progress bars to stderr
-        # continuously, which can fill the 64KB OS pipe buffer and hang.
-        err_file = tempfile.TemporaryFile()
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.DEVNULL,   # prevent hangs from HF auth prompts
-            stdout=subprocess.DEVNULL,
-            stderr=err_file,
-        )
-
-        while proc.poll() is None:
+        while job.poll() is None:
             # Check cancel flag (under lock for consistency)
             with _download_state_lock:
                 should_cancel = _cancel_download_flag
             if should_cancel:
                 logger.info(f"Download cancelled: {info['name']}")
-                try:
-                    proc.kill()
-                    proc.wait(timeout=10)
-                except Exception:
-                    pass  # Already dead — fine
-                err_file.close()
+                job.kill()
                 # Brief sleep for Windows handle release before cleanup
                 time.sleep(0.5)
                 # Clean up partial variant dir
@@ -402,14 +512,13 @@ def _do_download(key: str, hf_file: str, quant: str) -> bool:
             _set_download_state(downloaded_bytes=max(cur, total_bytes),
                                 message=f"Downloading {info['name']} ({quant})...")
 
-        if proc.returncode != 0:
-            err_file.seek(0)
-            stderr = err_file.read().decode(errors="replace")[:200]
-            err_file.close()
+        if job.poll() != 0:
+            stderr = job.error()
+            job.close()
             logger.error(f"Download failed: {stderr}")
             _set_download_state(status="error", message=f"Download failed: {stderr[:100]}")
             return False
-        err_file.close()
+        job.close()
         logger.info(f"Model download complete: {info['name']} ({quant})")
 
         # Download mmproj if not already present (shared per model)
@@ -418,20 +527,9 @@ def _do_download(key: str, hf_file: str, quant: str) -> bool:
         if not mmproj_path.exists():
             logger.info(f"Downloading mmproj: {info['mmproj_file']}...")
             _set_download_state(message=f"Downloading vision projector...")
-            cmd_mmproj = [
-                sys.executable, "-c",
-                "import sys; from huggingface_hub import hf_hub_download; "
-                "hf_hub_download(repo_id=sys.argv[1], filename=sys.argv[2], local_dir=sys.argv[3])",
-                info["hf_repo"], info["mmproj_file"], str(mmproj_dir),
-            ]
-            mmproj_proc = subprocess.Popen(
-                cmd_mmproj,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            mmproj_proc.wait(timeout=600)  # 10 min max for mmproj
-            if mmproj_proc.returncode != 0:
+            mmproj_job = _start_file_download(info["hf_repo"], info["mmproj_file"], mmproj_dir,
+                                              keep_stderr=False)
+            if mmproj_job.wait(timeout=600) != 0:  # 10 min max for mmproj
                 logger.error("mmproj download failed")
                 _set_download_state(status="error", message="Vision projector download failed")
                 return False
@@ -441,10 +539,8 @@ def _do_download(key: str, hf_file: str, quant: str) -> bool:
     except Exception as e:
         logger.error(f"Download error: {e}")
         _set_download_state(status="error", message=f"Error: {str(e)[:100]}")
-        try:
-            err_file.close()
-        except Exception:
-            pass
+        if job is not None:
+            job.close()
         return False
 
 
@@ -525,21 +621,11 @@ def start_server(model_key: Optional[str] = None, timeout: int = 60, hf_file: st
 
         port = settings.llama_server_port
 
-        # Find llama-server binary: check project's llama/ folder first, then PATH
-        bin_name = "llama-server.exe" if sys.platform == "win32" else "llama-server"
-        llama_bin = bin_name
-
-        # Detect dev vs pip install for llama binary location
-        import sysconfig
-        _site_packages = Path(sysconfig.get_path("purelib"))
-        _pkg_dir = Path(__file__).parent.parent  # screenmind/
-        if _pkg_dir.is_relative_to(_site_packages):
-            project_bin = Path.home() / ".screenmind" / "llama" / bin_name
-        else:
-            project_bin = _pkg_dir.parent / "llama" / bin_name
-
-        if project_bin.exists():
-            llama_bin = str(project_bin)
+        # Find llama-server: the project's llama/ folder (in the app: the
+        # bundled binary, then ~/.screenmind/llama/), then PATH. Not found:
+        # the bare name, so Popen raises FileNotFoundError below.
+        from screenmind.setup_llama import LLAMA_SERVER_BIN, find_llama_server
+        llama_bin = find_llama_server() or LLAMA_SERVER_BIN
 
         cmd = [
             llama_bin,
