@@ -80,3 +80,18 @@ Status: idea
 Since the restart fix, a call keeps one row across a restart (`AudioWorker._resume_recent()`). It still splits when the restart takes longer than `CALL_END_GRACE_S`, or when the call is transcribed (the old row already started its summary). The other way round, inside one process two Meet rooms back to back within the grace stay one row, because the room URL is read once per call. Re-reading the URL every few minutes would catch that.
 
 Refs: `AudioWorker.update()`, `_resume_recent()`, `_seen()`, `call_detection.same_call()`.
+
+### G42: Locked screen and screensaver were captured as work
+Status: open (Windows, Linux). macOS done.
+
+Seen on the Mac on 2026-10-08 14:09-14:20: both displays saved a frame every ~10 s while the screen was locked. The lock screen shows a moving landscape, so dedup let every frame through. The window list still had Claude and Chrome on top, so the rows were labeled with them, had no OCR text, and Gemma wrote "The user is viewing a landscape image". Since 2026-10-05, 170 activities had "landscape" in the summary. This cost OCR and Gemma every 10 s with nobody there, and time analysis counted locked time as work.
+
+macOS fix: `MacOSAdapter.is_screen_locked()` reads `CGSSessionScreenIsLocked` and `kCGSSessionOnConsoleKey` from `CGSessionCopyCurrentDictionary()` (about 1.5 ms per tick). After 30 s without input it also looks for a screensaver window (layer 1000 or above, display-sized), for a screensaver without a password. `CaptureWorker._check_screen_locked()` skips the tick and writes one `screen_locked` / `screen_unlocked` row to `ui_events` (the user's call, 2026-10-08), so analysis can tell locked time from an unchanged screen. Not used: the `com.apple.screenIsLocked` notifications (need an `NSRunLoop` thread) and the front app (stays the last app while locked).
+
+Left to do:
+- Windows: `WindowsAdapter.is_screen_locked()`. Options: `OpenInputDesktop()` fails or names "Winlogon" while locked; `SystemParametersInfoW(SPI_GETSCREENSAVERRUNNING)` for the screensaver; `WTSRegisterSessionNotification` needs a window. Check the cost per tick.
+- Linux: `org.freedesktop.ScreenSaver.GetActive` over D-Bus, or `loginctl show-session -p LockedHint`.
+- macOS: the UI event recorder may still record clicks on the lock screen under the last app. They are never linked to a frame (the link floor moves to the unlock time), but they stay in `ui_events`. Check with a lock and drop them in the recorder if they show up.
+- macOS: check which process owns the screensaver window on macOS 26 and whether the 30 s idle gate misses a hot-corner start.
+
+Refs: `MacOSAdapter.is_screen_locked()`, `CaptureWorker._check_screen_locked()`, `EventType.SCREEN_LOCKED`.

@@ -19,6 +19,7 @@ from screenmind.capture.screen import ScreenCapture
 from screenmind.capture.dedup import ScreenDeduplicator
 from screenmind.capture.window import (
     get_active_window_title, get_active_app_name, get_top_window_in, can_find_top_window,
+    is_screen_locked,
 )
 from screenmind.config import settings
 from screenmind.engine.a11y_extractor import A11yExtractor
@@ -75,6 +76,7 @@ class CaptureWorker:
         self._skip_count = 0
         self._last_save_time = 0.0
         self._consecutive_skips = 0  # Track idle state
+        self._screen_locked = False  # Lock screen or screensaver seen on the last tick
         # UI events (set by main when the recorder exists)
         self._ui_recorder = None
         self._trigger_lock = threading.Lock()
@@ -82,7 +84,8 @@ class CaptureWorker:
         self._stuck_link = None  # executor future of a UI-event link that timed out
         # Time of the last frame saved per display. A frame links only the
         # events after it, so older ones never jump to a later frame. Events
-        # from before this run (still unlinked) are never linked.
+        # from before this run or before the last unlock (still unlinked) are
+        # never linked.
         self._link_floor: dict = {}
         self._started_at = datetime.now()
 
@@ -143,6 +146,9 @@ class CaptureWorker:
     async def _capture_tick(self, trigger="periodic"):
         """Capture a screenshot of each display and enqueue the ones that changed."""
         try:
+            if self._check_screen_locked():
+                return
+
             app_name = get_active_app_name()
 
             # Auto-pause for heavy apps (games, video editors)
@@ -187,6 +193,38 @@ class CaptureWorker:
 
         except Exception as e:
             logger.error(f"Error: {e}")
+
+    def _check_screen_locked(self) -> bool:
+        """True while the screen is locked or the screensaver runs.
+
+        The windows behind the lock screen stay frontmost, so without this
+        check a locked screen gets saved as frames of the last app, analyzed,
+        and counted as work. Logs once per lock and unlock.
+        """
+        locked = is_screen_locked()
+        if locked != self._screen_locked:
+            self._screen_locked = locked
+            now = datetime.now()
+            if not locked:
+                # Clicks on the lock screen belong to no frame
+                self._link_floor.clear()
+                self._started_at = now
+            self._write_lock_marker(locked, now)
+            logger.info("Screen locked; capture skipped until unlock" if locked
+                        else "Screen unlocked; capture continues")
+        return locked
+
+    def _write_lock_marker(self, locked: bool, now: datetime):
+        """One ui_events row per lock and unlock, so analysis can tell locked
+        time from an unchanged screen. It has no app, so no frame links it."""
+        if not self._db:
+            return
+        from screenmind.capture.ui_events.models import EventType, UiEvent
+        kind = EventType.SCREEN_LOCKED if locked else EventType.SCREEN_UNLOCKED
+        try:
+            self._db.insert_ui_events([UiEvent(timestamp=now, type=kind)])
+        except Exception as e:
+            logger.debug(f"Could not write {kind.value} marker: {e}")
 
     def _is_blocked(self, app_name: Optional[str]) -> bool:
         return bool(app_name) and app_name.lower() in [
@@ -456,6 +494,7 @@ class CaptureWorker:
             "paused": self._paused,
             "captures": self._capture_count,
             "skipped": self._skip_count,
+            "screen_locked": self._screen_locked,
             "grab": self._screen.grab_status(),
         }
 

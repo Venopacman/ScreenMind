@@ -17,9 +17,15 @@ class EventType(str, Enum):
     APP_SWITCH = "app_switch"
     WINDOW_FOCUS = "window_focus"
     CLIPBOARD = "clipboard"
+    # Markers written by the capture worker, not user input. They tell
+    # locked time (or screensaver) apart from an unchanged screen.
+    SCREEN_LOCKED = "screen_locked"
+    SCREEN_UNLOCKED = "screen_unlocked"
 
 
-ALL_EVENT_TYPES = [t.value for t in EventType]
+MARKER_EVENT_TYPES = [EventType.SCREEN_LOCKED.value, EventType.SCREEN_UNLOCKED.value]
+# Input types the recorder can record (ui_events_types)
+ALL_EVENT_TYPES = [t.value for t in EventType if t.value not in MARKER_EVENT_TYPES]
 
 # Normalized key names produced by the backends. "char" means a printable
 # character is in RawEvent.char; everything else is a control key.
@@ -151,6 +157,10 @@ def describe_event(
     text: Optional[str],
     url: Optional[str] = None,
 ) -> str:
+    if type_ == EventType.SCREEN_LOCKED.value:
+        return "screen locked"
+    if type_ == EventType.SCREEN_UNLOCKED.value:
+        return "screen unlocked"
     app = app_name or "unknown app"
     site = _url_host(url)
     if site:

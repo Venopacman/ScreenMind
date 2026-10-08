@@ -38,6 +38,18 @@ def get_active_app_name() -> Optional[str]:
         return None
 
 
+def is_screen_locked() -> bool:
+    """True while the screen is locked or the screensaver runs.
+
+    False when the OS adapter cannot tell or the check fails, so a broken
+    check never stops capture.
+    """
+    try:
+        return adapter().is_screen_locked()
+    except Exception:
+        return False
+
+
 def can_find_top_window() -> bool:
     """Whether get_top_window_in() is supported on this OS."""
     try:

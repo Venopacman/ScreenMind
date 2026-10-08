@@ -47,6 +47,12 @@ class PlatformAdapter(ABC):
         display is empty (wallpaper only), not "unknown"."""
         return False
 
+    def is_screen_locked(self) -> bool:
+        """True while the screen is locked, the screensaver runs, or another
+        user has the console. Capture skips these times. Must be cheap: it
+        runs once per capture tick. False if not supported."""
+        return False
+
     def get_browser_url(self) -> Optional[str]:
         """URL of the page in the frontmost browser window. None when the
         frontmost app is not a browser or the OS does not expose it."""

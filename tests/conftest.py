@@ -26,6 +26,13 @@ def _isolate_data_dir(tmp_path_factory):
     mp.undo()
 
 
+@pytest.fixture(autouse=True)
+def _screen_unlocked(monkeypatch):
+    """Capture tests must not depend on whether this machine's screen is
+    locked. Tests of the lock check itself patch it back."""
+    monkeypatch.setattr("screenmind.workers.capture_worker.is_screen_locked", lambda: False)
+
+
 @pytest.fixture
 def tmp_data_dir(tmp_path):
     """Provide a temporary data directory for tests."""

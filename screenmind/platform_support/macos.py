@@ -38,6 +38,11 @@ _A11Y_MAX_NODES = 4000
 _NON_PAGE_SCHEMES = ("devtools:", "chrome-extension:", "moz-extension:", "safari-web-extension:")
 # AX calls to a hung app wait 6 s each by default.
 _AX_TIMEOUT_SECONDS = 1.0
+# The screensaver starts after at least a minute without input (a hot
+# corner starts it at once, but input stops then too). Below this idle time
+# we skip the window scan for it.
+_SCREENSAVER_MIN_IDLE_S = 30.0
+_SCREENSAVER_OWNERS = {"ScreenSaverEngine", "legacyScreenSaver"}
 
 
 def _repeats(a: str, b: str) -> bool:
@@ -195,6 +200,50 @@ class MacOSAdapter(PlatformAdapter):
         if not front:
             return None
         return {"pid": front["pid"], "app_name": front["owner"], "title": front["title"]}
+
+    def is_screen_locked(self) -> bool:
+        """True while the screen is locked, the screensaver runs, or another
+        user has the console (fast user switching).
+
+        The window list keeps the last app windows at layer 0 while locked,
+        so the frontmost app looks unchanged. We read the session instead:
+        CGSSessionScreenIsLocked is set from lock until unlock. A screensaver
+        without a password (or before the lock delay ends) does not set it,
+        so after some idle time we also look for a screensaver window.
+        """
+        try:
+            import Quartz  # type: ignore
+            session = Quartz.CGSessionCopyCurrentDictionary() or {}
+            if session.get("CGSSessionScreenIsLocked"):
+                return True
+            if session.get("kCGSSessionOnConsoleKey") is False:
+                return True
+            idle = Quartz.CGEventSourceSecondsSinceLastEventType(
+                Quartz.kCGEventSourceStateHIDSystemState, Quartz.kCGAnyInputEventType
+            )
+            if idle < _SCREENSAVER_MIN_IDLE_S:
+                return False
+            return self._screensaver_window_shown()
+        except Exception as e:
+            logger.debug(f"Screen lock check failed: {e}")
+            return False
+
+    def _screensaver_window_shown(self) -> bool:
+        """Whether a display-sized window sits at screensaver level or above."""
+        import Quartz  # type: ignore
+        level = Quartz.CGWindowLevelForKey(Quartz.kCGScreenSaverWindowLevelKey)
+        windows = Quartz.CGWindowListCopyWindowInfo(
+            Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID
+        ) or []
+        for w in windows:
+            if w.get("kCGWindowLayer", 0) < level:
+                continue
+            if w.get("kCGWindowOwnerName") in _SCREENSAVER_OWNERS:
+                return True
+            bounds = w.get("kCGWindowBounds") or {}
+            if bounds.get("Width", 0) >= 640 and bounds.get("Height", 0) >= 480:
+                return True
+        return False
 
     def get_browser_url(self) -> Optional[str]:
         """URL of the page in the frontmost browser window, or None if the
