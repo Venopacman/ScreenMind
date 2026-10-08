@@ -299,6 +299,14 @@ class Settings(BaseSettings):
     api_host: str = Field(default="127.0.0.1", description="API bind host")
     api_port: int = Field(default=7777, description="API bind port")
 
+    # ── Tray icon (Windows) ──────────────────────────────────────────────
+    tray_icon: Optional[bool] = Field(
+        default=None,
+        description="Tray icon on Windows: status, pause or resume, open dashboard, quit. "
+                    "Unset: on in the app (ScreenMind.exe), off from source. "
+                    "TRAY_ICON=true turns it on from source, false turns it off in the app.",
+    )
+
     # ── Internal State ────────────────────────────────────────────────────
     setup_complete: bool = Field(default=False, description="Whether first-run setup is complete")
 
@@ -370,6 +378,11 @@ class Settings(BaseSettings):
         if not self.meeting_apps:
             return []
         return [a.strip().lower() for a in self.meeting_apps.split(",") if a.strip()]
+
+    @property
+    def tray_icon_on(self) -> bool:
+        """Whether to show the tray icon (Windows only; see tray_icon)."""
+        return is_frozen() if self.tray_icon is None else self.tray_icon
 
     @property
     def num_gpu_layers(self) -> int:

@@ -443,6 +443,13 @@ class CaptureWorker:
         return self._paused
 
     @property
+    def auto_paused_for(self) -> Optional[str]:
+        """The heavy app that holds capture back right now (auto-pause), else None."""
+        if self._paused or not settings.auto_pause_heavy_apps:
+            return None
+        return getattr(self, "_heavy_app_logged", None)
+
+    @property
     def stats(self) -> dict:
         return {
             "running": self._running,

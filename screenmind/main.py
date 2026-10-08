@@ -295,6 +295,17 @@ async def main():
 
     logger.info(f"Dashboard: http://{settings.api_host}:{settings.api_port}")
     logger.info(f"API docs:  http://{settings.api_host}:{settings.api_port}/docs")
+
+    # ── Tray icon (Windows; on in the app, opt-in from source) ───────
+    tray = None
+    if sys.platform == "win32" and settings.tray_icon_on:
+        try:
+            from screenmind.tray import start_tray
+            tray = start_tray(capture_worker, request_shutdown,
+                              dashboard_url=f"http://127.0.0.1:{settings.api_port}")
+        except Exception:
+            logger.exception("Tray icon failed to start; running without it")
+
     _safe_print()
     logger.info("ScreenMind is running! Press Ctrl+C to stop.")
     _safe_print()
@@ -304,6 +315,8 @@ async def main():
 
     # ── Cleanup ──────────────────────────────────────────────────────
     logger.info("Shutting down...")
+    if tray is not None:
+        tray.stop()  # the icon goes at once, while the workers still stop
     watchdog.stop()
     capture_worker.stop()
     analysis_worker.stop()

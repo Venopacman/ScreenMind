@@ -173,7 +173,7 @@ Why onedir matters on macOS: PyInstaller's onedir bootloader loads Python into i
 
 Child processes and permissions: Apple DTS says macOS follows the chain from a child process to its parent to find the "responsible" app, as long as the parent stays alive ([forum](https://developer.apple.com/forums/thread/805245)). So a sidecar would usually get the shell app's grants. But the chain can break, and macOS 26.1 had a bug in how such children show in Settings ([forum](https://developer.apple.com/forums/thread/807898)).
 
-**Recommendation: no native shell.** No UI ships, so a webview shell would only add a process and RAM (Electron alone is often 100+ MB). A menu bar / tray item in Python (pyobjc `NSStatusItem` on macOS, `pystray` on Windows) is enough.
+**Recommendation: no native shell.** No UI ships, so a webview shell would only add a process and RAM (Electron alone is often 100+ MB). A menu bar / tray item in Python (pyobjc `NSStatusItem` on macOS, `Shell_NotifyIconW` through ctypes on Windows) is enough.
 
 ## 2. macOS
 
@@ -245,7 +245,7 @@ The first version is built (2026-10-08): [packaging-spikes.md, Windows installer
 - Wizard pages: welcome, "What ScreenMind records" (plain words, an "I understand" checkbox), folder, "Start ScreenMind when I sign in" checkbox, "Start ScreenMind now" on finish. This wizard is the whole first-run flow on Windows. No window after install.
 - Start at login: the installer writes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\ScreenMind = "<path>\ScreenMind.exe"`. The app's own toggle (`startup.py`) must write the same value (F4).
 - Uninstall: stop the running app first. Remove the Run value. Ask: "Also delete your ScreenMind data (screenshots, database, models: N GB)?" Default No. Models are large, so offer them separately.
-- Tray icon via `pystray`: status line, Pause or Resume, Quit. A tooltip shows the status. This is the minimum, so the user can always see that recording runs and can stop it.
+- Tray icon: status line, Pause or Resume, Quit. A tooltip shows the status. This is the minimum, so the user can always see that recording runs and can stop it. Done (2026-10-08): `screenmind/tray.py` and `platform_support/win_tray.py`, `Shell_NotifyIconW` through ctypes instead of `pystray` (under 1 MB against about 3 MB, no new package). It is on in the app and off from source (`TRAY_ICON=true` turns it on). Windows 11 puts a new icon in the hidden icons (the ^ button) until the user pins it.
 - Permissions: only the microphone ("Let desktop apps access your microphone"), and only if call transcription is on. Screen grabs, UI Automation and low-level hooks need no prompt. So Windows needs less UI than macOS.
 
 ## 4. Signing and trust
@@ -357,7 +357,7 @@ The unsigned milestone needs no secrets.
 | Milestone | What | Effort (rough) | Main risk |
 |---|---|---|---|
 | **M0: internal testers** | Fix F1-F6. Agent-mode build without the dashboard. OCR memory fixes (worker process, onnxruntime settings) and background priority. Memory and CPU rows in the e2e check. Labeling decision (server, vendor or local) implemented in its simplest form. Unsigned `.app` + DMG. Unsigned NSIS wizard (per-user, Run key, uninstall data question; built 2026-10-08). CI builds both on a tag. Short tester guide ("Open Anyway", SmartScreen "Run anyway"). | ~2 weeks | OCR worker may not reach 250 MB. Unsigned macOS builds lose permission grants on every update (try the self-signed certificate trick). |
-| **M1: app feel** | Native first-run permissions window (macOS). Menu bar / tray item. `SMAppService` login item. "Update available" menu line. Idle/AC scheduling of analysis. CI resource benchmark. Check by hand that a Finder-launched app gets "ScreenMind" prompts and SCK grabs work (G1, G22). | ~1-1.5 weeks | Main thread change for the menu bar. SMAppService via pyobjc untested. |
+| **M1: app feel** | Native first-run permissions window (macOS). Menu bar / tray item (Windows tray done, 2026-10-08). `SMAppService` login item. "Update available" menu line. Idle/AC scheduling of analysis. CI resource benchmark. Check by hand that a Finder-launched app gets "ScreenMind" prompts and SCK grabs work (G1, G22). | ~1-1.5 weeks | Main thread change for the menu bar. SMAppService via pyobjc untested. |
 | **M2: signed public release** | Apple Developer enrollment, Developer ID signing, entitlements, notarization in CI. Azure Artifact Signing (or OV cert) for Windows. | 3-5 days of work, plus waiting: Apple org enrollment and Azure identity checks take days to weeks | Notarization fails on some nested binary. SmartScreen warnings for the first weeks anyway. |
 | **M3: auto-update** | Sparkle + WinSparkle, or Velopack | ~1 week | Integration with a frozen Python app is untested for all three. |
 
