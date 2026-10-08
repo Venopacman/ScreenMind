@@ -46,6 +46,7 @@ Build files: [`packaging/screenmind.spec`](../../packaging/screenmind.spec) and 
 - Private bytes (commit) were 548 MB at idle and 1150 MB after one OCR frame, against 64 / 175 MB USS. Task Manager's Memory column shows the USS-like number; commit counts against the page file, not RAM.
 - `Get-Content` in PowerShell 5.1 shows the log's `→` as `â†'`. The log file is UTF-8; pass `-Encoding UTF8`.
 - Not tested: an installer, start at login, a start from Explorer or the Start menu, SmartScreen, the microphone and call transcription, llama-server inside the app, model download (F2).
+- After fixes F1-F5 (34ae529), built and run on port 7791 with a temp data dir and a temp `USERPROFILE`. The data dir's `.env` loaded, and a `.env` in the cwd did not. The log was written without `SCREENMIND_LOG_FILE`. No `launcher.vbs`, nothing new on the desktop. `POST /api/startup/install` wrote `Run\ScreenMind = "...\ScreenMind.exe"`, and uninstall removed it. A Gemma download ran in the app's own process (no second `ScreenMind.exe`), showed progress (100 MB in 8 s), and cancel stopped it and deleted the partial files. Shutdown took 1 s.
 
 ## Windows: how to run the same spike
 
