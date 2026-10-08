@@ -17,6 +17,12 @@ from screenmind.storage.models import ActivityRecord, ScreenshotEntry
 
 logger = logging.getLogger("screenmind.storage.database")
 
+# A UI event links only to a frame saved at most this long after it. The
+# first frame after an event is usually seconds later (a click asks for a
+# grab). A longer gap means no frame was saved in between (sleep, a locked
+# or unchanged screen), and the next frame shows another moment.
+UI_EVENT_MAX_LINK_LAG = timedelta(minutes=5)
+
 
 class Database:
     """
@@ -221,10 +227,18 @@ class Database:
             # skip them and the idle backfill can retry them.
             "UPDATE activities SET status = 'failed' "
             "WHERE status = 'ok' AND summary LIKE 'Analysis failed%'",
+            # v13: unlink UI events that older builds gave to a frame of
+            # another app or one saved long after them, and rebuild the
+            # user_actions of those frames.
+            _unlink_stale_ui_events,
         ]
 
         for i, migration in enumerate(migrations, start=1):
             if i > current:
+                if callable(migration):
+                    migration(conn)
+                    conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (i,))
+                    continue
                 statements = migration if isinstance(migration, list) else [migration]
                 for sql in statements:
                     if "DROP COLUMN" in sql and sqlite3.sqlite_version_info < (3, 35, 0):
@@ -851,12 +865,14 @@ class Database:
     def attach_ui_events(
         self, activity_id: int, until: datetime, *, app_name: Optional[str],
         since: Optional[datetime] = None, bounds: Optional[Dict[str, int]] = None,
+        max_lag: timedelta = UI_EVENT_MAX_LINK_LAG,
     ) -> int:
         """Link this frame's UI events to it. Returns the number linked.
 
         A frame gets the not-yet-linked events after `since` (the previous
         frame saved on the same display) up to `until`, and only those of its
-        own app. A click also has to be on the frame's display (`bounds`, an
+        own app. Events older than `until - max_lag` are too far from the
+        frame. A click also has to be on the frame's display (`bounds`, an
         mss monitor dict) when it is known. Events of other apps stay
         unlinked, with their own timestamp.
         """
@@ -864,12 +880,13 @@ class Database:
         key = app_key(app_name)
         if key is None:
             return 0
+        floor = until - max_lag
+        if since is not None and since > floor:
+            floor = since
         conn = self._get_conn()
-        sql = "SELECT id, app_name, x, y FROM ui_events WHERE activity_id IS NULL AND timestamp <= ?"
-        params: list = [until.isoformat()]
-        if since is not None:
-            sql += " AND timestamp > ?"
-            params.append(since.isoformat())
+        sql = ("SELECT id, app_name, x, y FROM ui_events "
+               "WHERE activity_id IS NULL AND timestamp <= ? AND timestamp > ?")
+        params: list = [until.isoformat(), floor.isoformat()]
         ids = [
             r["id"] for r in conn.execute(sql, params).fetchall()
             if app_key(r["app_name"]) == key and _on_display(r["x"], r["y"], bounds)
@@ -917,6 +934,49 @@ class Database:
         if hasattr(self._local, "conn") and self._local.conn:
             self._local.conn.close()
             self._local.conn = None
+
+
+def _unlink_stale_ui_events(conn: sqlite3.Connection, max_lag: timedelta = UI_EVENT_MAX_LINK_LAG):
+    """Undo links that attach_ui_events() no longer makes: the frame is of
+    another app, or it was saved more than `max_lag` after the event. Then
+    rebuild user_actions for the frames that lost events (NULL if none left).
+
+    Click positions are not checked: frames don't store their display bounds.
+    """
+    from screenmind.capture.ui_events.models import app_key, format_user_actions
+    rows = conn.execute(
+        "SELECT e.id, e.timestamp, e.app_name, e.activity_id, "
+        "a.timestamp AS frame_ts, a.detected_app "
+        "FROM ui_events e JOIN activities a ON a.id = e.activity_id"
+    ).fetchall()
+    stale, frames = [], set()
+    for r in rows:
+        try:
+            lag = datetime.fromisoformat(r[4]) - datetime.fromisoformat(r[1])
+        except (TypeError, ValueError):
+            lag = None
+        key = app_key(r[2])
+        if key is None or key != app_key(r[5]) or lag is None or lag > max_lag:
+            stale.append(r[0])
+            frames.add(r[3])
+    if not stale:
+        return
+    for i in range(0, len(stale), 500):
+        chunk = stale[i:i + 500]
+        conn.execute(
+            f"UPDATE ui_events SET activity_id = NULL WHERE id IN ({','.join('?' * len(chunk))})",
+            chunk,
+        )
+    for activity_id in frames:
+        cur = conn.execute(
+            "SELECT * FROM ui_events WHERE activity_id = ? ORDER BY timestamp, id", (activity_id,),
+        )
+        cols = [d[0] for d in cur.description]
+        events = [dict(zip(cols, row)) for row in cur.fetchall()]
+        conn.execute("UPDATE activities SET user_actions = ? WHERE id = ?",
+                     (format_user_actions(events), activity_id))
+    logger.info("Unlinked %d UI events from %d frames (other app or over %s later)",
+                len(stale), len(frames), max_lag)
 
 
 def _on_display(x: Optional[int], y: Optional[int], bounds: Optional[Dict[str, int]]) -> bool:

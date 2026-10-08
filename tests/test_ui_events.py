@@ -544,6 +544,95 @@ class TestDatabase:
         assert db.attach_ui_events(aid, t0, app_name="Slack", bounds=right) == 2
         assert [r["element_name"] or r["text"] for r in db.get_ui_events(aid)] == ["right", "hi"]
 
+    def test_attach_skips_events_too_old_for_the_frame(self, db):
+        """A Terminal click at 18:58 must not land on a Terminal frame the next
+        morning, even with no frame saved in between."""
+        t0 = datetime(2026, 10, 7, 18, 58, 0)
+        frame = datetime(2026, 10, 8, 9, 49, 0)
+        db.insert_ui_events([
+            _ev(t0, app_name="Terminal", element_name="old"),
+            _ev(frame - timedelta(minutes=4), app_name="Terminal", element_name="recent"),
+        ])
+        aid = db.insert_activity(ScreenshotEntry(timestamp=frame, screenshot_path="x"))
+        assert db.attach_ui_events(aid, frame, app_name="Terminal", since=t0 - timedelta(seconds=1)) == 1
+        assert [r["element_name"] for r in db.get_ui_events(aid)] == ["recent"]
+        left = db.get_ui_events_range(t0.isoformat(), t0.isoformat())
+        assert left[0]["activity_id"] is None
+
+    def test_attach_max_lag_is_a_parameter(self, db):
+        t0 = datetime(2026, 10, 7, 14, 0, 0)
+        db.insert_ui_events([_ev(t0)])
+        aid = db.insert_activity(ScreenshotEntry(timestamp=t0, screenshot_path="x"))
+        until = t0 + timedelta(minutes=3)
+        assert db.attach_ui_events(aid, until, app_name="Slack", max_lag=timedelta(minutes=2)) == 0
+        assert db.attach_ui_events(aid, until, app_name="Slack", max_lag=timedelta(minutes=4)) == 1
+
+    def test_migration_unlinks_stale_links(self, db):
+        """v13 undoes links older builds made: another app, or too long after."""
+        from screenmind.storage.database import _unlink_stale_ui_events
+        t0 = datetime(2026, 10, 7, 18, 58, 0)
+        frame = datetime(2026, 10, 8, 9, 49, 0)
+        db.insert_ui_events([
+            _ev(t0, EventType.APP_SWITCH, app_name="Terminal"),
+            _ev(frame - timedelta(seconds=20), app_name="Slack", element_name="Chrome-only"),
+            _ev(frame - timedelta(seconds=10), app_name="Google Chrome", element_name="Send"),
+            _ev(frame - timedelta(seconds=5), app_name=None),
+        ])
+        aid = db.insert_activity(ScreenshotEntry(
+            timestamp=frame, screenshot_path="x", detected_app_name="Google Chrome"))
+        other = db.insert_activity(ScreenshotEntry(
+            timestamp=frame, screenshot_path="y", detected_app_name="Slack"))
+        conn = db._get_conn()
+        conn.execute("UPDATE ui_events SET activity_id = ?", (aid,))
+        conn.execute("UPDATE ui_events SET activity_id = ? WHERE app_name = 'Slack'", (other,))
+        conn.execute("UPDATE activities SET user_actions = 'stale'")
+        conn.commit()
+
+        _unlink_stale_ui_events(conn)
+        conn.commit()
+
+        assert [r["element_name"] for r in db.get_ui_events(aid)] == ["Send"]
+        assert db.get_activity_by_id(aid)["user_actions"] == '- clicked element "Send" in Google Chrome'
+        # A frame that kept all its events is left alone
+        assert [r["element_name"] for r in db.get_ui_events(other)] == ["Chrome-only"]
+        assert db.get_activity_by_id(other)["user_actions"] == "stale"
+        unlinked = conn.execute("SELECT COUNT(*) FROM ui_events WHERE activity_id IS NULL").fetchone()[0]
+        assert unlinked == 2
+
+    def test_migration_runs_on_open(self, db):
+        """A DB below v13 gets the cleanup when it is opened, and keeps v13."""
+        from screenmind.storage.database import Database
+        t0 = datetime(2026, 10, 7, 18, 58, 0)
+        db.insert_ui_events([_ev(t0, app_name="Terminal")])
+        aid = db.insert_activity(ScreenshotEntry(
+            timestamp=t0 + timedelta(hours=15), screenshot_path="x", detected_app_name="Google Chrome"))
+        conn = db._get_conn()
+        conn.execute("UPDATE ui_events SET activity_id = ?", (aid,))
+        conn.execute("DELETE FROM schema_version WHERE version >= 13")
+        conn.commit()
+        path = db._db_path
+        db.close()
+        reopened = Database(db_path=path)
+        assert reopened.get_ui_events(aid) == []
+        version = reopened._get_conn().execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+        assert version >= 13
+        reopened.close()
+
+    def test_migration_clears_user_actions_when_nothing_is_left(self, db):
+        from screenmind.storage.database import _unlink_stale_ui_events
+        t0 = datetime(2026, 10, 7, 18, 58, 0)
+        db.insert_ui_events([_ev(t0, app_name="Terminal", element_name="ls")])
+        aid = db.insert_activity(ScreenshotEntry(
+            timestamp=t0 + timedelta(hours=15), screenshot_path="x", detected_app_name="Terminal"))
+        conn = db._get_conn()
+        conn.execute("UPDATE ui_events SET activity_id = ?", (aid,))
+        conn.execute("UPDATE activities SET user_actions = 'stale'")
+        conn.commit()
+        _unlink_stale_ui_events(conn)
+        conn.commit()
+        assert db.get_ui_events(aid) == []
+        assert db.get_activity_by_id(aid)["user_actions"] is None
+
     def test_range_query(self, db):
         t0 = datetime(2026, 10, 6, 10, 0, 0)
         db.insert_ui_events([_ev(t0), _ev(t0 + timedelta(minutes=5), EventType.TEXT, text="x")])
