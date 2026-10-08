@@ -26,7 +26,7 @@ Since `c377a8c` (G39) the code defaults are the shared settings, and the dashboa
 The user decided on 2026-10-08 which non-default values both machines keep:
 - `capture_interval: 10` (not the default 40): denser data for the workflows record.
 - `ui_events_types: "click,app_switch,text,clipboard"` (not the default `click,app_switch`): typed text and clipboard stay on, with the sensitive-data filter and password redaction. G31 stays open.
-- `performance_mode` follows the default (`balanced`) on both machines. The Mac dropped its `maximum`.
+- `performance_mode`: Windows follows the default (`balanced`). The Mac keeps `maximum` on purpose: with `balanced`, Apple Silicon ran Gemma on about 4 CPU cores and took 10.5 s per frame against 6.2 s on the GPU. This is the one key where the machines differ.
 
 Windows `~/.screenmind/settings.json`, whole file:
 
@@ -45,7 +45,7 @@ What that drops, by key:
 - Keys of removed features, ignored since `cd95561`: `break_reminder_minutes`, `obsidian_*`, `notion_*`, `webhook_*`, `agents_*`, `auto_bookmark*`, `smart_notifications`, `distraction_minutes`, `dashboard_lock_timeout`, `*_hotkey`.
 - Kept: `setup_complete` and `capture_paused` are state, not settings.
 
-Mac `~/.screenmind/settings.json` gets the same file without `setup_complete` (the Mac file never had it). It drops `performance_mode: maximum`, `capture_active_monitor: true` (a leftover from a 2026-10-06 test), `model_variants` and the old `sensitive_filter_types`. In the checkout's `.env`:
+Mac `~/.screenmind/settings.json` gets the same file without `setup_complete` (the Mac file never had it). It keeps `performance_mode: maximum` and drops `capture_active_monitor: true` (a leftover from a 2026-10-06 test), `model_variants` and the old `sensitive_filter_types`. In the checkout's `.env`:
 - `OCR_LANGUAGES`: drop it once the G32 default `en,es,de,fr,ru` is on `custom`.
 - `CAPTURE_ON_START=true`: drop it. Both machines then restore the last capture state (`capture_paused`). The Windows laptop has never had it.
 - Since `c377a8c` the `.env` is read from the checkout root, so a start at login (LaunchAgent, cwd `/`) now loads it too. Until now such a start ran without it.
