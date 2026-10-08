@@ -236,7 +236,7 @@ flowchart TB
     <colgroup><col style="width:9%"><col style="width:13%"><col class="os"><col class="os"><col style="width:13%"><col style="width:15%"><col style="width:7%"></colgroup>
     <thead><tr><th>Data point</th><th>What we collect</th><th><span class="chip mac">macOS</span></th><th><span class="chip win">Windows</span></th><th><span class="chip lnx">Linux</span></th><th>Stored in</th><th>Gaps</th></tr></thead>
     <tbody>
-      <tr><td>Screenshot</td><td>One JPEG per display per changed tick</td><td>ScreenCaptureKit <code>SCScreenshotManager</code> (pyobjc), then <code>screencapture -x</code> CLI, then <code>mss</code> (CoreGraphics)</td><td><code>mss</code> (GDI BitBlt)</td><td>X11: <code>mss</code>. Wayland: <code>grim</code>, then XDG Desktop Portal</td><td><code>screenshots/YYYY-MM-DD/HH-MM-SS_mmm[_mN].jpg</code>, <code>activities.screenshot_path</code></td><td>G1 G2 G3</td></tr>
+      <tr><td>Screenshot</td><td>One JPEG per display per changed tick</td><td>ScreenCaptureKit <code>SCScreenshotManager</code> (pyobjc), then <code>screencapture -x</code> CLI, then <code>mss</code> (CoreGraphics)</td><td><code>mss</code> (GDI BitBlt)</td><td>X11: <code>mss</code>. Wayland: <code>grim</code>, then XDG Desktop Portal</td><td><code>screenshots/YYYY-MM-DD/HH-MM-SS_mmm[_mN].jpg</code>, <code>activities.screenshot_path</code></td><td>G1 G3</td></tr>
       <tr><td>Change detection</td><td>pHash per display</td><td><code>imagehash.phash</code></td><td>same</td><td>same</td><td>not stored (in memory)</td><td>G4</td></tr>
       <tr><td>App name</td><td>Owner of the top window per display</td><td>Quartz <code>CGWindowListCopyWindowInfo</code>, <code>kCGWindowOwnerName</code></td><td><code>EnumWindows</code> + <code>QueryFullProcessImageNameW</code> (exe name, UWP child process)</td><td><code>xdotool</code> + <code>/proc</code>, or compositor IPC</td><td><code>activities.detected_app</code></td><td>G5 G6</td></tr>
       <tr><td>Window title</td><td>Title of the top window per display</td><td><code>kCGWindowName</code>; if only the app name, <code>AXTitle</code> of the window's <code>AXWebArea</code> (Electron)</td><td><code>GetWindowTextW</code>; if only the app name, the name of the window's UIA <code>Document</code></td><td><code>xdotool getwindowname</code> / <code>xprop</code>, compositor IPC</td><td><code>activities.window_title</code> (sensitive-filtered)</td><td>G5</td></tr>
@@ -318,8 +318,8 @@ flowchart TB
     <div>
       <div class="os-head"><span class="chip mac">macOS</span><h4>Fallback order</h4></div>
       <ol class="steps">
-        <li><b>ScreenCaptureKit</b>, <code>capture/sck.py</code>. <code>SCShareableContent</code> lists displays, refreshed every 60 s. <code>SCScreenshotManager</code> grabs one display at native pixel size in BGRA. The handler is awaited with a 3 s timeout. One timeout, or 3 handler errors in a row, disables SCK for the rest of the process.</li>
-        <li><b><code>screencapture -x -t png -R x,y,w,h</code></b>, about 0.2 s per display. Used after SCK fails, or for good after one mss grab took over 5 s.</li>
+        <li><b>ScreenCaptureKit</b>, <code>capture/sck.py</code>. <code>SCShareableContent</code> lists displays, refreshed every 60 s. <code>SCScreenshotManager</code> grabs one display at native pixel size in BGRA. The handler is awaited with a 3 s timeout. One timeout, or 3 handler errors in a row, start a 5 min cool-down on the <code>screencapture</code> tool. Then one probe goes out, which the capture tick does not wait for. An answer within 3 s brings SCK back. A failed probe doubles the wait (10, 20, 40, then every 60 min). The back-off starts over after 30 min of working SCK. If SCK never gave a frame in the process (G1), it stops for good after 2 failed probes. At most one SCK request is waited for at a time; a lost one costs a few KB and no thread. Log: <code>ScreenCaptureKit ... next try in N min</code>, <code>ScreenCaptureKit answered a probe ...; using it again</code>, <code>Screen grab backend: &lt;name&gt;</code>. <code>/api/status</code>: <code>capture.grab</code> (<code>backend</code>, <code>sck.state</code> on / cooldown / off, <code>sck.next_retry</code>, <code>sck.probing</code>, <code>sck.lost_requests</code>).</li>
+        <li><b><code>screencapture -x -t png -R x,y,w,h</code></b>, about 0.2 s per display. Used while SCK cools down or fails, or for good after one mss grab took over 5 s.</li>
         <li><b>mss</b> (<code>CGWindowListCreateImage</code>). Deprecated, can hang 30 s.</li>
       </ol>
       <p>SCK needs <code>pyobjc-framework-ScreenCaptureKit</code> (a macOS dependency in <code>pyproject.toml</code>) and macOS 14. Without them the log says "ScreenCaptureKit not available; using mss".</p>
@@ -563,7 +563,7 @@ flowchart TB
   <p>TCC grants a permission to the "responsible process", not to a Python package.</p>
   <ul>
     <li><b>Terminal.app</b> (the user's main instance): Terminal gets Screen Recording, Accessibility and Input Monitoring. Every script run from Terminal gets them too.</li>
-    <li><b>A Claude session:</b> Claude.app starts children through a <code>disclaimer</code> helper, so Python is its own responsible process. <code>CGPreflightScreenCaptureAccess()</code> says True, but SCK never answers and mss hangs 30 s. Only <code>screencapture</code> works (G1).</li>
+    <li><b>A Claude session:</b> Claude.app starts children through a <code>disclaimer</code> helper, so Python is its own responsible process. <code>CGPreflightScreenCaptureAccess()</code> says True, but SCK never answers and mss hangs 30 s. Only the first SCK call of the process answers (the display list); later ones hang too. Only <code>screencapture</code> works (G1).</li>
     <li><b>The venv's Python directly</b> (LaunchAgent, IDE): the prompt names "Python" or the IDE.</li>
     <li><b>A future signed <code>ScreenMind.app</code></b> would show "ScreenMind" (G22).</li>
   </ul>
@@ -603,8 +603,7 @@ flowchart TB
   <div class="scroll"><table id="gap-table">
     <thead><tr><th class="gid">Id</th><th>Gap</th><th>Scope</th><th>Backlog</th></tr></thead>
     <tbody>
-      <tr data-s="mac"><td class="gid">G1</td><td>Grabs from Claude-started processes: SCK never answers, mss hangs 30 s. Only <code>screencapture</code> works, so dev instances test the fallback only.</td><td><span class="chip mac">macOS</span></td><td>sck-capture.md "Find out why grabs hang"</td></tr>
-      <tr data-s="mac"><td class="gid">G2</td><td>One SCK timeout disables SCK until restart.</td><td><span class="chip mac">macOS</span></td><td>sck-capture.md "SCK is dropped for the whole process"</td></tr>
+      <tr data-s="mac"><td class="gid">G1</td><td>Grabs from Claude-started processes: SCK never answers, mss hangs 30 s. Only <code>screencapture</code> works, so dev instances test the fallback only. They pay one 3 s stall at start; the 2 probes after it cost nothing.</td><td><span class="chip mac">macOS</span></td><td>sck-capture.md "Find out why grabs hang"</td></tr>
       <tr data-s="both"><td class="gid">G3</td><td>A blocked app skips the whole display. No per-window exclusion (SCK <code>SCContentFilter</code> could do it).</td><td><span class="chip both">both</span> (fix is macOS-only)</td><td>sck-capture.md "Leave windows out of screenshots"</td></tr>
       <tr data-s="both" data-new="1"><td class="gid">G4</td><td>The periodic grab is deduped like the others. A static screen gets no rows, so time on it is not visible. The docstring says it forces a capture.</td><td><span class="chip both">both</span></td><td><span class="chip new">new</span></td></tr>
       <tr data-s="lnx"><td class="gid">G5</td><td>No per-display app lookup on Linux. Unfocused displays have no app name.</td><td><span class="chip lnx">Linux</span></td><td>multi-display-capture.md "Linux: no per-display app lookup"</td></tr>
@@ -640,7 +639,7 @@ flowchart TB
       <tr data-s="both" data-new="1"><td class="gid">G41</td><td>One row across a restart only if the restart takes less than <code>CALL_END_GRACE_S</code> and the call is not transcribed. Two Meet rooms back to back within the grace stay one row: the room URL is read once.</td><td><span class="chip both">both</span></td><td><span class="chip new">new</span></td></tr>
     </tbody>
   </table></div>
-  <p class="count">Closed while this map was written: G10 and G11 by <code>fa80d39</code> (Windows a11y reads the page, not the browser UI), G13 by <code>81277a8</code> (capture-time data kept on backlog skips), G20 by <code>399a565</code> (UI events on by default, live on the main instance since 2026-10-07). G19 (no global hotkeys on macOS) went away with the hotkeys themselves in <code>57cf0dd</code>. Their ids stay reserved.</p>
+  <p class="count">Closed while this map was written: G10 and G11 by <code>fa80d39</code> (Windows a11y reads the page, not the browser UI), G13 by <code>81277a8</code> (capture-time data kept on backlog skips), G20 by <code>399a565</code> (UI events on by default, live on the main instance since 2026-10-07). G2 (one SCK timeout disabled SCK until restart) by the SCK retry change on 2026-10-08. G19 (no global hotkeys on macOS) went away with the hotkeys themselves in <code>57cf0dd</code>. Their ids stay reserved.</p>
 </section>
 
 <!-- 9 -->

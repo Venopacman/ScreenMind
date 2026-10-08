@@ -123,12 +123,16 @@ class _FakeDisplay:
 
 
 def _fake_sck(monkeypatch, displays, shot="ok"):
-    """Install a fake ScreenCaptureKit module. shot: 'ok', 'hang' or 'error'."""
+    """Install a fake ScreenCaptureKit module and a fake clock (calls["now"]).
+
+    calls["shot"] can change mid-test: 'ok', 'hang', 'error' or 'late'
+    ('late' keeps the handler in calls["late"] for the test to call)."""
     import sys
     import types
     from screenmind.capture import sck
 
-    calls = {"content": 0, "shots": []}
+    calls = {"content": 0, "shots": [], "shot": shot, "late": [], "now": 1000.0}
+    monkeypatch.setattr(sck, "_clock", lambda: calls["now"])
 
     class Content:
         def displays(self):
@@ -161,10 +165,12 @@ def _fake_sck(monkeypatch, displays, shot="ok"):
         @staticmethod
         def captureImageWithFilter_configuration_completionHandler_(f, config, h):
             calls["shots"].append((f.display, config))
-            if shot == "ok":
+            if calls["shot"] == "ok":
                 h(("cgimage", config.width, config.height), None)
-            elif shot == "error":
+            elif calls["shot"] == "error":
                 h(None, "SCStreamErrorDomain -3801")
+            elif calls["shot"] == "late":
+                calls["late"].append(h)
             # 'hang': never call back
 
     module = types.SimpleNamespace(
@@ -204,18 +210,145 @@ def test_sck_refetches_displays_for_unknown_frame(monkeypatch):
     assert not grabber.disabled
 
 
-def test_sck_timeout_disables_for_good(monkeypatch):
-    grabber, calls = _fake_sck(monkeypatch, [_FakeDisplay(1, 0, 0, 1512, 982)], shot="hang")
+def _sck_lines(caplog):
+    return [r.getMessage() for r in caplog.records if r.name == "screenmind.capture.sck"]
+
+
+def test_sck_timeout_cools_down_then_probe_brings_it_back(monkeypatch, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger="screenmind.capture.sck")
+    grabber, calls = _fake_sck(monkeypatch, [_FakeDisplay(1, 0, 0, 1512, 982)])
+    assert grabber.grab(_MAIN) is not None
+
+    calls["shot"] = "hang"
     assert grabber.grab(_MAIN) is None and grabber.disabled
-    assert grabber.grab(_MAIN) is None and len(calls["shots"]) == 1
+    assert grabber.status()["state"] == "cooldown" and grabber.status()["next_retry"]
+    assert "next try in 5 min" in _sck_lines(caplog)[-1]
+
+    calls["shot"] = "ok"
+    calls["now"] += 4 * 60  # still cooling down: no SCK request at all
+    assert grabber.grab(_MAIN) is None and len(calls["shots"]) == 2
+
+    calls["now"] += 60  # cool-down over: one probe, the tool takes this tick
+    assert grabber.grab(_MAIN) is None and len(calls["shots"]) == 3
+    assert grabber.status()["probing"]
+    assert calls["content"] == 1  # the probe reuses the cached display, no blocking call
+
+    calls["now"] += 5  # next tick: the probe answered, SCK grabs again
+    assert grabber.grab(_MAIN).size == (3024, 1964) and not grabber.disabled
+    assert grabber.status() == {"state": "on", "next_retry": None, "probing": False,
+                                "lost_requests": 1}  # the hung grab never answered
+    assert "answered a probe" in _sck_lines(caplog)[-1]
 
 
-def test_sck_errors_disable_after_a_few(monkeypatch):
+def test_sck_backoff_grows_and_caps(monkeypatch, caplog):
+    import logging
+    import re
+    caplog.set_level(logging.INFO, logger="screenmind.capture.sck")
+    grabber, calls = _fake_sck(monkeypatch, [_FakeDisplay(1, 0, 0, 1512, 982)])
+    grabber.grab(_MAIN)
+    calls["shot"] = "hang"
+    grabber.grab(_MAIN)
+    for _ in range(6):
+        calls["now"] = grabber._retry_at
+        assert grabber.grab(_MAIN) is None  # sends the probe
+        calls["now"] += 1  # past the probe timeout
+        assert grabber.grab(_MAIN) is None  # probe failed
+    waits = [int(m) for line in _sck_lines(caplog)
+             for m in re.findall(r"next try in (\d+) min", line)]
+    assert waits == [5, 10, 20, 40, 60, 60, 60]
+    assert not grabber.off and len(calls["shots"]) == 2 + 6
+    assert grabber.lost == 6  # the hung grab and 5 probes were open when the next went out
+
+
+def test_sck_never_more_than_one_request_waited_for(monkeypatch):
+    grabber, calls = _fake_sck(monkeypatch, [_FakeDisplay(1, 0, 0, 1512, 982)])
+    grabber.grab(_MAIN)
+    calls["shot"] = "late"
+    grabber.grab(_MAIN)  # times out, handler kept for later
+    calls["now"] = grabber._retry_at
+    grabber.grab(_MAIN)  # probe out
+    assert len(calls["shots"]) == 3
+    for _ in range(5):  # ticks inside the probe timeout send nothing new
+        grabber.grab(_MAIN)
+    assert len(calls["shots"]) == 3 and grabber.status()["probing"]
+
+    calls["now"] += 1
+    grabber.grab(_MAIN)  # probe timed out
+    late_probe = grabber._inflight
+    calls["late"][-1](("cgimage", 3024, 1964), None)  # it answers late
+    assert late_probe.done.is_set() and late_probe.result is None  # image not kept
+    calls["now"] = grabber._retry_at
+    calls["shot"] = "ok"
+    grabber.grab(_MAIN)
+    assert grabber.lost == 1  # only the first hung grab; the late probe did answer
+
+
+def test_sck_late_grab_answer_is_dropped(monkeypatch):
+    grabber, calls = _fake_sck(monkeypatch, [_FakeDisplay(1, 0, 0, 1512, 982)], shot="late")
+    assert grabber.grab(_MAIN) is None
+    request = grabber._inflight
+    calls["late"][0](("cgimage", 3024, 1964), None)
+    assert request.done.is_set() and request.result is None
+
+
+def test_sck_never_worked_stops_after_two_probes(monkeypatch, caplog):
+    import logging
+    from screenmind.capture import sck
+    caplog.set_level(logging.INFO, logger="screenmind.capture.sck")
+    grabber, calls = _fake_sck(monkeypatch, [_FakeDisplay(1, 0, 0, 1512, 982)], shot="hang")
+    assert grabber.grab(_MAIN) is None  # the one 3 s stall at start
+    for _ in range(sck._MAX_PROBES_NEVER_WORKED):
+        calls["now"] = grabber._retry_at
+        grabber.grab(_MAIN)
+        calls["now"] += 1
+        grabber.grab(_MAIN)
+    assert grabber.off and grabber.status()["state"] == "off"
+    assert "from now on" in _sck_lines(caplog)[-1]
+    calls["now"] += 24 * 3600
+    assert grabber.grab(_MAIN) is None
+    assert len(calls["shots"]) == 1 + sck._MAX_PROBES_NEVER_WORKED
+
+
+def test_sck_backoff_resets_only_after_stable_period(monkeypatch, caplog):
+    import logging
+    from screenmind.capture import sck
+    caplog.set_level(logging.INFO, logger="screenmind.capture.sck")
+    grabber, calls = _fake_sck(monkeypatch, [_FakeDisplay(1, 0, 0, 1512, 982)])
+    grabber.grab(_MAIN)
+
+    def fail_and_come_back():
+        calls["shot"] = "hang"
+        grabber.grab(_MAIN)
+        calls["shot"] = "ok"
+        calls["now"] = grabber._retry_at
+        grabber.grab(_MAIN)
+        assert grabber.grab(_MAIN) is not None
+
+    fail_and_come_back()
+    calls["now"] += 60  # fails again soon after coming back: longer wait
+    calls["shot"] = "hang"
+    grabber.grab(_MAIN)
+    assert "next try in 10 min" in _sck_lines(caplog)[-1]
+
+    calls["shot"] = "ok"
+    calls["now"] = grabber._retry_at
+    grabber.grab(_MAIN)
+    grabber.grab(_MAIN)
+    calls["now"] += sck._STABLE_SECONDS
+    grabber.grab(_MAIN)  # worked long enough: back-off starts over
+    calls["shot"] = "hang"
+    grabber.grab(_MAIN)
+    assert "next try in 5 min" in _sck_lines(caplog)[-1]
+
+
+def test_sck_errors_cool_down_after_a_few(monkeypatch):
     from screenmind.capture import sck
     grabber, calls = _fake_sck(monkeypatch, [_FakeDisplay(1, 0, 0, 1512, 982)], shot="error")
     for _ in range(sck._MAX_ERRORS - 1):
         assert grabber.grab(_MAIN) is None and not grabber.disabled
-    assert grabber.grab(_MAIN) is None and grabber.disabled
+    assert grabber.grab(_MAIN) is None and grabber.disabled and not grabber.off
+    assert grabber.status()["state"] == "cooldown"
 
 
 def test_cgimage_to_pil_keeps_colors():
@@ -276,3 +409,31 @@ def test_grab_logs_backend_once_and_on_switch(monkeypatch, caplog):
         cap._grab(mon)
     lines = [r.getMessage() for r in caplog.records if "backend" in r.getMessage()]
     assert lines == ["Screen grab backend: sck", "Screen grab backend: screencapture"]
+
+
+def test_grab_logs_switch_back_to_sck(monkeypatch, caplog):
+    import logging
+    cap, sct, tool_calls = _fake_capture(monkeypatch, slow_seconds=1e9)
+
+    class Grabber:
+        result = Image.new("RGB", (2, 2))
+
+        def grab(self, monitor):
+            return Grabber.result
+
+        def status(self):
+            return {"state": "on" if Grabber.result else "cooldown"}
+
+    cap._sck = Grabber()
+    mon = {"left": 0, "top": 0, "width": 2, "height": 2}
+    with caplog.at_level(logging.INFO, logger="screenmind.capture.screen"):
+        cap._grab(mon)
+        Grabber.result = None
+        cap._grab(mon)
+        assert cap.grab_status() == {"backend": "screencapture", "sck": {"state": "cooldown"}}
+        Grabber.result = Image.new("RGB", (2, 2))
+        cap._grab(mon)
+    lines = [r.getMessage() for r in caplog.records if "backend" in r.getMessage()]
+    assert lines == ["Screen grab backend: sck", "Screen grab backend: screencapture",
+                     "Screen grab backend: sck"]
+    assert cap.grab_status() == {"backend": "sck", "sck": {"state": "on"}}

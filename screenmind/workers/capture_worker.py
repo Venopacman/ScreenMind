@@ -427,6 +427,7 @@ class CaptureWorker:
             "paused": self._paused,
             "captures": self._capture_count,
             "skipped": self._skip_count,
+            "grab": self._screen.grab_status(),
         }
 
 

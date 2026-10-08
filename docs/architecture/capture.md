@@ -103,7 +103,7 @@ Gap ids (G1, G2...) point to [section 8](#8-gaps).
 
 | Data point | What we collect | macOS | Windows | Linux (side column) | Stored in | Gaps |
 |---|---|---|---|---|---|---|
-| Screenshot | One JPEG per display per changed tick | ScreenCaptureKit `SCScreenshotManager` (pyobjc), then `screencapture -x` CLI, then `mss` (CoreGraphics) | `mss` (GDI BitBlt) | X11: `mss`. Wayland: `grim`, then XDG Desktop Portal | `screenshots/YYYY-MM-DD/HH-MM-SS_mmm[_mN].jpg`, `activities.screenshot_path` | G1, G2, G3 |
+| Screenshot | One JPEG per display per changed tick | ScreenCaptureKit `SCScreenshotManager` (pyobjc), then `screencapture -x` CLI, then `mss` (CoreGraphics) | `mss` (GDI BitBlt) | X11: `mss`. Wayland: `grim`, then XDG Desktop Portal | `screenshots/YYYY-MM-DD/HH-MM-SS_mmm[_mN].jpg`, `activities.screenshot_path` | G1, G3 |
 | Change detection | pHash per display | `imagehash.phash` | same | same | not stored (in memory) | G4 |
 | App name | Owner of the top window per display | Quartz `CGWindowListCopyWindowInfo`, `kCGWindowOwnerName` | `EnumWindows` + `QueryFullProcessImageNameW` (exe name, UWP child process) | `xdotool` + `/proc`, or compositor IPC on Wayland | `activities.detected_app` | G5, G6 |
 | Window title | Title of the top window per display | `kCGWindowName`; if it is only the app name, `AXTitle` of the window's `AXWebArea` (Electron) | `GetWindowTextW`; if it is only the app name, the name of the window's UIA `Document` | `xdotool getwindowname` / `xprop`, compositor IPC | `activities.window_title` (sensitive-filtered) | G5 |
@@ -175,8 +175,8 @@ flowchart TB
 
 **macOS order** (`ScreenCapture._grab_with_fallback()`):
 
-1. **ScreenCaptureKit**, `capture/sck.py`. `SCShareableContent` lists the displays. It is refreshed every 60 s, so a replugged display gets a fresh `SCDisplay`. `SCScreenshotManager.captureImageWithFilter_configuration_completionHandler_` grabs one display at native pixel size in BGRA. The async handler is awaited with a 3 s timeout. One timeout disables SCK for the rest of the process. Three handler errors in a row do the same.
-2. **`screencapture -x -t png -R x,y,w,h`**, the macOS CLI, about 0.2 s per display. Used after SCK fails, or for good after one mss grab took over 5 s.
+1. **ScreenCaptureKit**, `capture/sck.py`. `SCShareableContent` lists the displays. It is refreshed every 60 s, so a replugged display gets a fresh `SCDisplay`. `SCScreenshotManager.captureImageWithFilter_configuration_completionHandler_` grabs one display at native pixel size in BGRA. The async handler is awaited with a 3 s timeout. One timeout, or three handler errors in a row, start a cool-down: grabs use the `screencapture` tool for 5 min. Then one probe goes out: a screenshot request that the capture tick does not wait for. The next tick reads its answer. An answer within 3 s brings SCK back. A failed probe doubles the wait (10, 20, 40, then every 60 min). The back-off starts over once SCK has worked for 30 min after coming back. If SCK never gave a frame in the process (a Claude-started process, G1), it stops for good after 2 failed probes. At most one SCK request is waited for at a time. A request that never answers costs a few KB and no thread (200 of them: about 4 MB). The log says `ScreenCaptureKit ... next try in N min`, `ScreenCaptureKit answered a probe ...; using it again`, and `Screen grab backend: <name>` on every switch. `/api/status` shows the state under `capture.grab`: `backend`, and `sck.state` (`on`, `cooldown`, `off`), `sck.next_retry`, `sck.probing`, `sck.lost_requests`.
+2. **`screencapture -x -t png -R x,y,w,h`**, the macOS CLI, about 0.2 s per display. Used while SCK cools down or fails, or for good after one mss grab took over 5 s.
 3. **mss**, which uses `CGWindowListCreateImage`. It is deprecated and can hang 30 s.
 
 SCK needs `pyobjc-framework-ScreenCaptureKit` (a macOS dependency in `pyproject.toml`) and macOS 14. Without them `sck.available()` is False and the log says "ScreenCaptureKit not available; using mss".
@@ -417,7 +417,7 @@ Migrations live in `Database._init_db()` as a list. Version = list index + 1. Th
 **Who gets the prompt on macOS.** TCC grants a permission to the "responsible process", not to a Python package:
 
 - Started from Terminal.app (the user's main instance): Terminal gets Screen Recording, Accessibility and Input Monitoring. Every other script run from Terminal gets them too.
-- Started from a Claude session: Claude.app starts children through a `disclaimer` helper, so the Python binary is its own responsible process. `CGPreflightScreenCaptureAccess()` says True, but SCK's handler never fires and mss hangs 30 s. Only the `screencapture` tool works (G1).
+- Started from a Claude session: Claude.app starts children through a `disclaimer` helper, so the Python binary is its own responsible process. `CGPreflightScreenCaptureAccess()` says True, but SCK's handler never fires and mss hangs 30 s. Only the first SCK call of the process answers (the display list); later display-list calls hang too (2026-10-08). Only the `screencapture` tool works (G1).
 - Started as the venv's Python directly (LaunchAgent, IDE): the prompt names "Python" or the IDE.
 - A future signed `ScreenMind.app` would show "ScreenMind" in the prompts (G22).
 
@@ -442,8 +442,7 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 
 | Id | Gap | Scope | Backlog |
 |---|---|---|---|
-| G1 | Grabs from Claude-started processes: SCK never answers, mss hangs 30 s. Only `screencapture` works, so dev instances test the fallback only. | macOS | [sck-capture.md](../backlog/sck-capture.md) "Find out why grabs hang" |
-| G2 | One SCK timeout disables SCK until restart. | macOS | [sck-capture.md](../backlog/sck-capture.md) "SCK is dropped for the whole process" |
+| G1 | Grabs from Claude-started processes: SCK never answers, mss hangs 30 s. Only `screencapture` works, so dev instances test the fallback only. They pay one 3 s stall at start; the 2 probes after it cost nothing. | macOS | [sck-capture.md](../backlog/sck-capture.md) "Find out why grabs hang" |
 | G3 | A blocked app skips the whole display. No per-window exclusion (SCK `SCContentFilter` could do it). | both (fix is macOS-only) | [sck-capture.md](../backlog/sck-capture.md) "Leave windows out of screenshots" |
 | G4 | The "periodic" grab is deduped like the others. A static screen (reading a long page) gets no rows, so time on it is not visible. The docstring says it forces a capture. | both | new |
 | G5 | No per-display app lookup on Linux. Unfocused displays have no app name. | Linux | [multi-display-capture.md](../backlog/multi-display-capture.md) "Linux: no per-display app lookup" |
@@ -478,7 +477,7 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G40 | `meetings.window_title` is the first matching window, front to back. For a Slack huddle found by mic use, that is whatever Slack window is in front, not the huddle (row 6 on 2026-10-07: a huddle with a DM contact saved as "* b2b-general (Channel) ... [Main]"). | both | new |
 | G41 | A call is kept as one row across a restart only if the restart takes less than `CALL_END_GRACE_S` and the call is not being transcribed. Inside one process, two Meet rooms back to back within the grace stay one row, because the room URL is read only once. | both | new |
 
-Closed while this map was written: G10 and G11 by `fa80d39` (Windows a11y reads the page, not the browser UI), G13 by `81277a8` (capture-time data kept on backlog skips), G20 by `399a565` (UI events on by default, live on the main instance since 2026-10-07). G19 (no global hotkeys on macOS) went away with the hotkeys themselves in `57cf0dd`. Their ids stay reserved.
+Closed while this map was written: G10 and G11 by `fa80d39` (Windows a11y reads the page, not the browser UI), G13 by `81277a8` (capture-time data kept on backlog skips), G20 by `399a565` (UI events on by default, live on the main instance since 2026-10-07). G2 (one SCK timeout disabled SCK until restart) by the SCK retry change on 2026-10-08. G19 (no global hotkeys on macOS) went away with the hotkeys themselves in `57cf0dd`. Their ids stay reserved.
 
 ## 9. Code vs backlog
 

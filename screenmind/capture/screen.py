@@ -314,12 +314,19 @@ class ScreenCapture:
         start = time.monotonic()
         img, backend = self._grab_with_fallback(monitor)
         if backend != getattr(self, "_grab_backend", None):
-            # Once at start and on every switch; the WARNING before it says why
+            # Once at start and on every switch; the sck log line before it says why
             logger.info("Screen grab backend: %s", backend)
             self._grab_backend = backend
         logger.debug("Grabbed %dx%d with %s in %.2fs",
                      img.width, img.height, backend, time.monotonic() - start)
         return img
+
+    def grab_status(self) -> dict:
+        """Last grab backend and, on macOS, the SCK state (for /api/status)."""
+        status = {"backend": getattr(self, "_grab_backend", None)}
+        if self._sck is not None:
+            status["sck"] = self._sck.status()
+        return status
 
     def _grab_with_fallback(self, monitor: dict) -> Tuple[Image.Image, str]:
         if self._sck is not None:

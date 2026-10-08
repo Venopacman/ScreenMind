@@ -72,7 +72,7 @@ else:
 # browser at run time with the "browser_url" gaps.
 CHECKS = [
     ("screenshots", "Screenshots, every display", {"macos": ["G1"], "windows": []}),
-    ("grab_backend", "Screen grab backend", {"macos": ["G1", "G2"], "windows": []}),
+    ("grab_backend", "Screen grab backend", {"macos": ["G1"], "windows": []}),
     ("app_name", "App name", {"macos": [], "windows": []}),
     ("window_title", "Window title", {"macos": [], "windows": []}),
     ("a11y_text", "Screen text from accessibility", {"macos": ["G7", "G12"], "windows": ["G7", "G12"]}),
