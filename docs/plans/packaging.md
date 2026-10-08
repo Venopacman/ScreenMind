@@ -1,6 +1,6 @@
 # Ship ScreenMind as an app
 
-Status: research and recommendation, 2026-10-07 (updated the same day for a headless agent and a resource budget). Nothing here is built or signed yet. One unsigned macOS spike was built (see [packaging-spikes.md](packaging-spikes.md)).
+Status: research and recommendation, 2026-10-07 (updated the same day for a headless agent and a resource budget). Nothing here is built or signed yet. Unsigned spikes were built on macOS (2026-10-07) and Windows (2026-10-08); see [packaging-spikes.md](packaging-spikes.md).
 
 ## Short answer
 
@@ -145,8 +145,9 @@ These need fixing before any installer is useful. They are small. Most of them a
 | F5 | `config._setup_logging()` | A windowed build has no console. Logs go nowhere unless `SCREENMIND_LOG_FILE` is set. | In app mode, always log to `~/.screenmind/screenmind.log` (rotating). |
 | F6 | `engine/ocr.py` (`Global.model_root_dir`) | The app ships rapidocr's own default models (31 MB) but never uses them. It downloads other models into `~/.screenmind/models/ocr` on first use. | Ship the 5 models we use inside the app (works offline) and exclude rapidocr's defaults. |
 | F7 | `capture_worker`, `ui_events` permission requests | Screen Recording is never requested explicitly. macOS asks on the first grab, at a random moment. | The first-run window requests each permission on a button press (see [First-run flow](#first-run-flow-native-no-dashboard)). |
+| F8 | `packaging/screenmind.spec` on Windows | PyInstaller finds the DLLs that extensions link to through `PATH`. Another app's folder on `PATH` (a JDK on the Windows laptop) put an old `msvcp140.dll` 14.16 into the bundle, and onnxruntime crashed on the first OCR frame. | Fixed in the spec (2026-10-08): on Windows the build keeps only `%SystemRoot%` folders on `PATH`. CI should also check the bundled `msvcp140.dll` is 14.40 or newer. |
 
-The spike ran with F1-F7 still in place. The dashboard worked because the test needed none of these paths.
+The spikes ran with F1-F7 still in place. The dashboard worked because the test needed none of these paths.
 
 ## 1. Freezing options
 

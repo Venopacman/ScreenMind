@@ -14,6 +14,19 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, co
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 
+if sys.platform == "win32":
+    # PyInstaller finds the DLLs that extensions link to through PATH. Any other
+    # app's folder on PATH can then put its own msvcp140.dll, vcruntime140.dll and
+    # ucrtbase.dll into the bundle. On the Windows laptop a JDK 11 folder came
+    # first: its msvcp140.dll 14.16 crashed onnxruntime (0xc0000005) on the first
+    # OCR call. Keep only Windows' own folders, so the runtime comes from System32
+    # (or from Python and the wheels themselves).
+    _windir = os.path.normcase(os.environ.get("SystemRoot", r"C:\Windows"))
+    os.environ["PATH"] = os.pathsep.join(
+        p for p in os.environ.get("PATH", "").split(os.pathsep)
+        if os.path.normcase(os.path.abspath(p)).startswith(_windir)
+    )
+
 datas = collect_data_files("screenmind") + collect_data_files("rapidocr")
 binaries = []
 hiddenimports = (
@@ -22,8 +35,9 @@ hiddenimports = (
     + collect_submodules("uvicorn")
 )
 if sys.platform == "win32":
-    # Untested guess for the Windows spike: uiautomation may load DLLs from its
-    # package folder, and comtypes generates modules at runtime.
+    # uiautomation loads its DLLs from its own bin/ folder through ctypes, so
+    # PyInstaller warns "not found"; this keeps them at that path. comtypes
+    # generates modules at runtime.
     datas += collect_data_files("uiautomation")
     binaries += collect_dynamic_libs("uiautomation")
     hiddenimports += collect_submodules("comtypes")
