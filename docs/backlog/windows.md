@@ -23,24 +23,29 @@ Status: open (the user's step)
 
 Since `c377a8c` (G39) the code defaults are the shared settings, and the dashboard stores only values that differ from them. Existing files still hold the defaults of the day they were written, and ScreenMind never rewrites them at startup. Clean them up once, with ScreenMind stopped (it writes `settings.json` on pause and resume), then start it and check the log line "Settings that differ from the defaults" in `~/.screenmind/screenmind.log`.
 
-Windows `~/.screenmind/settings.json`, proposed whole file:
+The user decided on 2026-10-08 which non-default values both machines keep:
+- `capture_interval: 10` (not the default 40): denser data for the workflows record.
+- `ui_events_types: "click,app_switch,text,clipboard"` (not the default `click,app_switch`): typed text and clipboard stay on, with the sensitive-data filter and password redaction. G31 stays open.
+- `performance_mode` follows the default (`balanced`) on both machines. The Mac dropped its `maximum`.
+
+Windows `~/.screenmind/settings.json`, whole file:
 
 ```json
 {
   "setup_complete": true,
-  "capture_paused": false
+  "capture_paused": false,
+  "capture_interval": 10,
+  "ui_events_types": "click,app_switch,text,clipboard"
 }
 ```
 
 What that drops, by key:
-- `capture_interval` 10 → default 40. Event-triggered capture already takes a frame on app switches, clicks and typing pauses; 40 s periodic means a quarter of the periodic grabs, OCR and analysis (lowest-resource principle).
-- `ui_events_types` `click,app_switch,text,clipboard` → default `click,app_switch`. Typed text and clipboard are opt-in until there is PII detection (G31). If you want them, keep this key and put the same line in the Mac's file, so both machines record the same.
 - `sensitive_filter_types` `credit_card,ssn,api_key,password` → default, which adds `jwt` (this file was missing it).
 - Equal to today's defaults, no effect now but frozen against later changes: `performance_mode`, `context_window`, `kv_cache_quant`, `flash_attention`, `analysis_mode`, `auto_pause_heavy_apps`, `heavy_apps`, `defer_analysis`, `capture_active_monitor`, `meeting_transcription`, `meeting_apps`, `retention_days`, `sensitive_filter_enabled`, `encryption_enabled`, `ui_events_enabled`, `event_triggered_capture`, `active_model`, `model_variants` (`Q4_0` is the default variant).
 - Keys of removed features, ignored since `cd95561`: `break_reminder_minutes`, `obsidian_*`, `notion_*`, `webhook_*`, `agents_*`, `auto_bookmark*`, `smart_notifications`, `distraction_minutes`, `dashboard_lock_timeout`, `*_hotkey`.
 - Kept: `setup_complete` and `capture_paused` are state, not settings.
 
-Mac: apply the same rules to `~/.screenmind/settings.json` (keep `setup_complete` and `capture_paused`, plus any key you chose on purpose and want on both machines). In the checkout's `.env`:
+Mac `~/.screenmind/settings.json` gets the same file without `setup_complete` (the Mac file never had it). It drops `performance_mode: maximum`, `capture_active_monitor: true` (a leftover from a 2026-10-06 test), `model_variants` and the old `sensitive_filter_types`. In the checkout's `.env`:
 - `OCR_LANGUAGES`: drop it once the G32 default `en,es,de,fr,ru` is on `custom`.
 - `CAPTURE_ON_START=true`: drop it. Both machines then restore the last capture state (`capture_paused`). The Windows laptop has never had it.
 - Since `c377a8c` the `.env` is read from the checkout root, so a start at login (LaunchAgent, cwd `/`) now loads it too. Until now such a start ran without it.
