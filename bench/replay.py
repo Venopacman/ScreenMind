@@ -45,6 +45,10 @@ GENERIC = re.compile(r"\b(is interacting with|likely|is working (on|within))\b",
 BROWSER_WORDS = {"chrome", "chromium", "safari", "firefox", "edge", "brave", "arc", "opera", "vivaldi"}
 
 
+def _say(msg: str):
+    print(msg, flush=True)  # noqa: T201 (CLI output)
+
+
 # ── freeze ──────────────────────────────────────────────────────────────
 
 def freeze(activity_id: int, name: str, source_db: Path, force: bool):
@@ -87,7 +91,7 @@ def freeze(activity_id: int, name: str, source_db: Path, force: bool):
         "stored": {k: row[k] for k in ("app_name", "category", "summary", "analysis_method")},
     }
     (out / "capture.json").write_text(json.dumps(capture, indent=1, ensure_ascii=False))
-    print(f"froze #{activity_id} -> {out}  ({app} | {row['window_title']})")
+    _say(f"froze #{activity_id} -> {out}  ({app} | {row['window_title']})")
 
 
 # ── run ─────────────────────────────────────────────────────────────────
@@ -284,16 +288,16 @@ async def _run(scenarios: dict, only: list, repeat: int):
 
 def _print_result(r):
     if "error" in r:
-        print(f"ERROR {r['name']}: {r['error']}")
+        _say(f"ERROR {r['name']}: {r['error']}")
         return
     failed = [c for c in r["checks"] if not c["ok"]]
     status = "PASS" if not failed else ("GAP " if r["gap"] else "FAIL")
-    print(f"{status} {r['name']} (run {r['run']}, {r['seconds']}s)  "
+    _say(f"{status} {r['name']} (run {r['run']}, {r['seconds']}s)  "
           f"[{r['row']['category']}] {(r['row']['summary'] or '')[:90]}")
     for c in failed:
-        print(f"       x {c['check']}: got {c['got']}")
+        _say(f"       x {c['check']}: got {c['got']}")
     if failed and r["gap"]:
-        print(f"       known gap: {r['gap']}")
+        _say(f"       known gap: {r['gap']}")
 
 
 def _summary(results):
@@ -320,13 +324,13 @@ def run(only: list, repeat: int):
     scenarios = yaml.safe_load(spec_file.read_text())["scenarios"]
     results = asyncio.run(_run(scenarios, only, repeat))
     summary = _summary(results)
-    print("\n" + json.dumps(summary, indent=1))
+    _say("\n" + json.dumps(summary, indent=1))
     (BENCH / "runs").mkdir(parents=True, exist_ok=True)
     out = BENCH / "runs" / f"{datetime.now():%Y%m%d-%H%M%S}.json"
     out.write_text(json.dumps({"code": _git_head(), "taken_at": datetime.now().isoformat(timespec="seconds"),
                                "summary": summary, "results": results}, indent=1, default=str,
                               ensure_ascii=False))
-    print(f"saved {out}")
+    _say(f"saved {out}")
     return 1 if summary.get("failed") else 0
 
 
