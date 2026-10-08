@@ -28,11 +28,23 @@ The questionnaire session's hourly scan covers most of this.
 Refs: `MacOSAdapter._best_title()`, `capture_worker._get_browser_url()`, `UiEventRecorder._poll_front()`.
 
 ### PII detection before storing typed text and clipboard
-Status: open
+Status: done 2026-10-08 for emails, phones and IBANs (`38793c2`). Names and message content: decided not to detect, see below.
 
-Typed text and clipboard are off by default, because they can hold private content: messages, names, addresses, health or money details. Today only passwords and known secret patterns are removed (`privacy/data_filter.py`: cards, SSNs, API keys, JWTs, passwords). Before `text` and `clipboard` can be on by default, add PII detection that runs before a row is stored. For example names, emails, phone numbers, addresses, and free-form private messages. Then decide again whether to add `text,clipboard` to the default `ui_events_types`.
+`text` and `clipboard` became default UI event types in `5c419f8` (G31 in `windows.md`). This item was written before that.
 
-Refs: `UiEventRecorder._add()` (the one place every text field is filtered), `privacy/data_filter.py`, `config.ui_events_types`.
+Measured on a snapshot of the Mac DB (2026-10-08, data since 2026-10-07 18:23):
+- `ui_events`: 131 `text` and 6 `clipboard` rows (Chrome 78, Claude 54, Slack 4, Code 1). Emails, phones, IBANs, card numbers, addresses: 0. Two Slack rows are messages to colleagues. Most other long rows are prompts typed into Claude or Chrome.
+- `activities.ocr_text`: 203 of 1,623 frames hold emails (433 in total), 2 hold phone numbers. So OCR, not typed text, is where most PII sits. The filter covers both, because the same `data_filter` runs on OCR, a11y text, window titles and every UI event field.
+
+Done in `38793c2`: `email` (now on by default), `phone` and `iban` (new) are default `sensitive_filter_types`. They are applied at capture and again at export. The email marker keeps a real-looking domain (`[REDACTED:email@example.com]`) so the workflows app can tell internal from external contacts. On the snapshot: 1 phone and 0 IBAN matches in 3,470 texts, and +0.1 ms per OCR frame.
+
+Decisions (user, 2026-10-08):
+- Redact at capture, not only at export. Then nothing raw reaches the export or any session that reads the DB directly (for example EDA sending text to OpenAI).
+- No NER for names. `spacy` + `en_core_web_sm` measured +135 MB RAM, 2 ms per event, 22 s cold load, 45 packages, English only. That is over half of the 250 MB median budget.
+- Keep typed text and clipboard in chat and mail apps for now. A per-app rule for typed text alone hides little: OCR reads the same message from the screen once it is sent. Hiding chat content belongs with the "Work/personal flag per frame" item in `questionnaire-data-source.md`, which covers OCR too.
+- Not detected, so stored in clear: person names, postal addresses, free-form message content. Rows stored before `38793c2` are not rewritten; retention removes them, and the export scrubs them with the new types.
+
+Refs: `privacy/data_filter.py` (`PATTERNS`, `DEFAULT_TYPES`), `UiEventRecorder._add()`, `config.sensitive_filter_types`, `export/archive.py`.
 
 ### Firefox: probably no URL on macOS
 Status: idea
