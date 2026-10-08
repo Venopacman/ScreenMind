@@ -33,7 +33,7 @@ Activities 437, 441 and 443 still hold unsanitized OAuth/Keycloak URLs with toke
 Refs: `0fcf92a`, `activities.active_url`.
 
 ### Slack summaries are generic
-Status: open
+Status: closed, obsolete (2026-10-08). Gemma was removed (branch `claude/practical-dijkstra-f83cbe`), so new frames have no summary. The window title, which names the channel or DM, is stored as before.
 
 38 of 71 Slack frames (15:20-16:10) got summaries like "viewing a Slack channel conversation", even though the window title names the channel or DM. The benchmark scenario `slack_channel_goals` fails because the cycle goals are visible but not mentioned. Make the analysis prompt use the title and the OCR text, and check whether Gemma E2B is enough.
 

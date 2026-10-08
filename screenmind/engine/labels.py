@@ -64,6 +64,8 @@ KNOWN_APP_CATEGORIES = {
     "pycharm": "coding", "intellij idea": "coding", "webstorm": "coding",
     "xcode": "coding", "android studio": "coding", "sublime text": "coding",
     "zed": "coding", "neovim": "coding", "datagrip": "coding",
+    # The Claude desktop app here is mostly Claude Code sessions
+    "claude": "coding",
     # Communication
     "discord": "communication", "slack": "communication",
     "teams": "communication", "microsoft teams": "communication",
@@ -83,7 +85,7 @@ KNOWN_APP_CATEGORIES = {
     "figma": "design", "gimp": "design", "inkscape": "design", "sketch": "design",
     "photoshop": "design", "illustrator": "design",
     # Meetings
-    "zoom": "meeting", "facetime": "meeting",
+    "zoom": "meeting", "facetime": "meeting", "granola": "meeting",
 }
 
 # Site → category for browser windows. Keys match the URL host (or a parent
@@ -116,7 +118,7 @@ _TITLE_SITE_WORDS = {
     "whatsapp": "communication", "telegram": "communication",
     "google meet": "meeting", "github": "coding", "gitlab": "coding",
     "stack overflow": "coding", "google docs": "writing", "notion": "writing",
-    "figma": "design",
+    "jira": "writing", "confluence": "writing", "figma": "design",
 }
 
 # File extensions used to reject filename candidates from title extraction.

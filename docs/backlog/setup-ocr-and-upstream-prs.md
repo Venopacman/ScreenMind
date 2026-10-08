@@ -63,18 +63,14 @@ Goal: use ScreenMind data as a source for the workflows app in the backend monor
 
 Refs: `screenmind/export/`, `screenmind/api/routes/export.py`, `docs/export-format.md`, the `activities`, `ui_events` and `meetings` tables.
 
-### Swap Gemma for a vendor LLM API
+### Semantic analysis over session text
 Status: idea
 
-All model calls go through `screenmind/engine/llm_client.py`, which already speaks the OpenAI `/v1/chat/completions` format. For a vendor API:
-- Add an auth header and a `model` field.
-- `is_available()` must stop calling `/health`.
-- `fast` mode puts a Gemma-only `<think></think>` assistant message at the end. Use `balanced`, or drop that message.
-- Screenshots would leave the laptop unredacted. The sensitive-data filter only cleans OCR text.
-- Audio uses `input_audio`, which most vendors don't accept.
-- `GEMMA_MODE=api` exists but isn't wired to anything.
+Frames have no summary since Gemma was removed (branch `claude/practical-dijkstra-f83cbe`, 2026-10-08). App and category come from rules (`screenmind/engine/labels.py`). The plan is an LLM over session text (the export), off the device, not per frame. Nothing on the device calls a model, and no API key lives in the client. Before building it:
+- Send text only. Screenshots would leave unredacted.
+- The regex filter (`screenmind/privacy/data_filter.py`) misses names, addresses and message content. Decide what may leave the device.
 
-Refs: `screenmind/engine/llm_client.py`, `screenmind/engine/analyzer.py` (`analyze_screenshot_fast`), `screenmind/main.py:167`.
+Refs: `docs/export-format.md`, "Should local LLM analysis ship?" in `docs/plans/packaging.md` (options D and E).
 
 ### Unexplained write of `capture_paused=true`
 Status: open, low priority

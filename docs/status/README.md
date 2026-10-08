@@ -34,7 +34,7 @@ Then commit and push:
 git add docs/status && git commit -m "docs(status): e2e run on macos" && git push origin custom
 ```
 
-A run takes about 3 to 5 minutes. Most of it is waiting for Gemma.
+A run takes about 3 to 5 minutes. Most of it is the scripted steps and waiting for OCR. No llama-server is needed.
 
 **Hands off during the first minute.** The script switches apps, clicks and types by itself. If you click somewhere else at the same time, the test windows are in front too briefly to be captured, and the guards stop the typing. The rows then FAIL or SKIP for no real reason. Wait until it prints "You can use the computer again".
 
@@ -89,7 +89,7 @@ Results, one row per data point:
 | Typed secret is redacted | The value after `password:` is in no text column of any table. |
 | Password field is not stored | The password box secret is in no text column. `[password field]` was recorded instead. |
 | Call detection | A `meetings` row exists. SKIP when no call was active. To test it, run the check during a call. |
-| Analysis (Gemma) | At least one frame has `status='ok'`, with a category and summary. |
+| Analysis (text + rule labels) | At least one frame reaches `status='ok'` with text. No llama-server needed. |
 | Retention cleanup at startup | The 30-day-old rows and JPEG are gone after startup. |
 
 ## Rules
@@ -111,6 +111,6 @@ Results, one row per data point:
 | `--manual` | macOS: click and type by hand instead of injecting input. Tests the real input path. |
 | `--no-input` | Skip the click, typing and password steps. Those rows become SKIP. |
 | `--manual-seconds N` | Time for the by-hand typing step (default 30). |
-| `--analysis-timeout N` | Max seconds to wait for Gemma (default 240). |
+| `--analysis-timeout N` | Max seconds to wait for analysis of the captured frames (default 240). |
 | `--keep-data` | Keep the temp data dir and print its path. |
 | `--summary` | Only rebuild `summary.md` from the status files. |

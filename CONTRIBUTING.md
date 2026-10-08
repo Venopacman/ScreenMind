@@ -19,23 +19,17 @@ ScreenMind collects actions and labels them for a workflows app. New features sh
    This creates `.venv` from `uv.lock`, including the test tools.
    To add a dependency, run `uv add <package>` and commit `pyproject.toml` and `uv.lock`.
 
-3. Install llama-server (needed for the analysis engine):
-   ```bash
-   uv run python -m screenmind.setup_llama
-   ```
-   The app also does this on first start. Download a Gemma model in the Model Hub in the dashboard.
-
-4. Run tests:
+3. Run tests:
    ```bash
    uv run pytest tests -q
    ```
 
-5. Run your branch from a git worktree with `scripts/dev-instance.sh` (from the worktree root). It uses its own data dir (`~/.screenmind-dev/<worktree>`) and a port in 7800-7899, so it does not touch the main instance's data. `scripts/dev-instance.sh info` prints the port and data dir. Stop it with Ctrl+C when you are done, because it captures the screen.
+4. Run your branch from a git worktree with `scripts/dev-instance.sh` (from the worktree root). It uses its own data dir (`~/.screenmind-dev/<worktree>`) and a port in 7800-7899, so it does not touch the main instance's data. `scripts/dev-instance.sh info` prints the port and data dir. Stop it with Ctrl+C when you are done, because it captures the screen.
 
 ## Reporting Bugs
 
 Open an [issue](https://github.com/ayushh0110/ScreenMind/issues) with:
-- Your OS, Python version, and GPU (model + VRAM)
+- Your OS and Python version
 - Steps to reproduce
 - Relevant logs or screenshots
 
@@ -84,7 +78,7 @@ Logging goes to `stderr` and, once the app starts (`main.run()`), to a rotating 
 
 - **Capture gaps.** The open gaps per OS are listed in [docs/architecture/capture.md, section 8](docs/architecture/capture.md#8-gaps).
 - **Wayland testing.** Wayland capture works but needs more real-world testing across distros.
-- **Model testing.** Try different Gemma quantizations and variants.
+- **Label rules.** Add apps and sites to `KNOWN_APP_CATEGORIES` and `SITE_CATEGORIES` in `screenmind/engine/labels.py`.
 - **Docs.** Setup guides for specific hardware.
 
 ## Project Structure
@@ -96,11 +90,10 @@ ScreenMind/
 │   ├── config.py             # Pydantic settings (env + runtime overrides)
 │   ├── launcher.py           # Splash screen launcher (tkinter)
 │   ├── startup.py            # Cross-platform auto-start registration
-│   ├── setup_llama.py        # Auto-detect + install llama-server
 │   ├── api/                  # Web dashboard + REST API (FastAPI)
 │   ├── assets/               # Bundled logo, favicon
 │   ├── capture/              # Screen capture, dedup, UI events
-│   ├── engine/               # Gemma analysis, OCR, layout, LLM client, models
+│   ├── engine/               # OCR, layout text, rule labels, a11y text
 │   ├── export/               # Per-day zip archives for the workflows app
 │   ├── storage/              # SQLite database layer (schema v11)
 │   ├── workers/              # Background workers (capture, analysis, audio)

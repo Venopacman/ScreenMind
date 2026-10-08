@@ -2,7 +2,7 @@
 
 What ScreenMind captures on macOS and Windows, how, and where it ends up. Linux gets a short side column.
 
-This file is the source of truth. It was written from the code on `custom` at `482c275` (2026-10-07) and updated for the strip-down to action collection ([plan](../plans/strip-to-actions.md)), DB schema v11. Where the code and a backlog file disagree, this file follows the code. See [Code vs backlog](#9-code-vs-backlog).
+This file is the source of truth. It was written from the code on `custom` at `482c275` (2026-10-07) and updated for the strip-down to action collection ([plan](../plans/strip-to-actions.md)), DB schema v11, and for the removal of Gemma and llama-server on 2026-10-08 (`069c137`). Where the code and a backlog file disagree, this file follows the code. See [Code vs backlog](#9-code-vs-backlog).
 
 A rendered version with the same content is published as an Artifact: https://claude.ai/artifact/DUVgVLd84bMqUUNciuf7vA (private to the owner). Its source is [`capture.html`](capture.html) next to this file.
 
@@ -23,7 +23,7 @@ Contents:
 
 ## 1. Data flow
 
-Three workers run side by side. `CaptureWorker` takes screenshots and reads window info, a11y text and the URL at the moment of the grab. `AnalysisWorker` picks frames from a queue, runs OCR and Gemma, and writes the results. `AudioWorker` watches for calls on its own thread. `UiEventRecorder` records clicks, app switches, typed text and the clipboard by default; it can be turned off.
+Three workers run side by side. `CaptureWorker` takes screenshots and reads window info, a11y text and the URL at the moment of the grab. `AnalysisWorker` picks frames from a queue, runs OCR and the sensitive-data filter, labels the frame by rules, and writes the results. No model looks at the image. `AudioWorker` watches for calls on its own thread. `UiEventRecorder` records clicks, app switches, typed text and the clipboard by default; it can be turned off.
 
 ```mermaid
 flowchart TB
@@ -34,7 +34,6 @@ flowchart TB
     HOOK["Input hooks<br/>CGEventTap / WH_KEYBOARD_LL + WH_MOUSE_LL"]
     CLIP["Clipboard<br/>NSPasteboard / Win32 clipboard"]
     COREAUDIO["Mic users<br/>CoreAudio process list (macOS)"]
-    SD["Audio input<br/>sounddevice"]
   end
 
   subgraph CAP["Capture (capture_worker.py)"]
@@ -50,13 +49,13 @@ flowchart TB
 
   subgraph CALLS["Calls (audio_worker.py)"]
     DET["AudioWorker.check_calls<br/>every 5 s"]
-    TRANS["Transcription<br/>off by default"]
   end
 
   subgraph ANA["Analysis (analysis_worker.py)"]
     Q[["asyncio.Queue of CaptureResult"]]
     OCR["RapidOCR<br/>when a11y text is not real content"]
-    GEMMA["Gemma 4 via llama-server :5809"]
+    FILT["Sensitive-data filter<br/>+ OCR layout clustering"]
+    RULES["Rule labels<br/>engine/labels.py"]
   end
 
   subgraph STORE["Storage (data_dir)"]
@@ -79,11 +78,8 @@ flowchart TB
   WINS --> DET
   COREAUDIO --> DET
   DET -- "meetings row" --> DB
-  DET --> TRANS
-  SD --> TRANS
-  TRANS -- "audio chunks" --> GEMMA
-  Q --> OCR --> GEMMA
-  GEMMA -- "update row, status=ok" --> DB
+  Q --> OCR --> FILT --> RULES
+  RULES -- "update row, status=ok" --> DB
 ```
 
 The order inside one tick, from `CaptureWorker._capture_monitor()`:
@@ -113,8 +109,8 @@ Gap ids (G1, G2...) point to [section 8](#8-gaps).
 | OCR text | Text from pixels | RapidOCR (ONNX Runtime, CPU) | same | same | `activities.ocr_text`, `ocr_boxes`, `organized_text` | G14 |
 | UI events | Clicks, typed text, app switches, tab/page changes, clipboard | `CGEventTap` (listen-only) + `AXUIElement` + `NSPasteboard` | `WH_KEYBOARD_LL` / `WH_MOUSE_LL` hooks + UIA + Win32 clipboard | none | `ui_events`, `activities.user_actions` | G21, G22, G25, G27, G31 |
 | Call start/end | App, title, room URL, duration | Window rules + CoreAudio "is running input" per process | Window rules only (no mic info) | Window rules on the focused window only | `meetings` | G16, G17, G27, G40, G41 |
-| Call audio | Mic + system audio, transcript, summary | `sounddevice` mic; system audio only with a virtual loopback device | `sounddevice` mic + a device named "loopback" / "Stereo Mix" | `sounddevice` mic | `meetings.transcript`, `meetings.summary` | G18 |
-| Analysis | Category, summary, scene, layout | Gemma 4 E2B (llama-server) | same | same | `activities.app_name`, `category`, `summary`, `details`, `visible_text`, `mood`, `confidence`, `scene_description` | G15 |
+| Call audio | Not recorded since 2026-10-08. Older calls keep their transcript and summary | none | none | none | `meetings.transcript`, `meetings.summary` (old rows only) | |
+| Analysis | App name, category, layout text | Rules over app name, title and URL (`engine/labels.py`); OCR box clustering | same | same | `activities.app_name`, `category`, `organized_text`, `analysis_method` | G6 |
 
 ## 3. Components per OS
 
@@ -147,7 +143,7 @@ flowchart TB
     S4["engine/a11y_extractor.py (adapter facade)"]
     S5["capture/ui_events/recorder.py, text_buffer.py, models.py"]
     S6["workers/call_detection.py, audio_worker.py"]
-    S7["workers/analysis_worker.py, engine/ocr.py, analyzer.py, llm_client.py"]
+    S7["workers/analysis_worker.py, engine/ocr.py, layout_analyzer.py, labels.py"]
     S8["privacy/url_filter.py, data_filter.py, encryption.py"]
     S9["storage/database.py"]
   end
@@ -207,9 +203,10 @@ Cost, measured on the Windows laptop on 2026-10-08 (2.4 active hours, one displa
 
 The analysis worker has a second, per-app cache keyed by `(app, title[:100])`:
 
-- distance 3 or less: "identical", copy the last analysis, skip OCR and Gemma;
-- 4-10 and younger than 240 s (chat apps) or 420 s (others): "minor", run OCR, reuse Gemma's analysis;
+- distance 3 or less: "identical", copy the last frame's text and skip OCR. The labels still come from the rules;
 - more: "full".
+
+The "minor" tier (reuse Gemma's analysis, run OCR) went away with Gemma on 2026-10-08.
 
 ### 4.3 Window and app info
 
@@ -255,7 +252,7 @@ Read by `A11yExtractor.extract_text()` → `adapter().extract_a11y_text()`, at g
 
 **Linux:** AT-SPI via `pyatspi`.
 
-**How analysis uses it** (`_a11y_is_content()`): a11y text counts as real content when it has at least 200 chars after removing the title and the app name, and is not mostly repeats. On macOS and Linux it also drops English chrome markers and menu-word lines. Windows skips that check, because its walker already left chrome out by element type, in any UI language. Then it replaces OCR. If it is chrome only, OCR runs and a11y text up to 500 chars is put in front of the OCR text. The path (`a11y`, `ocr`, `a11y+ocr`, plus `+layout`) is only logged (`[text: N chars via ...]`). `analysis_method` stores the analysis tier instead (`full:fast`, `cache:minor`, `cache:identical`, `backfill:...`, `skipped`, `rule:empty_screen`). Only OCR writes `ocr_boxes`, so a row with `ocr_boxes` set went through OCR.
+**How analysis uses it** (`_a11y_is_content()`): a11y text counts as real content when it has at least 200 chars after removing the title and the app name, and is not mostly repeats. On macOS and Linux it also drops English chrome markers and menu-word lines. Windows skips that check, because its walker already left chrome out by element type, in any UI language. Then it replaces OCR. If it is chrome only, OCR runs and a11y text up to 500 chars is put in front of the OCR text. The path (`a11y`, `ocr`, `a11y+ocr`, plus `+layout`) is only logged (`[text: N chars via ...]`). `analysis_method` stores the analysis tier instead (`rules`, `cache:identical`, `rule:empty_screen`, `backfill:...`, `skipped`). Rows from before 2026-10-08 may hold the old Gemma values (`full:fast`, `cache:minor`). Only OCR writes `ocr_boxes`, so a row with `ocr_boxes` set went through OCR.
 
 The a11y text has no column of its own. It ends up in `activities.ocr_text` (G12).
 
@@ -271,7 +268,7 @@ Known holes: Chrome ignores `AXManualAccessibility`. After a reboot, with no oth
 
 **Per window:** `get_window_url(pid, bounds)` reads the URL of a browser window that is not in front. macOS only; it is used for call room URLs (G16).
 
-**Not used:** URLs found in OCR text. `_extract_all_urls()` still finds them and passes them to Gemma as a hint, but `active_url` is only the browser's own URL.
+**Not used:** URLs found in OCR text. The code that found them fed the Gemma prompt and was removed with it. `active_url` is only the browser's own URL.
 
 **Linux:** none.
 
@@ -286,7 +283,7 @@ Known holes: Chrome ignores `AXManualAccessibility`. After a reboot, with no oth
 - Models (~15 MB) download to `~/.screenmind/models/ocr` on first use.
 - onnxruntime options (`_session_options()`): memory pattern and memory arena off, `OCR_THREADS` threads (default 2). RapidOCR has no setting for the memory pattern, so `_tune_sessions()` loads its models again with these options. Same text as the defaults, with less memory and about 40% less CPU per frame. Each frame takes about 45% longer.
 - Runs in the analysis worker, not at grab time. Skipped when a11y text is real content, and on "identical" cache hits.
-- Output: text, plus boxes as JSON (`ocr_boxes`). `layout_analyzer.organize_ocr_text()` groups boxes into regions (`organized_text`), from Gemma's layout in `merged` mode or from OCR clustering otherwise.
+- Output: text, plus boxes as JSON (`ocr_boxes`). `layout_analyzer.cluster_ocr_layout()` clusters the boxes into regions by position, and `organize_ocr_text()` writes the text per region (`organized_text`).
 
 ### 4.7 UI events
 
@@ -324,11 +321,11 @@ OS hook thread -> queue.SimpleQueue -> enricher thread -> ui_events table
 - Every text field (names, values, typed text, clipboard up to 1,000 chars, window titles) goes through the sensitive-data filter in one place before it is queued for the DB. A label typed before a pause ("pwd -") is checked together with the next chunk. URLs go through `sanitize_url()`.
 - Rows are written in batches every 2 s. Backend calls run without the recorder lock, so a hung UIA or clipboard call cannot block capture. `flush_for_capture()` waits at most 2 s for the lock.
 - The watchdog (`screenmind/watchdog.py`) restarts the recorder when the enricher has not ticked for 2 min, at most 3 times an hour. The new enricher gets a new lock, so one stuck while holding the old lock blocks nothing.
-- At each saved frame, `attach_ui_events()` links events to the new row: the unlinked ones since the previous frame saved on that display, and only those of the frame's app (`app_key()`: case, spaces and `.exe` don't matter). A click must also be inside the display's rect. So an event goes to the first frame saved after it on a display, and only if that frame shows its app. Otherwise it stays unlinked (`activity_id` NULL) with its own timestamp, for later analysis to match by time. Example: typing in Notepad++, then a switch to Claude before any Notepad++ frame, leaves the typing unlinked. Capture can't grab the app being left after the switch, so no extra capture is requested. Events from before the current run are never linked. No extra OS calls: one indexed query per frame. `format_user_actions()` turns the linked events into at most 10 bullet lines (1,200 chars) in `activities.user_actions`. These lines go into the Gemma prompt. The export lists unlinked events between the frames in the session files ([export-format.md](../export-format.md)). The dashboard timeline shows only `user_actions`; `GET /api/ui-events` lists all events by time. With the same app on several displays, events without a point go to the first of its frames in the tick (G21).
+- At each saved frame, `attach_ui_events()` links events to the new row: the unlinked ones since the previous frame saved on that display, and only those of the frame's app (`app_key()`: case, spaces and `.exe` don't matter). A click must also be inside the display's rect. So an event goes to the first frame saved after it on a display, and only if that frame shows its app. Otherwise it stays unlinked (`activity_id` NULL) with its own timestamp, for later analysis to match by time. Example: typing in Notepad++, then a switch to Claude before any Notepad++ frame, leaves the typing unlinked. Capture can't grab the app being left after the switch, so no extra capture is requested. Events from before the current run are never linked. No extra OS calls: one indexed query per frame. `format_user_actions()` turns the linked events into at most 10 bullet lines (1,200 chars) in `activities.user_actions`. The export lists unlinked events between the frames in the session files ([export-format.md](../export-format.md)). The dashboard timeline shows only `user_actions`; `GET /api/ui-events` lists all events by time. With the same app on several displays, events without a point go to the first of its frames in the tick (G21).
 
 ### 4.8 Calls and meetings
 
-`workers/audio_worker.py` and `workers/call_detection.py`. Calls are tracked always. Transcription is off by default (`MEETING_TRANSCRIPTION=false`).
+`workers/audio_worker.py` and `workers/call_detection.py`. Calls are tracked always. No audio is recorded.
 
 **Detection**, own thread, every 5 s, also while capture is paused:
 
@@ -346,35 +343,29 @@ OS hook thread -> queue.SimpleQueue -> enricher thread -> ui_events table
 - Restarts: shutdown ends the call at the last time it was seen. When a call starts, `_resume_recent()` looks at the last `meetings` row. If that row ended less than the grace before, has no transcript, and `same_call()` says it is this call, the row is reopened (`end_time` back to NULL) and keeps its start. `same_call()`: same `app_name`; then the room URL decides if both are known; else, for browser calls, the title without markers (`normalize_title()` drops emoji, "* ", " - N new items", " [Main]"); else the app alone. This fixed one Meet call saved as two rows (ids 4 and 5) around a restart on 2026-10-07.
 - Stored: `meetings.start_time`, `end_time`, `app_name` (label like "Google Meet"), `window_title`, `url` (v10), `duration_minutes` (saved every 60 s). For browser calls the room URL comes from `get_window_url()` and `sanitize_url()`, retried every 30 s.
 
-**Transcription**, only when on and the active model has an audio encoder (`model_manager.is_audio_capable()`):
-
-- `sounddevice` records the mic and, if found, a system-audio device whose name contains "loopback" or "stereo mix". 16 kHz, 15 s chunks.
-- Each chunk goes to Gemma via llama-server (`input_audio`). The transcript and a summary are written to `meetings.transcript` and `meetings.summary`.
-- macOS has no such loopback device by default, so it records the mic only (G18).
+**Transcription** was removed with Gemma on 2026-10-08. `sounddevice` and `MEETING_TRANSCRIPTION` are gone. Calls from before keep `meetings.transcript` and `meetings.summary`, and the dashboard still shows them.
 
 
 ### 4.9 Analysis
 
-`workers/analysis_worker.py` → `engine/analyzer.py` (`GemmaAnalyzer`) → `engine/llm_client.py` → llama-server at `LLAMA_SERVER_HOST` (default `http://127.0.0.1:5809`, OpenAI-style `/v1/chat/completions`). Default model `gemma-4-e2b`, context 6,144 tokens.
+`workers/analysis_worker.py`. No model looks at the image. Gemma and llama-server were removed on 2026-10-08 (`069c137`).
 
-Modes (`ANALYSIS_MODE`): `fast` (default, no thinking, 500 tokens out), `balanced` (thinking, 1,024), `merged` (thinking + layout regions, 1,800).
+One frame, in order:
 
-What goes into one Gemma call:
+1. Per-app cache (4.2). An identical frame reuses the last frame's text and skips OCR.
+2. Text: the a11y text from capture, or OCR when it is not real content (4.4, 4.6).
+3. The sensitive-data filter cleans the text and the OCR boxes (`filter_ocr_boxes()`, before `ocr_boxes` and `organized_text` are built). The image is not cleaned.
+4. A frame with no app, no title and under 20 chars of real text is stored as `idle` (`rule:empty_screen`).
+5. `cluster_ocr_layout()` and `organize_ocr_text()` build `organized_text` from the OCR boxes.
+6. `engine/labels.py`, `label_frame(app_name_hint, window_title, url)`, sets `app_name` and `category`:
+   - App name, first non-empty wins: L0 the OS app name where the adapter trusts it (macOS); L1 the title suffix after `" - "`; L2 the OS process name, unless it is a generic wrapper (`electron`, `java`); L3 a short clean title; L4 the raw OS name, else `unknown`.
+   - Category in a browser window: the site from the URL host (`SITE_CATEGORIES`), else words in the title, else the app's known category, else `browsing`. Other apps: `KNOWN_APP_CATEGORIES`, else `other`.
 
-- The screenshot, scaled to at most 768 px on the long side, JPEG quality 85.
-- `OS-detected app: <detected_app>`.
-- `Window title: <window_title>`.
-- `URLs visible in screenshot: ...`: the browser URL first, then URLs found in the screen text.
-- `Extracted text (accurate): ...`: `_text_hint()` of the a11y/OCR text. Unique words over 2 chars, in screen order, cut at 8,000 chars (`_GEMMA_TEXT_HINT_CHARS`), then **sorted alphabetically**. So Gemma gets a bag of words, not lines (G15).
-- `User actions just before this screenshot (exact, from OS events): ...`: `activities.user_actions`.
+`analysis_method` is `rules`, `cache:identical` or `rule:empty_screen`. The idle backfill adds a `backfill:` prefix. `summary`, `details`, `visible_text`, `mood`, `confidence` and `scene_description` stay empty on new rows. Rows from before 2026-10-08 keep Gemma's values.
 
-Before the call:
+A frame older than 180 s when its turn comes is finished by `Database.mark_skipped()`: `status='skipped'`, analysis fields NULL, and the capture-time a11y text (filtered) and URL kept in `ocr_text` and `active_url`. The idle backfill re-analyzes today's `pending`, `skipped` and `failed` rows later, and reuses that a11y text and URL.
 
-- The sensitive-data filter cleans the text and the OCR boxes (`filter_ocr_boxes()`, before `ocr_boxes` and `organized_text` are built). The image is not cleaned.
-- A frame with no app, no title and under 20 chars of real text is stored as `idle` without Gemma (`rule:empty_screen`).
-- A frame older than 180 s when its turn comes is finished by `Database.mark_skipped()`: `status='skipped'`, analysis fields NULL, and the capture-time a11y text (filtered) and URL kept in `ocr_text` and `active_url`. The idle backfill re-analyzes today's `pending`, `skipped` and `failed` rows later, and reuses that a11y text and URL.
-
-After the call the row is updated (`status='ok'`). Nothing else runs. Embeddings, git context and auto-bookmarks were removed in `57cf0dd`, and migration v11 dropped their data.
+Then the row is updated (`status='ok'`). Nothing else runs. Embeddings, git context and auto-bookmarks were removed in `57cf0dd`, and migration v11 dropped their data.
 
 ## 5. Storage
 
@@ -387,7 +378,7 @@ Everything lives under `DATA_DIR` (default `~/.screenmind`). Dev instances use `
 | `settings.json` | Runtime overrides from the dashboard. Only values that differ from the default (or `.env`) are stored, so the rest follow later default changes. A file written before `c377a8c` can still hold defaults; they shrink on the next save. |
 | `screenmind.log`, `.1`-`.3` | Log of every app start, console or not (`main.run()`), rotating at 1 MB, INFO. Starts with "ScreenMind <version> starting" and "Settings that differ from the defaults: ..." with each value's source. `SCREENMIND_LOG_FILE` moves it. |
 | `crash.log` | Traceback of an error before logging starts, only for a start without stderr (`pythonw`, a detached `python.exe`) |
-| `models/` | GGUF models, `ocr/`. An old `embedder/` folder is no longer used and can be deleted. |
+| `models/` | `ocr/` (RapidOCR). Old folders are no longer used and can be deleted by hand: `gemma-4-e2b/` (Gemma GGUF files, about 3.2 GB, unused since 2026-10-08) and `embedder/`. |
 | `.encryption_key` | Fernet key backup (also in the OS keyring) |
 
 ### Tables in `screenmind.db`
@@ -421,7 +412,7 @@ Migrations live in `Database._init_db()` as a list. Version = list index + 1. Th
 | Screen Recording | SCK, `screencapture`, mss; also `kCGWindowName` window titles | Grabs fail or show only the wallpaper; titles are empty | not needed | X11: none. Wayland: portal prompt on GNOME/KDE |
 | Accessibility | a11y text, Electron titles, browser URL, UI event element lookups (`AXIsProcessTrusted`) | AX calls fail quietly: no a11y text, no URL, titles fall back to Quartz | not needed (UIA) | AT-SPI must be on |
 | Input Monitoring | UI events `CGEventTap` (`CGPreflightListenEventAccess`) | Keyboard tap creation fails; falls back to a mouse-only tap: clicks yes, typed text and shortcuts no | not needed (LL hooks) | no backend |
-| Microphone | Call transcription (`sounddevice`) | Silent audio | "Let desktop apps access your microphone" in Privacy settings | PulseAudio/PipeWire access |
+| Microphone | Not needed since 2026-10-08 (no audio is recorded). The macOS app has no `NSMicrophoneUsageDescription` | | not needed | not needed |
 | Mic-in-use detection | CoreAudio process list, no permission | | not available | not available |
 | Keychain | Encryption key via `keyring` | Falls back to the key file | Credential Manager | Secret Service |
 
@@ -444,7 +435,7 @@ The app requests Accessibility and Input Monitoring only from the UI events sett
 | Password fields | a11y walkers, UI event backends | Never read; typing stores `[password field]` |
 | Clipboard secret markers | UI event backends | Password-manager clipboard data is not read |
 | `sanitize_url()` | `privacy/url_filter.py`, before every stored URL | Keeps scheme, host, path. Drops query and fragment except `tab`, `view`, `page`, `sort`, `lang`, `hl`. Sign-in hosts and auth/token paths keep only scheme and host. Token-like path parts become `<token>`. Non-http(s) URLs (including `file://`) become `None` |
-| Sensitive-data filter | `privacy/data_filter.py` (`SENSITIVE_FILTER_ENABLED`, default on), `capture_worker.filter_sensitive()` | Redacts credit cards, SSNs, API keys, JWTs, passwords, emails, phone numbers and IBANs before Gemma and storage: in a11y/OCR text, OCR boxes, window titles and all UI event text. Passwords also match "pwd - value" and a value on the next line; the label stays ("pwd - [REDACTED:password]"). Emails keep a real-looking domain ("[REDACTED:email@example.com]"). Phones need a "+" code, brackets or separators; IBANs must pass the mod-97 check. Names and message content are not detected. The image is not redacted |
+| Sensitive-data filter | `privacy/data_filter.py` (`SENSITIVE_FILTER_ENABLED`, default on), `capture_worker.filter_sensitive()` | Redacts credit cards, SSNs, API keys, JWTs, passwords, emails, phone numbers and IBANs before storage: in a11y/OCR text, OCR boxes, window titles and all UI event text. Passwords also match "pwd - value" and a value on the next line; the label stays ("pwd - [REDACTED:password]"). Emails keep a real-looking domain ("[REDACTED:email@example.com]"). Phones need a "+" code, brackets or separators; IBANs must pass the mod-97 check. Names and message content are not detected. The image is not redacted |
 | Encryption | `privacy/encryption.py` | Screenshots only, off by default |
 
 ## 8. Gaps
@@ -457,16 +448,14 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G3 | A blocked app skips the whole display. No per-window exclusion (SCK `SCContentFilter` could do it). | both (fix is macOS-only) | [sck-capture.md](../backlog/sck-capture.md) "Leave windows out of screenshots" |
 | G4 | The "periodic" grab is deduped like the others. A static screen (reading a long page) gets no rows, so time on it is not visible. | both | new |
 | G5 | No per-display app lookup on Linux. Unfocused displays have no app name. | Linux | [multi-display-capture.md](../backlog/multi-display-capture.md) "Linux: no per-display app lookup" |
-| G6 | The capture side knows a display has no app window but does not pass that on. Desktops with widgets still go to Gemma. | both | [ui-events.md](../backlog/ui-events.md) "Capture side should mark..." |
+| G6 | The capture side knows a display has no app window but does not pass that on. Desktops with widgets have too much text for the empty-screen rule, so they are stored as normal frames instead of `idle`. | both | [ui-events.md](../backlog/ui-events.md) "Capture side should mark..." |
 | G7 | a11y text and the browser URL are read only for the focused display. Other displays get OCR only and no URL, even though macOS `get_window_url()` could read it. | both | new |
 | G8 | Chrome ignores `AXManualAccessibility`. After a reboot, no page tree: no URL and no a11y page text from Chrome. | macOS | [ui-events.md](../backlog/ui-events.md) "Chrome shows its page tree only after..." |
 | G9 | Firefox URL and page text are untested. | macOS | [ui-events.md](../backlog/ui-events.md) "Firefox: probably no URL on macOS" |
-| G12 | a11y text has no column. It is merged into `ocr_text`, and the source is not stored: `analysis_method` holds the analysis tier (`full:fast`), not `a11y`/`ocr`. Only `ocr_boxes` being set shows that OCR ran. | both | new |
+| G12 | a11y text has no column. It is merged into `ocr_text`, and the source is not stored: `analysis_method` holds the analysis tier (`rules`), not `a11y`/`ocr`. Only `ocr_boxes` being set shows that OCR ran. | both | new |
 | G14 | OCR reads one script per frame. With the default `en,es,de,fr,ru` the East Slavic model reads all Latin text. It has the English model's characters, but not ß, œ, š, č, ł, ą, ę. On a French page it read à as a or á. | both | new |
-| G15 | Gemma gets the screen text as an alphabetically sorted bag of unique words (8,000 chars) and a 768 px image. Line order and structure are lost. | both | [questionnaire-data-source.md](../backlog/questionnaire-data-source.md) "Slack summaries are generic" (related) |
 | G16 | No `get_window_url()` on Windows, so `meetings.url` is always NULL there. | Windows | new |
 | G17 | No mic-in-use signal on Windows. Discord calls are never detected (Discord is out of scope for now, 2026-10-08). Slack needs "huddle" in the title. A call whose window is hidden ends after `CALL_END_GRACE_S` (120 s). | Windows | new |
-| G18 | System audio is recorded only from a device named "loopback" or "Stereo Mix". macOS has none by default, so transcripts have the mic side only. | both (macOS always) | new |
 | G21 | With the same app on several displays, UI events without a point (typing, app switches, clipboard) go to the first frame of that app saved in the tick. Clicks go by position, other apps by name. | both | [ui-events.md](../backlog/ui-events.md) "Same app on two displays" |
 | G22 | Permission prompts name Terminal or Python, not ScreenMind. | macOS | [ui-events.md](../backlog/ui-events.md) "macOS permission prompts name Terminal or Python" |
 | G23 | The DB is plain text. Only screenshots can be encrypted, and that is off by default. | both | [ui-events.md](../backlog/ui-events.md) "Encrypt the whole DB" |
@@ -476,15 +465,14 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G28 | macOS may show a periodic "still recording your screen" reminder; not seen yet. | macOS | [sck-capture.md](../backlog/sck-capture.md) "macOS still recording your screen reminder" |
 | G29 | Wayland hides window positions: no window list, no active display, no per-display labels. | Linux | [multi-display-capture.md](../backlog/multi-display-capture.md) (Wayland note) |
 | G31 | Typed text and clipboard are on by default (2026-10-08), with no PII detection before they are stored. Only the sensitive-data filter (cards, SSNs, API keys, JWTs, passwords) and the password-field rules apply. | both | [ui-events.md](../backlog/ui-events.md) "PII detection before storing typed text and clipboard" |
-| G33 | `performance_mode=balanced` starts llama-server with `-ngl 15`. On the Windows laptop (8 GB GPU) Gemma then runs mostly on the CPU: about 26 s per new frame, about 8 cores busy, and about half the frames are skipped as backlog while the user is active. Parked: the long-term aim is the lowest resource use. | Windows | [windows.md](../backlog/windows.md) "G33" (parked) |
 | G34 | Electron apps (Claude desktop): the Windows walker reads the web Document, and buttons inside it are kept ("Copy", "Fork from here", "Hide sidebar"). The type filter covers native controls only. Parked: telling labels from content is left to the LLM. | Windows | [windows.md](../backlog/windows.md) "G34" (parked) |
 | G35 | Windows shell surfaces are saved as activities: Task View, Task Switching, Start, Search, notifications. Their a11y text is only "Task Switching \| DesktopWindowXamlSource". Parked until it hurts. | Windows | [windows.md](../backlog/windows.md) "G35" (parked) |
 | G37 | No overall time limit on UIA reads: UIA's 1 s timeout bounds one call, but a read is hundreds of calls, so a slow app could hold capture, the event loop or the recorder for minutes. Most likely cause of the 2026-10-07 freeze; the shared client across threads was ruled out. Fixed: UIA worker threads with a deadline per read, a watchdog and a shutdown deadline ([uptime.md](../plans/uptime.md)). Open: moving capture off the event loop, and a process supervisor. | Windows | [windows.md](../backlog/windows.md) "G37" |
 | G40 | `meetings.window_title` is the first matching window, front to back. For a Slack huddle found by mic use, that is whatever Slack window is in front, not the huddle (row 6 on 2026-10-07: a huddle with a DM contact saved as "* b2b-general (Channel) ... [Main]"). | both | new |
 | G42 | No locked-screen or screensaver check on Windows and Linux. A screensaver that changes the picture gets saved and analyzed as the last app. | Windows, Linux | new |
-| G41 | A call is kept as one row across a restart only if the restart takes less than `CALL_END_GRACE_S` and the call is not being transcribed. Inside one process, two Meet rooms back to back within the grace stay one row, because the room URL is read only once. | both | new |
+| G41 | A call is kept as one row across a restart only if the restart takes less than `CALL_END_GRACE_S` and the old row has no transcript. Inside one process, two Meet rooms back to back within the grace stay one row, because the room URL is read only once. | both | new |
 
-Closed while this map was written: G10 and G11 by `fa80d39` (Windows a11y reads the page, not the browser UI), G13 by `81277a8` (capture-time data kept on backlog skips), G20 by `399a565` (UI events on by default, live on the main instance since 2026-10-07). G2 (one SCK timeout disabled SCK until restart) by the SCK retry change on 2026-10-08. G38 (no log file without a console) and G39 (machines on different settings) by `c377a8c`: every start writes `screenmind.log`, the code defaults are the shared settings, the startup log and the e2e status header list what differs, and `.env` is read from the checkout root. Behaviour change: a dashboard value left at the default is no longer stored, so it follows later default changes. Each machine's existing `settings.json` needs a one-time cleanup ([windows.md](../backlog/windows.md) "Settings cleanup"). G32 (OCR read Latin only on Windows) by `a48f41c`: `OCR_LANGUAGES` defaults to `en,es,de,fr,ru` on every machine. G19 (no global hotkeys on macOS) went away with the hotkeys themselves in `57cf0dd`. Their ids stay reserved.
+Closed while this map was written: G10 and G11 by `fa80d39` (Windows a11y reads the page, not the browser UI), G13 by `81277a8` (capture-time data kept on backlog skips), G20 by `399a565` (UI events on by default, live on the main instance since 2026-10-07). G2 (one SCK timeout disabled SCK until restart) by the SCK retry change on 2026-10-08. G38 (no log file without a console) and G39 (machines on different settings) by `c377a8c`: every start writes `screenmind.log`, the code defaults are the shared settings, the startup log and the e2e status header list what differs, and `.env` is read from the checkout root. Behaviour change: a dashboard value left at the default is no longer stored, so it follows later default changes. Each machine's existing `settings.json` needs a one-time cleanup ([windows.md](../backlog/windows.md) "Settings cleanup"). G32 (OCR read Latin only on Windows) by `a48f41c`: `OCR_LANGUAGES` defaults to `en,es,de,fr,ru` on every machine. G19 (no global hotkeys on macOS) went away with the hotkeys themselves in `57cf0dd`. G15 (Gemma got a bag of words), G18 (no system audio for transcripts) and G33 (`-ngl 15` on the Windows laptop) are obsolete: Gemma removed 2026-10-08 (`069c137`). Their ids stay reserved.
 
 ## 9. Code vs backlog
 
@@ -494,11 +482,11 @@ The code wins in each case below. Backlog files belong to other sessions, so the
 |---|---|
 | [ui-events.md](../backlog/ui-events.md) "Windows: no browser URL": `WindowsAdapter` has no `get_browser_url()`, so `active_url` and `ui_events.url` are NULL on Windows. | `WindowsAdapter.get_browser_url()` exists since `16f933a`. It reads the page's UIA `Document` value. Windows has `active_url` and `ui_events.url`. Only `meetings.url` is missing (G16). |
 | [setup-ocr-and-upstream-prs.md](../backlog/setup-ocr-and-upstream-prs.md) "OCR known limits": EasyOCR `canvas_size`, `OCR_CANVAS_SIZE`, `_merge_readings`, extra `Reader`s. | OCR is RapidOCR since `4cb9030`. `OCR_CANVAS_SIZE` and `_merge_readings` do not exist. One recognizer per frame (G14). |
-| [docs/plans/ui-events.md](../plans/ui-events.md) Windows notes: a11y total capped at 20,000 chars. | 300,000 chars on both OSes since `87b058d`. Only the Gemma prompt is trimmed (8,000 chars). |
+| [docs/plans/ui-events.md](../plans/ui-events.md) Windows notes: a11y total capped at 20,000 chars. | 300,000 chars on both OSes since `87b058d`. |
 
 ## 10. How to update
 
-- **Same-commit rule.** A change to capture code (`screenmind/capture/`, `workers/capture_worker.py`, `workers/audio_worker.py`, `workers/call_detection.py`, `engine/a11y_extractor.py`, `engine/ocr.py`, what `engine/analyzer.py` sends to Gemma), a platform adapter (`screenmind/platform_support/`), a privacy filter or a DB migration updates this file in the same commit.
+- **Same-commit rule.** A change to capture code (`screenmind/capture/`, `workers/capture_worker.py`, `workers/audio_worker.py`, `workers/call_detection.py`, `engine/a11y_extractor.py`, `engine/ocr.py`, `engine/labels.py`), a platform adapter (`screenmind/platform_support/`), a privacy filter or a DB migration updates this file in the same commit.
 - Update the matrix row, the detail section and the gap table. Close a gap by deleting its row and naming the commit in the commit message. Keep gap ids stable; don't reuse a deleted id.
 - A new migration: add its columns to the table in section 5 with `(vN)`, and update "the latest is vN".
 - Mermaid: keep labels in double quotes. Check the diagram renders (GitHub preview or the Artifact).

@@ -47,7 +47,7 @@ Status: open
 Refs: `base.PlatformAdapter.mic_apps()`, `workers/call_detection.py`.
 
 ### G18: macOS transcripts have the mic side only
-Status: idea
+Status: closed, obsolete (2026-10-08). Gemma was removed (branch `claude/practical-dijkstra-f83cbe`), and with it call recording and transcription.
 
 `_find_loopback_device()` looks for an input named "loopback" or "stereo mix". macOS has none unless the user installs a virtual device (BlackHole names itself "BlackHole", so it is not found either). macOS 14.2+ has Core Audio process taps for system audio without a driver. Only matters when `MEETING_TRANSCRIPTION` is on.
 
@@ -77,7 +77,7 @@ Refs: `call_detection.match_call()`, `AudioWorker._start_meeting()`.
 ### G41: Calls still split in some cases
 Status: idea
 
-Since the restart fix, a call keeps one row across a restart (`AudioWorker._resume_recent()`). It still splits when the restart takes longer than `CALL_END_GRACE_S`, or when the call is transcribed (the old row already started its summary). The other way round, inside one process two Meet rooms back to back within the grace stay one row, because the room URL is read once per call. Re-reading the URL every few minutes would catch that.
+Since the restart fix, a call keeps one row across a restart (`AudioWorker._resume_recent()`). It still splits when the restart takes longer than `CALL_END_GRACE_S`, or when the call is transcribed (the old row already started its summary). (Update 2026-10-08: calls are no longer transcribed, Gemma was removed. Only old rows with a transcript still block a resume.) The other way round, inside one process two Meet rooms back to back within the grace stay one row, because the room URL is read once per call. Re-reading the URL every few minutes would catch that.
 
 Refs: `AudioWorker.update()`, `_resume_recent()`, `_seen()`, `call_detection.same_call()`.
 

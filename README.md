@@ -2,11 +2,9 @@
 
 # ScreenMind
 
-**Local screen activity recorder. It collects what you do on your computer and labels it with Gemma 4.**
+**Local screen activity recorder. It collects what you do on your computer and labels it by rules.**
 
 [![Python 3.14+](https://img.shields.io/badge/Python-3.14+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Gemma 4](https://img.shields.io/badge/Gemma_4-E2B_%7C_E4B_%7C_12B-8B5CF6?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev/gemma)
-[![llama.cpp](https://img.shields.io/badge/llama.cpp-Local_Inference-333?style=flat-square)](https://github.com/ggerganov/llama.cpp)
 [![License MIT](https://img.shields.io/badge/License-MIT-10B981?style=flat-square)](LICENSE)
 
 [Features](#features) · [Quick Start](#quick-start) · [Architecture](#architecture) · [API](#api-reference) · [Configuration](#configuration)
@@ -15,7 +13,7 @@
 
 </div>
 
-ScreenMind records your actions: screenshots, apps and windows, browser URLs, screen text, clicks and app switches, and calls. Near-duplicate frames are dropped by image hash. A local Gemma 4 model gives each frame a first label: app, category and a short summary. Everything runs on your machine.
+ScreenMind records your actions: screenshots, apps and windows, browser URLs, screen text, clicks and app switches, and calls. Near-duplicate frames are dropped by image hash. Rules give each frame a first label: app and category. No model runs. Everything runs on your machine.
 
 It is a data source for a workflows app. The per-day export is the hand-off point. See [docs/export-format.md](docs/export-format.md).
 
@@ -34,22 +32,23 @@ Based on [ayushh0110/ScreenMind](https://github.com/ayushh0110/ScreenMind). This
 - **Browser URL.** The URL the browser reports, cleaned by `privacy/url_filter.py` before storage.
 - **OCR.** RapidOCR on ONNX Runtime, CPU only. It runs when the accessibility text is not real content.
 - **UI events (macOS and Windows).** Clicks, app switches, typed text and clipboard by default. Password fields are never recorded; secrets are redacted by the sensitive-data filter, but there is no PII detection yet. Code: `screenmind/capture/ui_events/`.
-- **Calls.** Zoom, Teams, Meet, Webex, Slack and Discord calls are tracked with start, end, app and room URL. Optional: Gemma transcribes the audio and writes a summary per call.
+- **Calls.** Zoom, Teams, Meet, Webex, Slack and Discord calls are tracked with start, end, app and room URL. No audio is recorded.
 
 The detailed map of what is collected per OS, and how, is [docs/architecture/capture.md](docs/architecture/capture.md).
 
 ### Analysis
 
-- **Labels.** Gemma 4 (via llama-server) reads each frame with its text and returns app, category, summary, details, scene and mood.
-- **Three modes.** `fast` (default, no thinking), `balanced` (thinking) and `merged` (thinking plus layout regions).
-- **Per-app analysis cache.** A frame close to the last one for the same app and title reuses its analysis. This saves Gemma calls.
+- **Rule labels.** `engine/labels.py` names the app from the OS app name and the window title. It picks the category from the app or, in a browser, from the site. No model runs.
+- **Per-app cache.** A frame identical to the last one for the same app reuses its text and skips OCR.
 - **Layout-ordered text.** `engine/layout_analyzer.py` groups OCR boxes into screen regions.
-- **App name reconciliation.** The OS app name, the window title and Gemma's guess are combined into one app name.
+- **Empty screens.** A frame with no app, no title and little text is labelled `idle`.
+
+ScreenMind used to label frames with a local Gemma model. It was removed on 2026-10-08. Old rows keep Gemma's summary and details. New rows leave them empty.
 
 ### Privacy
 
-- **Local only.** Data stays on your machine. The network is used only to download llama-server and models.
-- **Sensitive-data filter.** Redacts credit cards, SSNs, API keys, JWTs and passwords in text before Gemma and storage (`privacy/data_filter.py`). The image is not redacted.
+- **Local only.** Data stays on your machine. The network is used only to download the OCR models (~25 MB, once).
+- **Sensitive-data filter.** Redacts credit cards, SSNs, API keys, JWTs and passwords in text before storage (`privacy/data_filter.py`). The image is not redacted.
 - **Screenshot encryption.** Optional, off by default. Fernet with the key in the OS keyring (`privacy/encryption.py`).
 - **Blocked apps and incognito.** Blocked apps are never captured. Incognito pauses capture with one click.
 - **Local API.** The API binds to `127.0.0.1` only and has no auth. Export and shutdown accept only local clients.
@@ -59,11 +58,10 @@ The detailed map of what is collected per OS, and how, is [docs/architecture/cap
 At `http://127.0.0.1:7777`:
 
 - **Timeline**: activities by date with screenshots, labels and calls.
-- **Search**: keyword search over SQLite FTS5 and meeting transcripts. It highlights matches on the screenshot.
+- **Search**: keyword search over SQLite FTS5 and old meeting transcripts. It highlights matches on the screenshot.
 - **Analytics**: categories, top apps, hourly heatmap, meeting stats.
-- **Meetings**: tracked calls, transcripts and summaries.
-- **Settings**: capture, AI and models, audio and meetings, storage with the **Data Export** card, privacy and security (including UI events).
-- **Model Hub**: download, switch and delete Gemma models and quantization variants.
+- **Meetings**: tracked calls. Calls from before 2026-10-08 may also show a transcript and summary.
+- **Settings**: capture, meetings, storage with the **Data Export** card, privacy and security (including UI events).
 - Start/stop capture, incognito, and a welcome screen on first run.
 
 ### Running it
@@ -77,7 +75,7 @@ At `http://127.0.0.1:7777`:
 
 ## Quick Start
 
-> **Requirements:** Python 3.14+ · GPU recommended (4GB+ VRAM) · ~2GB disk for model (E2B Q4_0)
+> **Requirements:** Python 3.14+ · no GPU needed · ~25MB disk for OCR models
 
 ### 1. Install
 
@@ -99,11 +97,9 @@ screenmind --background # Run silently without console window
 
 On first run, ScreenMind will:
 
-- Detect your GPU and download `llama-server` if it is not found (CUDA or CPU build).
-- Open the **Model Hub**. Pick a model and a quantization variant, then download it in the UI.
-- Start `llama-server` in the background, or use one that is already running.
 - Show the welcome screen.
-- Create `~/.screenmind/` for data and `~/.screenmind/models/` for GGUF files.
+- Create `~/.screenmind/` for data.
+- Download the OCR models into `~/.screenmind/models/ocr/` on the first OCR run.
 - Create a desktop shortcut.
 
 <details>
@@ -139,7 +135,7 @@ Dependencies live in `pyproject.toml` and are pinned in `uv.lock`. Add or change
 
 **Windows checkouts set up with pip:** since `c68311a` the project needs Python 3.14 and uv. Install uv before the next pull (PowerShell: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`). Then pull and run `uv sync`. uv downloads Python 3.14 and replaces the old `.venv`.
 
-**Second instance from a git worktree:** run `scripts/dev-instance.sh` from the worktree root. It uses its own data dir (`~/.screenmind-dev/<worktree>`) and a port in 7800-7899. It shares the models and the running llama-server. `scripts/dev-instance.sh info` prints the port and data dir.
+**Second instance from a git worktree:** run `scripts/dev-instance.sh` from the worktree root. It uses its own data dir (`~/.screenmind-dev/<worktree>`) and a port in 7800-7899. It shares the OCR models. `scripts/dev-instance.sh info` prints the port and data dir.
 
 </details>
 
@@ -176,65 +172,20 @@ Or configure everything from the **Settings** tab in the dashboard.
 
 ---
 
-## Gemma 4 models
-
-| Model | Variants | VRAM | Audio |
-|---|---|---|---|
-| **Gemma 4 E2B** (2B), *default* | Q4_0 · Q8_0 · BF16 | ~4 GB | yes |
-| **Gemma 4 E4B** (4B) | Q4_0 · Q8_0 · BF16 | ~6 GB | yes |
-| **Gemma 4 12B** | IQ3_M · Q4_K_M · Q5_K_M · Q6_K · Q8_0 | ~10 GB | yes |
-
-E2B is the default. It is small enough to run all the time next to your work, and it reads images and audio. More VRAM lets you use E4B or 12B for richer labels.
-
-Models come from [ggml-org](https://huggingface.co/ggml-org) and other llama.cpp-compatible GGUF repos. They are stored in `~/.screenmind/models/`.
-
-Call transcription uses Gemma's own audio encoder. There is no Whisper dependency.
-
-### Analysis modes
-
-Times are from a GTX 1650 (4GB VRAM), where the model does not fit in VRAM.
-
-| Mode | `ANALYSIS_MODE` | What it does | ~Time |
-|---|---|---|---|
-| Fast (default) | `fast` | No thinking. Layout from OCR box clustering. | ~12s |
-| Balanced | `balanced` | Thinking, analysis only. Layout from OCR box clustering. | ~40s |
-| Accurate | `merged` | One call with thinking. Gemma also finds layout regions. | ~76s |
-
-<details>
-<summary><b>GPU scaling</b></summary>
-
-<br>
-
-The numbers above are a worst case: the model spills to CPU RAM. When it fits in VRAM, inference gets much faster:
-
-| GPU | VRAM | Bandwidth | Regime | ~Fast Mode |
-|---|---|---|---|---|
-| **GTX 1650** *(baseline)* | 4 GB | ~190 GB/s | spilling | ~12s |
-| **RTX 3060** | 12 GB | ~360 GB/s | full fit | ~3-4s |
-| **RTX 4060 Ti** | 16 GB | ~290 GB/s | full fit | ~2-3s |
-| **RTX 3090** | 24 GB | ~935 GB/s | full fit | ~1-2s |
-| **RTX 4090** | 24 GB | ~1000 GB/s | full fit | ~1s |
-
-The big jump is from "spilling" to "full fit". Any GPU with 6GB+ VRAM should run E2B fully on the GPU.
-
-</details>
-
----
-
 ## Architecture
 
 The full description is in [architecture.md](architecture.md). The per-OS capture map is [docs/architecture/capture.md](docs/architecture/capture.md).
 
 ```
-                 OS APIs (screen, windows, accessibility, input hooks, mic)
+                 OS APIs (screen, windows, accessibility, input hooks, mic use)
                          │                    │                     │
                          ▼                    ▼                     ▼
                ┌──────────────────┐  ┌─────────────────┐  ┌──────────────────┐
                │  Capture Worker  │  │ UI event        │  │  Audio Worker    │
                │ • grab / display │  │ recorder        │  │ • call detection │
-               │ • pHash dedup    │  │ • clicks, apps  │  │ • transcription  │
-               │ • window, a11y,  │  │ • text, clip    │  │   + summary      │
-               │   URL            │  │                 │  │   (optional)     │
+               │ • pHash dedup    │  │ • clicks, apps  │  │ • start, end,    │
+               │ • window, a11y,  │  │ • text, clip    │  │   app, room URL  │
+               │   URL            │  │                 │  │                  │
                └────────┬─────────┘  └────────┬────────┘  └────────┬─────────┘
                         │ queue               │                    │
                         ▼                     │                    │
@@ -243,8 +194,8 @@ The full description is in [architecture.md](architecture.md). The per-OS captur
                │ • per-app cache  │           │                    │
                │ • RapidOCR       │           │                    │
                │ • data filter    │           │                    │
-               │ • Gemma 4 label  │           │                    │
                │ • layout text    │           │                    │
+               │ • rule labels    │           │                    │
                └────────┬─────────┘           │                    │
                         ▼                     ▼                    ▼
                ┌────────────────────────────────────────────────────────────┐
@@ -258,8 +209,6 @@ The full description is in [architecture.md](architecture.md). The per-OS captur
                └────────────────────────────────────────────────────────────┘
 ```
 
-Gemma runs in a separate `llama-server` process (default port 5809).
-
 ---
 
 ## API Reference
@@ -271,18 +220,14 @@ Full Swagger docs are at `http://127.0.0.1:7777/docs`.
 | `GET` | `/api/status` | Capture state and worker stats |
 | `GET` | `/api/timeline?date=2026-05-21` | Activities for a date |
 | `GET` | `/api/activity/{id}` | One activity |
-| `POST` | `/api/activities/{id}/reanalyze` | Run analysis again |
 | `GET` | `/api/screenshot/{id}` | Screenshot image |
-| `GET` | `/api/search?q=auth error` | Keyword search (FTS5) plus meeting transcripts |
+| `GET` | `/api/search?q=auth error` | Keyword search (FTS5) plus old meeting transcripts |
 | `GET` | `/api/stats?range=day` | Analytics (categories, apps, meetings) |
 | `GET` | `/api/meetings` | Tracked calls |
 | `GET` | `/api/ui-events?start=&end=&type=` | Recorded UI events in a time range |
 | `GET` | `/api/ui-events/status` | UI event recorder state, backend, macOS permissions |
 | `GET` | `/api/export?user=&date=` | Per-day zip archive (local clients only) |
 | `GET` | `/api/export/preview?date=` | Counts and sizes before an export |
-| `GET` | `/api/models` | Available models and variants |
-| `POST` | `/api/models/variant` | Set the preferred quantization variant |
-| `POST` | `/api/models/delete` | Delete a downloaded model variant |
 | `GET` / `POST` | `/api/settings` | Read or change settings |
 | `POST` | `/api/capture/pause` | Pause capture |
 | `POST` | `/api/capture/resume` | Resume capture |
@@ -298,11 +243,8 @@ The defaults below are the settings for every machine. Change one only when a ma
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CAPTURE_INTERVAL` | `10` | Seconds between periodic captures (10-120). Every grab is deduped, so a screen that does not change gets no new frame |
-| `ANALYSIS_MODE` | `fast` | `fast` (~12s), `balanced` (~40s), or `merged` (~76s, accurate) |
-| `PERFORMANCE_MODE` | `balanced` | GPU layers: `minimal` / `balanced` / `maximum` |
 | `BLOCKED_APPS` | *(empty)* | Comma-separated apps to never capture |
 | `OCR_LANGUAGES` | `en,es,de,fr,ru` | OCR languages. One script per frame; the default reads Latin and Cyrillic |
-| `MEETING_TRANSCRIPTION` | `false` | Transcribe calls with Gemma |
 | `RETENTION_DAYS` | `7` | Delete data older than N days (0 = forever) |
 | `ENCRYPTION_ENABLED` | `false` | Encrypt screenshots at rest |
 | `SENSITIVE_FILTER_ENABLED` | `true` | Redact credit cards, SSNs, API keys, passwords, emails (domain kept), phone numbers, IBANs |
@@ -321,9 +263,8 @@ See `.env.example` for the full list.
 
 | Layer | Technology |
 |-------|-----------|
-| **Labels and audio** | Gemma 4 (E2B / E4B / 12B) |
-| **Inference server** | llama-server (llama.cpp), OpenAI-compatible API |
-| **OCR** | RapidOCR (PP-OCR on ONNX Runtime), CPU only, ~15MB of models |
+| **Labels** | Rules over app name, window title and URL (`engine/labels.py`) |
+| **OCR** | RapidOCR (PP-OCR on ONNX Runtime), CPU only, ~25MB of models |
 | **Dedup** | imagehash (pHash) |
 | **Backend** | FastAPI + Uvicorn |
 | **Database** | SQLite (WAL) + FTS5 |
@@ -375,7 +316,6 @@ ScreenMind/
 ├── screenmind/
 │   ├── main.py                  # Entry point, starts all services
 │   ├── config.py                # Pydantic settings (env + runtime overrides)
-│   ├── setup_llama.py           # Detect + install llama-server
 │   ├── launcher.py              # Splash screen launcher (tkinter)
 │   ├── startup.py               # Start at login (Windows, macOS, Linux)
 │   ├── assets/                  # Logo, favicon
@@ -387,16 +327,14 @@ ScreenMind/
 │   │   ├── dedup.py             # pHash dedup
 │   │   └── ui_events/           # Clicks, typing, app switches, clipboard
 │   ├── engine/
-│   │   ├── analyzer.py          # Gemma 4 labels, three modes, app reconciliation
-│   │   ├── llm_client.py        # llama-server client (text, vision, audio)
-│   │   ├── model_manager.py     # Server lifecycle, model download/switch
+│   │   ├── labels.py            # Rule labels: app name and category
 │   │   ├── ocr.py               # RapidOCR
 │   │   ├── layout_analyzer.py   # Layout-ordered OCR text
 │   │   └── a11y_extractor.py    # Accessibility text
 │   ├── workers/
 │   │   ├── capture_worker.py    # Capture loop, dedup, privacy checks
-│   │   ├── analysis_worker.py   # Cache, OCR, filter, Gemma, layout, store
-│   │   ├── audio_worker.py      # Call tracking, transcription, summary
+│   │   ├── analysis_worker.py   # Cache, OCR, filter, layout, rule labels, store
+│   │   ├── audio_worker.py      # Call tracking
 │   │   └── call_detection.py    # Call rules per app
 │   ├── export/                  # Per-day zip archives for the workflows app
 │   ├── storage/
@@ -430,15 +368,10 @@ ScreenMind/
 
 | Scenario | Behavior |
 |----------|----------|
-| **llama-server not found** | Downloads the right binary from GitHub releases (CUDA or CPU). Checks disk space first. |
-| **llama-server already running** | Detects and uses it. Known models show as active. Unknown models show an amber warning. |
-| **Model not downloaded** | The Model Hub shows download cards with progress. |
-| **GPU out of memory** | Detects OOM, retries after a delay, re-queues on repeated failure. |
 | **Duplicate frames** | pHash dedup drops frames within hamming distance 8 of the last kept one. |
 | **Stale queue items** | Frames older than 3 min when their turn comes are marked `skipped`. The idle backfill analyzes them later. |
 | **App in blocklist** | Skipped. No screenshot is saved. |
 | **Call ended** | A call ends 120 s after its window or mic use was last seen. |
-| **Re-analyze** | Uses the full context (app name, title, URL), same as the first analysis. |
 | **Crash recovery** | Stale meetings are cleaned on startup. Unanalyzed rows are backfilled. The capture pause state is kept. |
 
 ---

@@ -2,7 +2,7 @@
 
 ScreenMind is a local screen activity recorder. It collects actions and does the minimal analysis needed to dedup, unify and label them. It is a data source for a workflows app.
 
-Gemma 4 (E2B / E4B / 12B) runs locally through llama.cpp.
+Frames are labelled by rules from the OS app name, the window title and the URL. No model runs. A local Gemma model did this until 2026-10-08. It was removed because its notes added nothing to workflow extraction and it was the largest resource cost.
 
 This file gives the overview. The detailed, per-OS map of what is captured, and how, is [docs/architecture/capture.md](docs/architecture/capture.md). When the two disagree, capture.md follows the code and wins.
 
@@ -18,16 +18,16 @@ This file gives the overview. The detailed, per-OS map of what is captured, and 
 │  │ Capture      │──▶│ asyncio    │──▶│ Analysis Worker               │  │
 │  │ Worker       │   │ Queue      │   │                               │  │
 │  │              │   └────────────┘   │ per-app cache → a11y / OCR    │  │
-│  │ • grab per   │                    │ → data filter → Gemma 4       │  │
-│  │   display    │                    │ → layout text → store         │  │
+│  │ • grab per   │                    │ → data filter → layout text   │  │
+│  │   display    │                    │ → rule labels → store         │  │
 │  │ • pHash dedup│                    └───────────────┬───────────────┘  │
 │  │ • window,    │                                    │                  │
 │  │   a11y, URL  │   ┌────────────┐   ┌────────────┐  │                  │
 │  └──────┬───────┘   │ UI event   │   │ Audio      │  │                  │
 │         │           │ recorder   │   │ Worker     │  │                  │
 │         │           │ (optional) │   │ • calls    │  │                  │
-│         │           │ • clicks   │   │ • transcr. │  │                  │
-│         │           │ • app sw.  │   │ • summary  │  │                  │
+│         │           │ • clicks   │   │ • start,   │  │                  │
+│         │           │ • app sw.  │   │   end, URL │  │                  │
 │         │           └─────┬──────┘   └─────┬──────┘  │                  │
 │         ▼                 ▼                ▼         ▼                  │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
@@ -45,12 +45,9 @@ This file gives the overview. The detailed, per-OS map of what is captured, and 
 │  │  └─────────────────────────────────────────────────────────────┘  │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
-
-        llama-server (separate process, default port 5809), single slot
-        ▲ used by the Analysis Worker (labels) and the Audio Worker (calls)
 ```
 
-**Core principle:** everything runs locally. The network is used only to download llama-server and models. There is no telemetry.
+**Core principle:** everything runs locally. The network is used only to download the OCR models. There is no telemetry.
 
 **Removed features.** Rewind, chat, voice memos, agents, bookmarks, daily summaries, the MCP server, integrations, global hotkeys, semantic search, git context and the dashboard PIN were removed (`57cf0dd`). Migration v11 dropped their data. See [docs/plans/strip-to-actions.md](docs/plans/strip-to-actions.md).
 
@@ -61,26 +58,24 @@ This file gives the overview. The detailed, per-OS map of what is captured, and 
 ```
 Screenshot (+ window info, a11y text and URL read at grab time)
     │
-    ├──▶ Per-app pHash cache: identical → copy last analysis, stop here
+    ├──▶ Per-app pHash cache: identical → copy last frame's text, skip OCR
     │
     ├──▶ RapidOCR (CPU), only when the a11y text is not real content
     │
     ├──▶ Sensitive-data filter on text and OCR boxes
     │
-    ├──▶ Gemma 4 via llama-server (skipped on a "minor" cache hit)
-    │         ├── JSON: app, category, summary, details, scene, mood
-    │         └── Layout regions (merged mode only)
+    ├──▶ Empty screen (no app, no title, little text) → category idle
     │
-    └──▶ Layout analyzer: OCR boxes grouped by screen region
-              (Gemma's regions in merged mode, OCR clustering otherwise)
+    ├──▶ Layout analyzer: OCR boxes clustered into screen regions
+    │
+    └──▶ Rule labels (engine/labels.py): app_name, activity_category
 
     All results → SQLite + FTS5. The row gets status='ok'.
 ```
 
-Two models:
+One model runs: **RapidOCR**. It reads text from pixels (PP-OCR models on ONNX Runtime, CPU). Labels come from rules.
 
-1. **RapidOCR**: reads text from pixels (PP-OCR models on ONNX Runtime, CPU).
-2. **Gemma 4**: labels the frame. It sees the image plus the text as a hint.
+`analysis_method` is `rules`, `cache:identical` or `rule:empty_screen`. Rows analyzed by the idle backfill get a `backfill:` prefix. `summary`, `details`, `mood`, `confidence`, `scene_description` and `visible_text` stay empty on new rows. Rows from before 2026-10-08 keep Gemma's values.
 
 ---
 
@@ -113,37 +108,40 @@ Capture tick (per display):
                                      └──▶ delete file, stop
 ```
 
-### 3.2 Analysis Worker: Per-App Cache (3 Tiers)
+### 3.2 Analysis Worker: Per-App Cache
 
-`workers/analysis_worker.py`. Most frames look like the last frame of the same app. The cache avoids repeat Gemma calls. It is keyed by `(app_name, window_title[:100])` and compares pHash with the last analyzed frame for that key.
+`workers/analysis_worker.py`. Most frames look like the last frame of the same app. The cache avoids repeat OCR. It is keyed by `(app_name, window_title[:100])` and compares pHash with the last analyzed frame for that key.
 
 | Tier | When | What runs |
 |---|---|---|
-| Identical | Distance 3 or less | Nothing. Copy the cached analysis. |
-| Minor | Distance 4-10, cache younger than 240 s (chat apps) or 420 s (others) | OCR and layout text. Reuse Gemma's analysis and layout regions. |
+| Identical | Distance 3 or less | No OCR. Copy the cached text. Labels still come from rules. |
 | Full | Anything else | Everything |
 
 Cache: LRU `OrderedDict`, at most 30 entries.
 
 Other rules (see [capture.md, section 4.9](docs/architecture/capture.md#49-analysis)):
 
-- A frame with no app, no title and under 20 chars of real text is stored as `idle` without Gemma.
+- A frame with no app, no title and under 20 chars of real text is stored as `idle` (`analysis_method='rule:empty_screen'`).
 - A frame older than 180 s when its turn comes is marked `skipped`. Its a11y text and URL are kept. The idle backfill analyzes `pending`, `skipped` and `failed` rows from today later.
-- GPU out-of-memory errors are retried after a delay. On repeated failure the frame is re-queued.
 
-### 3.3 Gemma 4: Three Analysis Modes
+### 3.3 Rule Labels
 
-`engine/analyzer.py`. Times are from a GTX 1650 (4GB VRAM).
+`engine/labels.py`. `label_frame(app_name_hint, window_title, url)` returns `app_name` and `activity_category`. No model runs.
 
-| Mode | `ANALYSIS_MODE` | Method | Time | Layout source |
-|---|---|---|---|---|
-| **Fast** (default) | `fast` | No thinking (prefilled empty think block) | ~12s | OCR box clustering |
-| **Balanced** | `balanced` | Analysis-only prompt with thinking | ~40s | OCR box clustering |
-| **Accurate** | `merged` | One call with thinking for layout and analysis | ~76s | Gemma's regions |
+App name (first non-empty wins):
 
-What goes into one call: the screenshot (at most 768 px on the long side), the OS app name, the window title, the URLs, the screen text as a hint, and the recorded user actions before the frame.
+| Level | Source |
+|---|---|
+| L0 | OS app name, where the platform adapter trusts it (macOS) |
+| L1 | Title suffix after `" - "` (`main.py - Visual Studio Code`) |
+| L2 | OS process name, unless it is a generic wrapper (`electron`, `java`) |
+| L3 | A short clean title (`Calculator`) |
+| L4 | The raw OS name, else `unknown` |
 
-`analyzer.py` also reconciles the app name. It combines the OS app name, the window title and Gemma's guess into one `app_name` and category.
+Category:
+
+- Browser windows: the site from the URL host (`SITE_CATEGORIES`), else words in the title, else the app's known category, else `browsing`.
+- Other apps: `KNOWN_APP_CATEGORIES`, else `other`.
 
 ### 3.4 Layout Analyzer
 
@@ -151,9 +149,10 @@ What goes into one call: the screenshot (at most 768 px on the long side), the O
 
 ```
 Input: OCR boxes with (x, y, width, height, text, confidence)
-       + layout regions [{"name": "nav_sidebar", "x_start": 0.0, "x_end": 0.15, ...}]
 
 Process:
+  0. cluster_ocr_layout(): cluster the boxes into regions by position
+     [{"name": "nav_sidebar", "x_start": 0.0, "x_end": 0.15, ...}]
   1. Sort regions narrow-first (sidebar before main content)
   2. Put each OCR box into a region by its center point
   3. In chat-like regions: detect timestamps and attribute messages to senders
@@ -177,11 +176,11 @@ OS hook thread → queue → enricher thread → ui_events table
                                   └──▶ CaptureWorker.request_capture()
 ```
 
-Events before a frame are linked to it in `activities.user_actions` and sent to Gemma. Details: [capture.md, section 4.7](docs/architecture/capture.md#47-ui-events).
+Events before a frame are linked to it in `activities.user_actions`. Details: [capture.md, section 4.7](docs/architecture/capture.md#47-ui-events).
 
 ### 3.6 Audio Worker: Calls
 
-`workers/audio_worker.py` and `workers/call_detection.py`. Calls are always tracked. Transcription is off by default (`MEETING_TRANSCRIPTION=false`).
+`workers/audio_worker.py` and `workers/call_detection.py`. Calls are always tracked. No audio is recorded.
 
 ```
 Detection (own thread, every 5 s, also while capture is paused):
@@ -192,24 +191,11 @@ Detection (own thread, every 5 s, also while capture is paused):
       │
       ├── 2 detections in a row → meetings row (app, title, room URL)
       └── not seen for 120 s    → call ends
-
-Transcription (optional, needs a model with audio):
-  sounddevice: mic + loopback device if found, 16 kHz, 15 s chunks
-      │
-      └── each chunk → llm_client.transcribe_audio() → transcript
-
-On call end (with a transcript):
-  Short (≤4000 chars): one Gemma call → summary
-  Long (>4000 chars):  ~3000-char chunks → summary per chunk → combined summary
 ```
 
-Gemma 4 handles audio with its own encoder. There is no Whisper dependency. Details: [capture.md, section 4.8](docs/architecture/capture.md#48-calls-and-meetings).
+Reading which apps use the mic needs no mic permission. Call transcription and summaries (Gemma audio) were removed on 2026-10-08. Older meetings keep their transcript and summary. Details: [capture.md, section 4.8](docs/architecture/capture.md#48-calls-and-meetings).
 
-### 3.7 Inference
-
-llama-server runs with one slot (`--parallel 1`). Analysis, call transcription and call summaries share it and run one after another. Its host prompt cache is off (`--cache-ram 0`, if the build has the flag). The default 8 GiB cache grew about 21 MB per call. `engine/model_manager.py` starts and stops the server, downloads models and switches between them. It also adopts a llama-server that is already running.
-
-### 3.8 Export
+### 3.7 Export
 
 `screenmind/export/` and `api/routes/export.py`. `GET /api/export` builds a zip for a user and a date range: one folder per day, one text file per work session (split by idle gaps), JSONL copies and the screenshots. Only `status='ok'` rows go out. URLs and text are filtered again on the way. The route accepts only local clients. The dashboard has a Data Export card in Settings → Storage.
 
@@ -259,7 +245,7 @@ User query: "auth error"
       │
       ├──▶ FTS5 MATCH on activities_fts (status='ok' rows) → ranked matches
       │
-      └──▶ LIKE search on meetings.transcript and meetings.summary
+      └──▶ LIKE search on meetings.transcript and meetings.summary (old rows)
 
       Merge → return top N
 ```
@@ -281,7 +267,7 @@ The dashboard highlights matching OCR boxes on the screenshot (`/api/screenshot/
 │    • Password fields never read                         │
 │    • URLs cleaned by sanitize_url()                     │
 │                                                         │
-│  Before Gemma and storage:                              │
+│  Before storage:                                        │
 │    • Sensitive-data filter (regex redaction)            │
 │      - Credit cards → [REDACTED:card]                   │
 │      - SSNs → [REDACTED:ssn]                            │
@@ -341,24 +327,14 @@ Wayland: window info comes from compositor IPC (Sway, Hyprland, Niri). Permissio
 
 | Metric | Value | Notes |
 |---|---|---|
-| Gemma 4 (accurate) | ~76s | Thinking + layout, GTX 1650 4GB |
-| Gemma 4 (balanced) | ~40s | Thinking, layout via OCR clustering |
-| Gemma 4 (fast) | ~12s | No thinking, same GPU |
-| Cache hit (identical) | ~0ms | Copy from memory |
-| Cache hit (minor) | OCR time only | Gemma skipped |
-| VRAM usage | ~3-4GB | Gemma 4 E2B Q4_0 (default). E4B ~6GB, 12B ~10GB |
+| Cache hit (identical) | ~0ms | Copy from memory, no OCR |
+| GPU | not used | OCR runs on the CPU |
 
 ### Resource Management
 
 | Setting | Effect |
 |---|---|
-| Performance Mode: minimal | 0 GPU layers (CPU inference, slow but frees VRAM) |
-| Performance Mode: balanced | 15 GPU layers (default) |
-| Performance Mode: maximum | 99 GPU layers (all on GPU) |
-| Deferred Analysis | Queue captures, analyze only when idle (60s with no new captures) |
 | Auto-Pause Heavy Apps | Skip capture when games or editors are in front |
-| KV Cache Quantization | Saves ~200MB VRAM, adds ~10s per inference |
-| Flash Attention | Faster and less VRAM (on by default) |
 
 ---
 
@@ -370,27 +346,26 @@ Wayland: window info comes from compositor IPC (Sway, Hyprland, Niri). Permissio
 │  works  │   │ (timer, change,  │   │                                      │
 └────┬────┘   │  or UI event)    │   │  1. a11y text + URL (at grab time)   │
      │        └──────────────────┘   │  2. Per-app cache check              │
-     │                               │     ├─ identical → done              │
-     │                               │     ├─ minor → OCR only              │
+     │                               │     ├─ identical → reuse text        │
      │                               │     └─ full → continue               │
      │                               │  3. RapidOCR (if a11y is not enough) │
      │                               │  4. Sensitive-data redaction         │
-     │                               │  5. Gemma 4 labels (+ layout)        │
-     │                               │  6. Organize text by regions         │
+     │                               │  5. Organize text by regions         │
+     │                               │  6. Rule labels (app, category)      │
      │                               │  7. Store to SQLite, status='ok'     │
      │                               └──────────────────────────────────────┘
      │
      ├──▶ UI event recorder → ui_events (+ user_actions on the next frame)
-     └──▶ Audio Worker → meetings (+ transcript and summary if on)
+     └──▶ Audio Worker → meetings (app, title, room URL, start, end)
                                                   │
                                                   ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                               Readers                                    │
 │                                                                          │
 │  Timeline  → browse by date                                              │
-│  Search    → FTS5 keyword search + meeting transcripts                   │
+│  Search    → FTS5 keyword search + old meeting transcripts               │
 │  Analytics → category / app / hour aggregations                          │
-│  Meetings  → calls, transcripts, summaries                               │
+│  Meetings  → calls (old ones may have a transcript and summary)          │
 │  Export    → per-day zip for the workflows app                           │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
@@ -399,15 +374,9 @@ Wayland: window info comes from compositor IPC (Sway, Hyprland, Niri). Permissio
 
 ## 9. Models
 
-| Model | Variants | VRAM | Audio |
-|---|---|---|---|
-| **Gemma 4 E2B** (2B), *default* | Q4_0 · Q8_0 · BF16 | ~4 GB | yes |
-| **Gemma 4 E4B** (4B) | Q4_0 · Q8_0 · BF16 | ~6 GB | yes |
-| **Gemma 4 12B** | IQ3_M · Q4_K_M · Q5_K_M · Q6_K · Q8_0 | ~10 GB | yes |
+RapidOCR models (~25 MB) download to `~/.screenmind/models/ocr` on first use. No other model is used.
 
-GGUF files are stored in `~/.screenmind/models/`. The Model Hub downloads, switches and deletes variants from the dashboard. RapidOCR models (~15 MB) download to `~/.screenmind/models/ocr` on first use.
-
-E2B is the default. It reads images and audio, stays local, and is small enough to run all the time on a 4GB GPU.
+Gemma GGUF files from before 2026-10-08 stay in `~/.screenmind/models/gemma-4-e2b` (about 3.2 GB). ScreenMind does not use or delete them. You can delete that folder by hand.
 
 ---
 
@@ -415,15 +384,13 @@ E2B is the default. It reads images and audio, stays local, and is small enough 
 
 | Layer | Technology |
 |---|---|
-| **Labels and audio** | Gemma 4 (E2B / E4B / 12B) via llama.cpp |
-| **Inference server** | llama-server (llama.cpp), OpenAI-compatible API |
+| **Labels** | Rules over app name, window title and URL (`engine/labels.py`) |
 | **OCR** | RapidOCR (PP-OCR on ONNX Runtime, CPU) |
 | **Dedup** | imagehash (pHash) |
 | **Backend** | FastAPI + Uvicorn |
 | **Database** | SQLite (WAL) + FTS5 |
 | **Capture** | ScreenCaptureKit / `screencapture` (macOS), mss, grim / XDG Portal (Wayland) |
 | **Accessibility and UI events** | AXUIElement + CGEventTap (macOS), UI Automation + low-level hooks (Windows), AT-SPI (Linux) |
-| **Audio** | sounddevice |
 | **Encryption** | cryptography (Fernet) + keyring |
 | **Frontend** | Vanilla JS + CSS, no build step |
 | **Platform** | Windows / macOS / Linux (X11 + Wayland) |

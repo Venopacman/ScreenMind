@@ -6,6 +6,8 @@ Build files: [`packaging/screenmind.spec`](../../packaging/screenmind.spec) and 
 
 ## Results
 
+Update 2026-10-08: Gemma and llama-server were removed (branch `claude/practical-dijkstra-f83cbe`). The notes below about `llama-server`, model downloads (F2), a bundled llama-server (F3), `MEETING_TRANSCRIPTION`, `LLAMA_SERVER_*` and `/api/models` are history. Those settings are ignored now, and `/api/models` returns 404.
+
 | | macOS (arm64) | Windows (x64) |
 |---|---|---|
 | Date, commit | 2026-10-08, `custom` 3092a5f (after F1-F4). First run 2026-10-07 on cd95561 (after the strip) | 2026-10-08, `custom` 4f98416 |
@@ -33,7 +35,7 @@ Build files: [`packaging/screenmind.spec`](../../packaging/screenmind.spec) and 
 - Built twice: on `custom` 2639ae1 (before F1-F4) and on 3092a5f (after). Both ran from `Contents/MacOS/ScreenMind` under `env -i` with a temp `DATA_DIR`, `API_PORT=7891`, `CAPTURE_ON_START=false`, `UI_EVENTS_ENABLED=false`, `MEETING_TRANSCRIPTION=false`, `LLAMA_SERVER_SHARED=1`, a dead llama port and `PATH=/usr/bin:/bin:/usr/sbin:/sbin`. The main instance kept running. Build outputs were deleted afterwards.
 - F1 works on macOS: a `.env` in the temp data dir with `OCR_LANGUAGES=en,de` showed as `ocr_languages=en,de (.env)` in the start log. On 2639ae1 no `.env` loaded at all (the path pointed inside the bundle).
 - F4 works for the shortcut: the log says "Desktop shortcut skipped" and nothing appeared on the desktop. On 2639ae1 the first start wrote `~/Desktop/ScreenMind.command`, which runs `launcher.py` inside the bundle (deleted). The login-item command is now the app binary alone (`startup.py`). Not tested: installing the LaunchAgent, because that changes the user's real login items.
-- F2 and F3 were not tested on macOS: they need a model download and a `llama-server` start.
+- F2 and F3 were not tested on macOS: they need a model download and a `llama-server` start. (Update 2026-10-08: F2 and F3 no longer apply; Gemma was removed.)
 - A fresh DB migrated from v0 to v13 in the bundle.
 - The app read the model list from `~/.screenmind/models` (it ignores `DATA_DIR`, as on Windows) and wrote nothing there.
 - For the resource budget, a read-only sample of the main instance 20 min after its start: 415 MB footprint, peak 1177 MB, 60 CPU-s (about 5% of one core). Its `llama-server`: 842 MB footprint.
@@ -115,7 +117,7 @@ Not tested yet: running the installer, the wizard pages, start at sign-in, the S
 
 Why OCR costs more CPU here than on the Mac. Measured with a per-stage version of the benchmark on 12 saved frames from 2026-10-07 (2560x1600, 80 text boxes found per frame, 56 kept). "Quiet" means `llama-server` was idle during the run. Plugged in, Balanced power plan.
 
-- **About half of the 24 CPU-s was contention.** The main instance's `llama-server` (`-ngl 15`, no `-t`) uses 5-12 logical CPUs during each Gemma call, and the calls often run back to back. The same OCR run costs 10.7-12.1 CPU-s per frame when `llama-server` is idle and 18-20 CPU-s when it runs (+70%). OCR threads then share physical cores with llama's threads, so each CPU-second does less work. The first benchmark ran during calls.
+- **About half of the 24 CPU-s was contention.** The main instance's `llama-server` (`-ngl 15`, no `-t`) uses 5-12 logical CPUs during each Gemma call, and the calls often run back to back. The same OCR run costs 10.7-12.1 CPU-s per frame when `llama-server` is idle and 18-20 CPU-s when it runs (+70%). OCR threads then share physical cores with llama's threads, so each CPU-second does less work. The first benchmark ran during calls. (Update 2026-10-08: llama-server was removed, so the "quiet" numbers are now the normal case.)
 - **Recognition is 88% of the cost.** Quiet, 2 threads, per frame: detection 1.0 CPU-s, classifier 0.15, recognition 9.4. Recognition cost grows with the number of text lines, not with the image size: each line is scaled to 48 px high.
 - **More threads cost CPU and add almost no speed here.** Quiet, per frame: 1 thread 6.7 CPU-s and 6.6 s; 2 threads (the app) 10.7 CPU-s and 5.4 s; 4 threads 20 CPU-s and 5.1 s; all 16 (the old default) 39 CPU-s and 5.3 s, with `llama-server` partly busy.
 - **Windows pays for freed memory.** With the onnxruntime memory arena off, every operator allocates and frees its own buffers. Windows gives big blocks back to the OS at once, so the next operator page-faults them in again: 1.8 million page faults and 1.1-1.6 kernel CPU-s per frame. The Mac's allocator keeps freed pages (see [Resource budget](packaging.md#resource-budget)), so it does not pay this; that is likely also why its footprint is larger. Arena on, given back after every model run (arena shrinkage): 355 thousand page faults, 0.27 kernel CPU-s, +45 MB USS, +80 MB peak working set. Arena on without shrinkage: 890 MB.
@@ -124,7 +126,7 @@ Why OCR costs more CPU here than on the Mac. Measured with a per-stage version o
 - After the fix the laptop needs 5.4 CPU-s per frame, against 4.3 on the Mac (2 threads). The Mac numbers have no line count, so per-line cost is not compared yet. `ocr_mem_bench.py` now prints text boxes per frame and CPU-ms per box.
 - The newest screenshot folder grows while the app runs, so two benchmark runs on it read different frames. Pass `--dir` with a finished day to compare runs.
 - `--dump` crashed on Windows with Cyrillic text (it wrote in the ANSI code page). It now writes UTF-8.
-- `llama-server` is the bigger CPU cost on this laptop: 7-12 logical CPUs for about 26 s per call. Capping its threads (`-t`) is a backlog idea.
+- `llama-server` is the bigger CPU cost on this laptop: 7-12 logical CPUs for about 26 s per call. Capping its threads (`-t`) is a backlog idea. (Update 2026-10-08: obsolete, llama-server was removed.)
 
 ## Windows: how to run the same spike
 
@@ -165,7 +167,7 @@ For the Windows laptop session. It only builds and starts the app. It installs n
    Pop-Location
    ```
 
-5. Check it answers (wait a few seconds first):
+5. Check it answers (wait a few seconds first). Update 2026-10-08: `/api/models` was removed with Gemma, so expect 404 there, and the `MEETING_TRANSCRIPTION` and `LLAMA_SERVER_*` lines in step 4 do nothing now.
 
    ```powershell
    foreach ($u in "/", "/css/styles.css", "/js/core.js", "/api/status", "/api/timeline", "/api/settings", "/api/models", "/api/search?q=test") { "$u " + (curl.exe -s -o NUL -w "%{http_code}" "http://127.0.0.1:7790$u") }

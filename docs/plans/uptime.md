@@ -51,7 +51,7 @@ A third worker with the same rules reads the clipboard (finding 6). It starts on
 
 ### 2. Clean shutdown under a stuck thread (built)
 
-`watchdog.start_shutdown_deadline()`: when a stop is asked for (Ctrl+C or `/api/shutdown`), a 45 s daemon timer starts. A normal stop takes up to about 25 s (recorder 7 s, call recording 5 s, llama-server 10 s).
+`watchdog.start_shutdown_deadline()`: when a stop is asked for (Ctrl+C or `/api/shutdown`), a 45 s daemon timer starts. A normal stop takes up to about 25 s (recorder 7 s, call recording 5 s, llama-server 10 s). Update 2026-10-08: Gemma, llama-server and call recording were removed (branch `claude/practical-dijkstra-f83cbe`), so a normal stop now takes up to about 10 s.
 
 If the process is still alive when the timer fires, it:
 
@@ -71,7 +71,7 @@ A normal stop exits with 0, so the e2e check and the logs can tell a forced stop
 | Capture loop | `CaptureWorker.last_beat`, each loop pass (at most 5 s apart, also while paused or idle) | no pass for 2 min | log the stacks of all threads; again every 10 min while it lasts |
 | UI-event enricher | `UiEventRecorder.ticks`, each tick | count unchanged for 2 min while running | log stacks, then `restart()`: a new enricher with a new lock, the stuck thread left behind. At most 3 times per hour |
 | UIA workers | job start time | one job over 30 s | replaced by the worker itself (step 1) |
-| Analysis | `AnalysisWorker.last_beat`, each loop pass | frames waiting and no pass for 20 min | log stacks (one Gemma call may take 300 s, with retries) |
+| Analysis | `AnalysisWorker.last_beat`, each loop pass | frames waiting and no pass for 20 min | log stacks (one Gemma call may take 300 s, with retries; update 2026-10-08: Gemma was removed, one OCR call takes seconds, so 20 min is a wide margin) |
 
 The stack dump is the main tool: if a freeze happens again, the log shows where each thread waits. Since G38 the log file is on by default, so the cause is no longer a guess.
 

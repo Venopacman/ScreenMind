@@ -2,6 +2,8 @@
 
 Status: done on 2026-10-07. All slices are merged into `custom`. See [Progress](#progress) at the end. The tables below show the final decisions.
 
+Update 2026-10-08: Gemma and llama-server were removed (branch `claude/practical-dijkstra-f83cbe`, `069c137`). Labels now come from rules (`engine/labels.py`). So every "Keep" below for Gemma, the analysis modes, the Model Hub, `model_manager.py`, `setup_llama.py`, `llm_client.py`, `analyzer.py`, re-analyze, call transcription and per-call summaries no longer applies. Call tracking stays.
+
 ## Goal
 
 The user's words: "strip all the extra features like rewind, ask, memos, Agents, bookmarks. We care only about actions collection plus minimalistic analysis for deduplication, unification and preliminary labeling purposes."
@@ -13,7 +15,7 @@ So a feature stays only if it does one of these:
 1. **Collects** an action: screenshot, window/app, URL, a11y text, OCR text, UI events, calls.
 2. **Dedups** it: pHash at capture, and the per-app analysis cache.
 3. **Unifies** it: one app name per tool, sanitized URLs, redacted secrets.
-4. **Labels** it: app, category and a one-line summary from Gemma.
+4. **Labels** it: app, category and a one-line summary from Gemma. (Update 2026-10-08: app and category from rules, no summary.)
 5. **Runs, shows or exports** the above: the capture loop, the model server, the timeline, settings, retention, and the export that another session is adding.
 
 Everything else goes: features that produce new content (chat, summaries, agents), push data somewhere else (Obsidian, Notion, webhooks, MCP), or are user conveniences that do not add data (rewind, bookmarks, memos, hotkeys).
@@ -210,8 +212,8 @@ Restarting the main instance (port 7777) to pick up the changes needs the user's
 The user's answers, 2026-10-07:
 
 1. **Pages.** Timeline, Search, Analytics and Meetings stay. Rewind, Ask, Memos, Agents, Bookmarks and Summary go. Analytics shows only one day; that fix goes to a separate session.
-2. **Calls.** Keep all of it: tracking, transcription and the per-call summary.
-3. **Gemma analysis.** Keep all three modes.
+2. **Calls.** Keep all of it: tracking, transcription and the per-call summary. (Update 2026-10-08: transcription and summaries were removed with Gemma. Tracking stays.)
+3. **Gemma analysis.** Keep all three modes. (Update 2026-10-08: Gemma was removed. Frames are labelled by rules.)
 4. **Embeddings.** Remove. Search becomes keyword-only.
 5. **Daily summary and MCP server.** Remove.
 6. **Git context.** Remove.

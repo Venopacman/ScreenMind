@@ -21,7 +21,7 @@ The workflows/questionnaire work needs to know which apps were visible in each f
 ### Linux: no per-display app lookup
 Status: open
 
-`get_top_window_in()` and `can_find_top_window` exist on macOS and, since `16f933a`, on Windows. On Linux X11 the display without focus is still saved with no app name, so Gemma guesses it, or the idle rule fires when there is no text. Implement both in `LinuxAdapter`, for example with `xdotool search --onlyvisible` plus window geometry, or with python-xlib. Wayland can't do this.
+`get_top_window_in()` and `can_find_top_window` exist on macOS and, since `16f933a`, on Windows. On Linux X11 the display without focus is still saved with no app name, so Gemma guesses it, or the idle rule fires when there is no text. (Update 2026-10-08: Gemma was removed, branch `claude/practical-dijkstra-f83cbe`. Such a frame now gets a rule label with no app name to work from. The item still applies.) Implement both in `LinuxAdapter`, for example with `xdotool search --onlyvisible` plus window geometry, or with python-xlib. Wayland can't do this.
 
 Refs: `screenmind/platform_support/linux.py`, `base.py`, `CaptureWorker._label_monitor()`.
 
@@ -39,6 +39,8 @@ It can only be set in `.env`. `capture_active_monitor` has a switch in Settings.
 
 ### Analysis cost with several displays
 Status: idea
+
+Update 2026-10-08: Gemma was removed (branch `claude/practical-dijkstra-f83cbe`). A display now costs at most one OCR run per tick, and none when a11y text is real content. The Gemma part below no longer applies.
 
 When both screens change, there are up to 2 Gemma runs per tick (about 8 s each on the laptop). If the queue backs up, frames older than 3 minutes are skipped. Watch `cache_skips` in `/api/status`. If it grows, consider analyzing the display without focus less often.
 

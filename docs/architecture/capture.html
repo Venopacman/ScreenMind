@@ -137,7 +137,7 @@ td.gid, th.gid { font-family: var(--font-mono); white-space: nowrap; font-varian
   <div class="meta">
     <span>Code: <b><code>custom</code> @ <code>482c275</code></b></span>
     <span>DB schema: <b>v11</b></span>
-    <span>Date: <b>2026-10-07</b></span>
+    <span>Date: <b>2026-10-07</b>, Gemma removed <b>2026-10-08</b></span>
     <span>Source of truth: <b><code>docs/architecture/capture.md</code></b></span>
   </div>
   <div class="filters" style="margin-top:16px" aria-label="Legend">
@@ -148,7 +148,7 @@ td.gid, th.gid { font-family: var(--font-mono); white-space: nowrap; font-varian
 <!-- 1 -->
 <section id="flow">
   <h2><span class="n">1</span>Data flow</h2>
-  <p>Three workers run side by side. <code>CaptureWorker</code> takes screenshots and reads window info, a11y text and the URL at the moment of the grab. <code>AnalysisWorker</code> picks frames from a queue, runs OCR and Gemma, and writes the results. <code>AudioWorker</code> watches for calls on its own thread. <code>UiEventRecorder</code> records clicks, app switches, typed text and the clipboard by default; it can be turned off.</p>
+  <p>Three workers run side by side. <code>CaptureWorker</code> takes screenshots and reads window info, a11y text and the URL at the moment of the grab. <code>AnalysisWorker</code> picks frames from a queue, runs OCR and the sensitive-data filter, labels the frame by rules, and writes the results. No model looks at the image. <code>AudioWorker</code> watches for calls on its own thread. <code>UiEventRecorder</code> records clicks, app switches, typed text and the clipboard by default; it can be turned off.</p>
   <p class="hint">Click a diagram to open it full screen. Zoom with the wheel, a pinch or the + and − buttons. Drag to move.</p>
   <div class="diagram" data-title="Data flow" tabindex="0" role="button" aria-label="Open the data flow diagram full screen">
 <button type="button" class="expand-btn" tabindex="-1">Open full screen</button>
@@ -161,7 +161,6 @@ flowchart TB
     HOOK["Input hooks&lt;br/&gt;CGEventTap / WH_KEYBOARD_LL + WH_MOUSE_LL"]
     CLIP["Clipboard&lt;br/&gt;NSPasteboard / Win32 clipboard"]
     COREAUDIO["Mic users&lt;br/&gt;CoreAudio process list (macOS)"]
-    SD["Audio input&lt;br/&gt;sounddevice"]
   end
 
   subgraph CAP["Capture (capture_worker.py)"]
@@ -177,13 +176,13 @@ flowchart TB
 
   subgraph CALLS["Calls (audio_worker.py)"]
     DET["AudioWorker.check_calls&lt;br/&gt;every 5 s"]
-    TRANS["Transcription&lt;br/&gt;off by default"]
   end
 
   subgraph ANA["Analysis (analysis_worker.py)"]
     Q[["asyncio.Queue of CaptureResult"]]
     OCR["RapidOCR&lt;br/&gt;when a11y text is not real content"]
-    GEMMA["Gemma 4 via llama-server :5809"]
+    FILT["Sensitive-data filter&lt;br/&gt;+ OCR layout clustering"]
+    RULES["Rule labels&lt;br/&gt;engine/labels.py"]
   end
 
   subgraph STORE["Storage (data_dir)"]
@@ -206,11 +205,8 @@ flowchart TB
   WINS --&gt; DET
   COREAUDIO --&gt; DET
   DET -- "meetings row" --&gt; DB
-  DET --&gt; TRANS
-  SD --&gt; TRANS
-  TRANS -- "audio chunks" --&gt; GEMMA
-  Q --&gt; OCR --&gt; GEMMA
-  GEMMA -- "update row, status=ok" --&gt; DB
+  Q --&gt; OCR --&gt; FILT --&gt; RULES
+  RULES -- "update row, status=ok" --&gt; DB
 </pre>
   </div>
   <h3>Order inside one tick</h3>
@@ -246,8 +242,8 @@ flowchart TB
       <tr><td>OCR text</td><td>Text from pixels</td><td>RapidOCR (ONNX Runtime, CPU)</td><td>same</td><td>same</td><td><code>activities.ocr_text</code>, <code>ocr_boxes</code>, <code>organized_text</code></td><td>G14</td></tr>
       <tr><td>UI events</td><td>Clicks, typed text, app switches, tab/page changes, clipboard</td><td><code>CGEventTap</code> (listen-only) + <code>AXUIElement</code> + <code>NSPasteboard</code></td><td><code>WH_KEYBOARD_LL</code> / <code>WH_MOUSE_LL</code> hooks + UIA + Win32 clipboard</td><td>none</td><td><code>ui_events</code>, <code>activities.user_actions</code></td><td>G21 G22 G25 G27 G31</td></tr>
       <tr><td>Call start/end</td><td>App, title, room URL, duration</td><td>Window rules + CoreAudio "is running input" per process</td><td>Window rules only (no mic info)</td><td>Window rules on the focused window only</td><td><code>meetings</code></td><td>G16 G17 G27 G40 G41</td></tr>
-      <tr><td>Call audio</td><td>Mic + system audio, transcript, summary</td><td><code>sounddevice</code> mic; system audio only with a virtual loopback device</td><td><code>sounddevice</code> mic + a device named "loopback" / "Stereo Mix"</td><td><code>sounddevice</code> mic</td><td><code>meetings.transcript</code>, <code>meetings.summary</code></td><td>G18</td></tr>
-      <tr><td>Analysis</td><td>Category, summary, scene, layout</td><td>Gemma 4 E2B (llama-server)</td><td>same</td><td>same</td><td><code>activities.app_name</code>, <code>category</code>, <code>summary</code>, <code>details</code>, <code>visible_text</code>, <code>mood</code>, <code>confidence</code>, <code>scene_description</code></td><td>G15</td></tr>
+      <tr><td>Call audio</td><td>Not recorded since 2026-10-08. Older calls keep their transcript and summary</td><td>none</td><td>none</td><td>none</td><td><code>meetings.transcript</code>, <code>meetings.summary</code> (old rows only)</td><td></td></tr>
+      <tr><td>Analysis</td><td>App name, category, layout text</td><td>Rules over app name, title and URL (<code>engine/labels.py</code>); OCR box clustering</td><td>same</td><td>same</td><td><code>activities.app_name</code>, <code>category</code>, <code>organized_text</code>, <code>analysis_method</code></td><td>G6</td></tr>
     </tbody>
   </table>
   </div>
@@ -288,7 +284,7 @@ flowchart TB
     S4["engine/a11y_extractor.py (adapter facade)"]
     S5["capture/ui_events/recorder.py, text_buffer.py, models.py"]
     S6["workers/call_detection.py, audio_worker.py"]
-    S7["workers/analysis_worker.py, engine/ocr.py, analyzer.py, llm_client.py"]
+    S7["workers/analysis_worker.py, engine/ocr.py, layout_analyzer.py, labels.py"]
     S8["privacy/url_filter.py, data_filter.py, encryption.py"]
     S9["storage/database.py"]
   end
@@ -346,7 +342,7 @@ flowchart TB
 
   <h3 id="d-dedup">4.2 Dedup</h3>
   <p><code>capture/dedup.py</code>. One <code>ScreenDeduplicator</code> per display. Hamming distance of <code>imagehash.phash</code> to the last kept frame: 8 or less is a duplicate. The JPEG is deleted and no row is written. This holds for every grab, click-triggered ones included.</p>
-  <p>The analysis worker has a second, per-app cache keyed by <code>(app, title[:100])</code>: distance 3 or less is "identical" (copy the last analysis, skip OCR and Gemma); 4-10 and younger than 240 s (chat apps) or 420 s (others) is "minor" (run OCR, reuse Gemma's analysis); more is "full".</p>
+  <p>The analysis worker has a second, per-app cache keyed by <code>(app, title[:100])</code>: distance 3 or less is "identical" (copy the last frame's text, skip OCR; labels still come from the rules); more is "full". The "minor" tier (reuse Gemma's analysis, run OCR) went away with Gemma on 2026-10-08.</p>
 
   <h3 id="d-windows">4.3 Window and app info</h3>
   <div class="cols">
@@ -401,7 +397,7 @@ flowchart TB
       <p>AT-SPI via <code>pyatspi</code>.</p>
     </div>
   </div>
-  <div class="note"><p><b>How analysis uses it.</b> <code>_a11y_is_content()</code>: at least 200 chars after removing the title and the app name, and not mostly repeats. macOS and Linux also drop English chrome markers and menu-word lines; Windows skips that, since its walker leaves chrome out by type in any UI language. Then it replaces OCR. Otherwise OCR runs, with a11y text up to 500 chars in front. The path is only logged; <code>analysis_method</code> stores the analysis tier (<code>full:fast</code>, <code>cache:minor</code>...). Only OCR writes <code>ocr_boxes</code>. The a11y text has no column of its own; it ends up in <code>activities.ocr_text</code> (G12).</p></div>
+  <div class="note"><p><b>How analysis uses it.</b> <code>_a11y_is_content()</code>: at least 200 chars after removing the title and the app name, and not mostly repeats. macOS and Linux also drop English chrome markers and menu-word lines; Windows skips that, since its walker leaves chrome out by type in any UI language. Then it replaces OCR. Otherwise OCR runs, with a11y text up to 500 chars in front. The path is only logged; <code>analysis_method</code> stores the analysis tier (<code>rules</code>, <code>cache:identical</code>...). Rows from before 2026-10-08 may hold <code>full:fast</code> or <code>cache:minor</code>. Only OCR writes <code>ocr_boxes</code>. The a11y text has no column of its own; it ends up in <code>activities.ocr_text</code> (G12).</p></div>
 
   <h3 id="d-url">4.5 Browser URL</h3>
   <p><code>_get_browser_url()</code> → <code>adapter().get_browser_url()</code> → <code>sanitize_url()</code>. Focused display only.</p>
@@ -418,7 +414,7 @@ flowchart TB
       <p>None.</p>
     </div>
   </div>
-  <p><b>Per window:</b> <code>get_window_url(pid, bounds)</code> reads a browser window that is not in front. macOS only; used for call room URLs (G16). <b>Not used:</b> URLs found in OCR text. They go to Gemma as a hint, but <code>active_url</code> is only the browser's own URL.</p>
+  <p><b>Per window:</b> <code>get_window_url(pid, bounds)</code> reads a browser window that is not in front. macOS only; used for call room URLs (G16). <b>Not used:</b> URLs found in OCR text. The code that found them fed the Gemma prompt and was removed with it. <code>active_url</code> is only the browser's own URL.</p>
 
   <h3 id="d-ocr">4.6 OCR</h3>
   <ul>
@@ -430,7 +426,7 @@ flowchart TB
     <li>Models (~15 MB) in <code>~/.screenmind/models/ocr</code>.</li>
     <li>onnxruntime: memory pattern and arena off, <code>OCR_THREADS</code> threads (default 2). Less memory, about 40% less CPU per frame.</li>
     <li>Runs in the analysis worker. Skipped when a11y text is real content, and on "identical" cache hits.</li>
-    <li>Output: text and boxes (<code>ocr_boxes</code> JSON). <code>organize_ocr_text()</code> groups boxes into regions (<code>organized_text</code>).</li>
+    <li>Output: text and boxes (<code>ocr_boxes</code> JSON). <code>cluster_ocr_layout()</code> clusters the boxes into regions by position, and <code>organize_ocr_text()</code> writes the text per region (<code>organized_text</code>).</li>
   </ul>
 
   <h3 id="d-ui">4.7 UI events</h3>
@@ -469,11 +465,11 @@ flowchart TB
     <li>Every text field (names, values, typed text, clipboard up to 1,000 chars, window titles) goes through the sensitive-data filter before it is queued. A label typed before a pause ("pwd -") is checked with the next chunk. URLs through <code>sanitize_url()</code>.</li>
     <li>The watchdog (<code>screenmind/watchdog.py</code>) restarts the recorder when the enricher has not ticked for 2 min, at most 3 times an hour, with a new lock.</li>
     <li>Backend calls run without the recorder lock; <code>flush_for_capture()</code> waits at most 2 s. Rows written in batches every 2 s. At each saved frame, <code>attach_ui_events()</code> links unlinked events to the new row: those since the previous frame saved on that display, of the frame's app only (<code>app_key()</code>: case, spaces, <code>.exe</code> don't matter), and clicks only inside the display's rect. So an event goes to the first frame saved after it on a display, if that frame shows its app. Otherwise it stays unlinked with its own timestamp, for later analysis to match by time. Typing in Notepad++ followed by a switch to Claude stays unlinked: the app that was left can't be grabbed after the switch, so no extra capture is requested. Events from before the current run are never linked. No extra OS calls, one indexed query per frame.</li>
-    <li><code>format_user_actions()</code> makes at most 10 lines (1,200 chars) in <code>activities.user_actions</code>, which go into the Gemma prompt. The export lists unlinked events between the frames in the session files; the dashboard timeline shows only <code>user_actions</code>, and <code>GET /api/ui-events</code> lists all events by time. With the same app on several displays, events without a point go to the first of its frames in the tick (G21).</li>
+    <li><code>format_user_actions()</code> makes at most 10 lines (1,200 chars) in <code>activities.user_actions</code>. The export lists unlinked events between the frames in the session files; the dashboard timeline shows only <code>user_actions</code>, and <code>GET /api/ui-events</code> lists all events by time. With the same app on several displays, events without a point go to the first of its frames in the tick (G21).</li>
   </ul>
 
   <h3 id="d-calls">4.8 Calls and meetings</h3>
-  <p><code>workers/audio_worker.py</code> and <code>workers/call_detection.py</code>. Calls are tracked always. Transcription is off by default (<code>MEETING_TRANSCRIPTION=false</code>).</p>
+  <p><code>workers/audio_worker.py</code> and <code>workers/call_detection.py</code>. Calls are tracked always. No audio is recorded.</p>
   <h4>Detection, own thread, every 5 s, also while capture is paused</h4>
   <ul>
     <li>Input: <code>list_visible_windows()</code> and <code>get_mic_apps()</code>.</li>
@@ -483,31 +479,32 @@ flowchart TB
     <li>Restarts: shutdown ends the call at the last time seen. At a call start, <code>_resume_recent()</code> reopens the last <code>meetings</code> row if it ended less than the grace before, has no transcript, and <code>same_call()</code> matches: same <code>app_name</code>; room URL if both known; else, for browser calls, the title without markers (<code>normalize_title()</code>: emoji, "* ", " - N new items", " [Main]"); else the app alone. Fixes one Meet call saved as rows 4 and 5 around a restart (2026-10-07).</li>
     <li>Stored: <code>meetings.start_time</code>, <code>end_time</code>, <code>app_name</code>, <code>window_title</code>, <code>url</code> (v10), <code>duration_minutes</code> (every 60 s). Browser room URL from <code>get_window_url()</code> + <code>sanitize_url()</code>, retried every 30 s.</li>
   </ul>
-  <h4>Transcription, when on and the model has an audio encoder</h4>
-  <ul>
-    <li><code>sounddevice</code> records the mic and, if found, a device named "loopback" or "stereo mix". 16 kHz, 15 s chunks.</li>
-    <li>Each chunk goes to Gemma via llama-server (<code>input_audio</code>). Transcript and summary go to <code>meetings.transcript</code> and <code>meetings.summary</code>.</li>
-    <li>macOS has no such device by default: mic side only (G18).</li>
-  </ul>
+  <h4>Transcription</h4>
+  <p>Removed with Gemma on 2026-10-08. <code>sounddevice</code> and <code>MEETING_TRANSCRIPTION</code> are gone. Calls from before keep <code>meetings.transcript</code> and <code>meetings.summary</code>, and the dashboard still shows them.</p>
 
   <h3 id="d-analysis">4.9 Analysis</h3>
-  <p><code>analysis_worker.py</code> → <code>analyzer.py</code> (<code>GemmaAnalyzer</code>) → <code>llm_client.py</code> → llama-server at <code>LLAMA_SERVER_HOST</code> (default <code>http://127.0.0.1:5809</code>, <code>/v1/chat/completions</code>). Default model <code>gemma-4-e2b</code>, context 6,144 tokens. Modes: <code>fast</code> (default, no thinking, 500 tokens out), <code>balanced</code> (thinking, 1,024), <code>merged</code> (thinking + layout, 1,800).</p>
-  <h4>What goes into one Gemma call</h4>
+  <p><code>analysis_worker.py</code>. No model looks at the image. Gemma and llama-server were removed on 2026-10-08 (<code>069c137</code>).</p>
+  <h4>One frame, in order</h4>
+  <ol>
+    <li>Per-app cache (4.2). An identical frame reuses the last frame's text and skips OCR.</li>
+    <li>Text: the a11y text from capture, or OCR when it is not real content (4.4, 4.6).</li>
+    <li>The sensitive-data filter cleans the text and the OCR boxes (<code>filter_ocr_boxes()</code>), not the image.</li>
+    <li>No app, no title and under 20 chars of real text = <code>idle</code> (<code>rule:empty_screen</code>).</li>
+    <li><code>cluster_ocr_layout()</code> and <code>organize_ocr_text()</code> build <code>organized_text</code>.</li>
+    <li><code>engine/labels.py</code>, <code>label_frame(app_name_hint, window_title, url)</code>, sets <code>app_name</code> and <code>category</code>.</li>
+  </ol>
   <div class="scroll"><table>
-    <thead><tr><th>Part</th><th>Source</th></tr></thead>
+    <thead><tr><th>Label</th><th>Rule (first non-empty wins)</th></tr></thead>
     <tbody>
-      <tr><td>Image</td><td>The screenshot, at most 768 px on the long side, JPEG quality 85</td></tr>
-      <tr><td><code>OS-detected app:</code></td><td><code>detected_app</code></td></tr>
-      <tr><td><code>Window title:</code></td><td><code>window_title</code></td></tr>
-      <tr><td><code>URLs visible in screenshot:</code></td><td>Browser URL first, then URLs found in the screen text</td></tr>
-      <tr><td><code>Extracted text (accurate):</code></td><td><code>_text_hint()</code>: unique words over 2 chars, screen order, cut at 8,000 chars (<code>_GEMMA_TEXT_HINT_CHARS</code>), then sorted alphabetically. A bag of words, not lines (G15)</td></tr>
-      <tr><td><code>User actions just before this screenshot:</code></td><td><code>activities.user_actions</code></td></tr>
+      <tr><td>App name</td><td>L0 the OS app name where the adapter trusts it (macOS); L1 the title suffix after <code>" - "</code>; L2 the OS process name, unless it is a generic wrapper (<code>electron</code>, <code>java</code>); L3 a short clean title; L4 the raw OS name, else <code>unknown</code></td></tr>
+      <tr><td>Category, browser</td><td>The site from the URL host (<code>SITE_CATEGORIES</code>), else words in the title, else the app's known category, else <code>browsing</code></td></tr>
+      <tr><td>Category, other apps</td><td><code>KNOWN_APP_CATEGORIES</code>, else <code>other</code></td></tr>
     </tbody>
   </table></div>
   <ul>
-    <li>Before: the sensitive-data filter cleans the text and the OCR boxes (<code>filter_ocr_boxes()</code>), not the image. No app, no title and under 20 chars of real text = <code>idle</code> without Gemma (<code>rule:empty_screen</code>).</li>
+    <li><code>analysis_method</code> is <code>rules</code>, <code>cache:identical</code> or <code>rule:empty_screen</code>; the idle backfill adds a <code>backfill:</code> prefix. <code>summary</code>, <code>details</code>, <code>visible_text</code>, <code>mood</code>, <code>confidence</code> and <code>scene_description</code> stay empty on new rows. Rows from before 2026-10-08 keep Gemma's values.</li>
     <li>A frame older than 180 s when its turn comes goes to <code>Database.mark_skipped()</code>: <code>status='skipped'</code>, analysis fields NULL, capture-time a11y text (filtered) and URL kept in <code>ocr_text</code> and <code>active_url</code>. The idle backfill re-analyzes today's <code>pending</code>, <code>skipped</code>, <code>failed</code> rows later and reuses that text and URL.</li>
-    <li>After the call the row is updated (<code>status='ok'</code>). Nothing else runs. Embeddings, git context and auto-bookmarks were removed in <code>57cf0dd</code>, and migration v11 dropped their data.</li>
+    <li>Then the row is updated (<code>status='ok'</code>). Nothing else runs. Embeddings, git context and auto-bookmarks were removed in <code>57cf0dd</code>, and migration v11 dropped their data.</li>
   </ul>
 </section>
 
@@ -523,7 +520,7 @@ flowchart TB
       <tr><td><code>settings.json</code></td><td>Runtime overrides from the dashboard. Only values that differ from the default (or <code>.env</code>) are stored, so the rest follow later default changes. A file written before <code>c377a8c</code> can still hold defaults; they shrink on the next save.</td></tr>
       <tr><td><code>screenmind.log</code>, <code>.1</code>-<code>.3</code></td><td>Log of every app start, console or not (<code>main.run()</code>), rotating at 1 MB, INFO. Starts with "ScreenMind &lt;version&gt; starting" and "Settings that differ from the defaults: ..." with each value's source. <code>SCREENMIND_LOG_FILE</code> moves it.</td></tr>
       <tr><td><code>crash.log</code></td><td>Traceback of an error before logging starts, only for a start without stderr (<code>pythonw</code>, a detached <code>python.exe</code>)</td></tr>
-      <tr><td><code>models/</code></td><td>GGUF models, <code>ocr/</code>. An old <code>embedder/</code> folder is no longer used and can be deleted.</td></tr>
+      <tr><td><code>models/</code></td><td><code>ocr/</code> (RapidOCR). Old folders are no longer used and can be deleted by hand: <code>gemma-4-e2b/</code> (Gemma GGUF files, about 3.2 GB, unused since 2026-10-08) and <code>embedder/</code>.</td></tr>
       <tr><td><code>.encryption_key</code></td><td>Fernet key backup (also in the OS keyring)</td></tr>
     </tbody>
   </table></div>
@@ -562,7 +559,7 @@ flowchart TB
       <tr><td>Screen Recording</td><td>SCK, <code>screencapture</code>, mss; also <code>kCGWindowName</code> titles</td><td>Grabs fail or show only the wallpaper; titles empty</td><td>not needed</td><td>X11 none; Wayland portal prompt on GNOME/KDE</td></tr>
       <tr><td>Accessibility</td><td>a11y text, Electron titles, browser URL, UI event element lookups</td><td>AX calls fail quietly: no a11y text, no URL</td><td>not needed (UIA)</td><td>AT-SPI must be on</td></tr>
       <tr><td>Input Monitoring</td><td>UI events <code>CGEventTap</code></td><td>No keys; falls back to a mouse-only tap, so clicks still work</td><td>not needed (LL hooks)</td><td>no backend</td></tr>
-      <tr><td>Microphone</td><td>Call transcription (<code>sounddevice</code>)</td><td>Silent audio</td><td>"Let desktop apps access your microphone"</td><td>PulseAudio/PipeWire</td></tr>
+      <tr><td>Microphone</td><td>Not needed since 2026-10-08 (no audio is recorded). The macOS app has no <code>NSMicrophoneUsageDescription</code></td><td></td><td>not needed</td><td>not needed</td></tr>
       <tr><td>Mic-in-use detection</td><td>CoreAudio process list, no permission</td><td></td><td>not available</td><td>not available</td></tr>
       <tr><td>Keychain</td><td>Encryption key via <code>keyring</code></td><td>Falls back to the key file</td><td>Credential Manager</td><td>Secret Service</td></tr>
     </tbody>
@@ -589,7 +586,7 @@ flowchart TB
       <tr><td>Password fields</td><td>a11y walkers, UI event backends</td><td>Never read; typing stores <code>[password field]</code></td></tr>
       <tr><td>Clipboard secret markers</td><td>UI event backends</td><td>Password-manager clipboard data is not read</td></tr>
       <tr><td><code>sanitize_url()</code></td><td><code>privacy/url_filter.py</code>, before every stored URL</td><td>Keeps scheme, host, path. Drops query and fragment except <code>tab</code>, <code>view</code>, <code>page</code>, <code>sort</code>, <code>lang</code>, <code>hl</code>. Sign-in hosts and auth/token paths keep only scheme and host. Token-like path parts become <code>&lt;token&gt;</code>. Non-http(s) becomes <code>None</code></td></tr>
-      <tr><td>Sensitive-data filter</td><td><code>privacy/data_filter.py</code> (default on), <code>capture_worker.filter_sensitive()</code></td><td>Redacts credit cards, SSNs, API keys, JWTs, passwords before Gemma and storage: a11y/OCR text, OCR boxes, window titles, all UI event text. Passwords also match "pwd - value" and a value on the next line; the label stays. Not the image</td></tr>
+      <tr><td>Sensitive-data filter</td><td><code>privacy/data_filter.py</code> (default on), <code>capture_worker.filter_sensitive()</code></td><td>Redacts credit cards, SSNs, API keys, JWTs, passwords before storage: a11y/OCR text, OCR boxes, window titles, all UI event text. Passwords also match "pwd - value" and a value on the next line; the label stays. Not the image</td></tr>
       <tr><td>Encryption</td><td><code>privacy/encryption.py</code></td><td>Screenshots only, off by default</td></tr>
     </tbody>
   </table></div>
@@ -615,16 +612,14 @@ flowchart TB
       <tr data-s="both"><td class="gid">G3</td><td>A blocked app skips the whole display. No per-window exclusion (SCK <code>SCContentFilter</code> could do it).</td><td><span class="chip both">both</span> (fix is macOS-only)</td><td>sck-capture.md "Leave windows out of screenshots"</td></tr>
       <tr data-s="both" data-new="1"><td class="gid">G4</td><td>The periodic grab is deduped like the others. A static screen gets no rows, so time on it is not visible.</td><td><span class="chip both">both</span></td><td><span class="chip new">new</span></td></tr>
       <tr data-s="lnx"><td class="gid">G5</td><td>No per-display app lookup on Linux. Unfocused displays have no app name.</td><td><span class="chip lnx">Linux</span></td><td>multi-display-capture.md "Linux: no per-display app lookup"</td></tr>
-      <tr data-s="both"><td class="gid">G6</td><td>The capture side knows a display has no app window but does not pass that on. Desktops with widgets still go to Gemma.</td><td><span class="chip both">both</span></td><td>ui-events.md "Capture side should mark..."</td></tr>
+      <tr data-s="both"><td class="gid">G6</td><td>The capture side knows a display has no app window but does not pass that on. Desktops with widgets have too much text for the empty-screen rule, so they are stored as normal frames instead of <code>idle</code>.</td><td><span class="chip both">both</span></td><td>ui-events.md "Capture side should mark..."</td></tr>
       <tr data-s="both" data-new="1"><td class="gid">G7</td><td>a11y text and the URL are read only for the focused display. Other displays get OCR only and no URL, though macOS <code>get_window_url()</code> could read it.</td><td><span class="chip both">both</span></td><td><span class="chip new">new</span></td></tr>
       <tr data-s="mac"><td class="gid">G8</td><td>Chrome ignores <code>AXManualAccessibility</code>. After a reboot, no page tree: no URL and no a11y page text from Chrome.</td><td><span class="chip mac">macOS</span></td><td>ui-events.md "Chrome shows its page tree only after..."</td></tr>
       <tr data-s="mac"><td class="gid">G9</td><td>Firefox URL and page text are untested.</td><td><span class="chip mac">macOS</span></td><td>ui-events.md "Firefox: probably no URL on macOS"</td></tr>
-      <tr data-s="both" data-new="1"><td class="gid">G12</td><td>a11y text has no column. It is merged into <code>ocr_text</code>, and the source is not stored: <code>analysis_method</code> holds the analysis tier (<code>full:fast</code>), not a11y/OCR. Only <code>ocr_boxes</code> being set shows that OCR ran.</td><td><span class="chip both">both</span></td><td><span class="chip new">new</span></td></tr>
+      <tr data-s="both" data-new="1"><td class="gid">G12</td><td>a11y text has no column. It is merged into <code>ocr_text</code>, and the source is not stored: <code>analysis_method</code> holds the analysis tier (<code>rules</code>), not a11y/OCR. Only <code>ocr_boxes</code> being set shows that OCR ran.</td><td><span class="chip both">both</span></td><td><span class="chip new">new</span></td></tr>
       <tr data-s="both" data-new="1"><td class="gid">G14</td><td>OCR reads one script per frame. With the default <code>en,es,de,fr,ru</code> the East Slavic model reads all Latin text. It has the English model's characters, but not ß, œ, š, č, ł, ą, ę. On a French page it read à as a or á.</td><td><span class="chip both">both</span></td><td><span class="chip new">new</span></td></tr>
-      <tr data-s="both"><td class="gid">G15</td><td>Gemma gets the screen text as an alphabetically sorted bag of unique words (8,000 chars) and a 768 px image. Line order and structure are lost.</td><td><span class="chip both">both</span></td><td>questionnaire-data-source.md "Slack summaries are generic" (related)</td></tr>
       <tr data-s="win" data-new="1"><td class="gid">G16</td><td>No <code>get_window_url()</code> on Windows, so <code>meetings.url</code> is always NULL there.</td><td><span class="chip win">Windows</span></td><td><span class="chip new">new</span></td></tr>
       <tr data-s="win" data-new="1"><td class="gid">G17</td><td>No mic-in-use signal on Windows. Discord calls are never detected (Discord is out of scope for now, 2026-10-08). Slack needs "huddle" in the title. A hidden call window ends the call after <code>CALL_END_GRACE_S</code> (120 s).</td><td><span class="chip win">Windows</span></td><td><span class="chip new">new</span></td></tr>
-      <tr data-s="both" data-new="1"><td class="gid">G18</td><td>System audio only from a device named "loopback" or "Stereo Mix". macOS has none by default: mic side only.</td><td><span class="chip both">both</span> (macOS always)</td><td><span class="chip new">new</span></td></tr>
       <tr data-s="both"><td class="gid">G21</td><td>With the same app on several displays, UI events without a point (typing, app switches, clipboard) go to the first frame of that app saved in the tick. Clicks go by position, other apps by name.</td><td><span class="chip both">both</span></td><td>ui-events.md "Same app on two displays"</td></tr>
       <tr data-s="mac"><td class="gid">G22</td><td>Permission prompts name Terminal or Python, not ScreenMind.</td><td><span class="chip mac">macOS</span></td><td>ui-events.md "macOS permission prompts name Terminal or Python"</td></tr>
       <tr data-s="both"><td class="gid">G23</td><td>The DB is plain text. Only screenshots can be encrypted, and that is off by default.</td><td><span class="chip both">both</span></td><td>ui-events.md "Encrypt the whole DB"</td></tr>
@@ -634,15 +629,14 @@ flowchart TB
       <tr data-s="mac"><td class="gid">G28</td><td>macOS may show a periodic "still recording your screen" reminder; not seen yet.</td><td><span class="chip mac">macOS</span></td><td>sck-capture.md "macOS still recording your screen reminder"</td></tr>
       <tr data-s="lnx"><td class="gid">G29</td><td>Wayland hides window positions: no window list, no active display, no per-display labels.</td><td><span class="chip lnx">Linux</span></td><td>multi-display-capture.md (Wayland note)</td></tr>
       <tr data-s="both"><td class="gid">G31</td><td>Typed text and clipboard are on by default (2026-10-08), with no PII detection before they are stored. Only the sensitive-data filter (cards, SSNs, API keys, JWTs, passwords) and the password-field rules apply.</td><td><span class="chip both">both</span></td><td>ui-events.md "PII detection before storing typed text and clipboard"</td></tr>
-      <tr data-s="win" data-new="1"><td class="gid">G33</td><td><code>performance_mode=balanced</code> starts llama-server with <code>-ngl 15</code>. On the Windows laptop (8 GB GPU) Gemma then runs mostly on the CPU: about 26 s per new frame, about 8 cores busy, and about half the frames are skipped as backlog while the user is active. Parked: the long-term aim is the lowest resource use.</td><td><span class="chip win">Windows</span></td><td>windows.md "G33" (parked)</td></tr>
       <tr data-s="win" data-new="1"><td class="gid">G34</td><td>Electron apps (Claude desktop): the Windows walker reads the web Document, and buttons inside it are kept ("Copy", "Fork from here", "Hide sidebar"). The type filter covers native controls only. Parked: telling labels from content is left to the LLM.</td><td><span class="chip win">Windows</span></td><td>windows.md "G34" (parked)</td></tr>
       <tr data-s="win" data-new="1"><td class="gid">G35</td><td>Windows shell surfaces are saved as activities: Task View, Task Switching, Start, Search, notifications. Their a11y text is only "Task Switching | DesktopWindowXamlSource". Parked until it hurts.</td><td><span class="chip win">Windows</span></td><td>windows.md "G35" (parked)</td></tr>
       <tr data-s="win" data-new="1"><td class="gid">G37</td><td>No overall time limit on UIA reads: UIA's 1 s timeout bounds one call, but a read is hundreds of calls, so a slow app could hold capture, the event loop or the recorder for minutes. Most likely cause of the 2026-10-07 freeze; the shared client across threads was ruled out. Fixed: UIA worker threads with a deadline per read, a watchdog and a shutdown deadline (<code>docs/plans/uptime.md</code>). Open: capture off the event loop, a process supervisor.</td><td><span class="chip win">Windows</span></td><td>windows.md "G37"</td></tr>
       <tr data-s="both" data-new="1"><td class="gid">G40</td><td><code>meetings.window_title</code> is the first matching window, front to back. For a Slack huddle found by mic use, that is whatever Slack window is in front, not the huddle (row 6 on 2026-10-07).</td><td><span class="chip both">both</span></td><td><span class="chip new">new</span></td></tr>
-      <tr data-s="both" data-new="1"><td class="gid">G41</td><td>One row across a restart only if the restart takes less than <code>CALL_END_GRACE_S</code> and the call is not transcribed. Two Meet rooms back to back within the grace stay one row: the room URL is read once.</td><td><span class="chip both">both</span></td><td><span class="chip new">new</span></td></tr>
+      <tr data-s="both" data-new="1"><td class="gid">G41</td><td>One row across a restart only if the restart takes less than <code>CALL_END_GRACE_S</code> and the old row has no transcript. Two Meet rooms back to back within the grace stay one row: the room URL is read once.</td><td><span class="chip both">both</span></td><td><span class="chip new">new</span></td></tr>
     </tbody>
   </table></div>
-  <p class="count">Closed while this map was written: G10 and G11 by <code>fa80d39</code> (Windows a11y reads the page, not the browser UI), G13 by <code>81277a8</code> (capture-time data kept on backlog skips), G20 by <code>399a565</code> (UI events on by default, live on the main instance since 2026-10-07). G2 (one SCK timeout disabled SCK until restart) by the SCK retry change on 2026-10-08. G38 (no log file without a console) and G39 (machines on different settings) by <code>c377a8c</code>: every start writes <code>screenmind.log</code>, the code defaults are the shared settings, the startup log and the e2e status header list what differs, and <code>.env</code> is read from the checkout root. Behaviour change: a dashboard value left at the default is no longer stored, so it follows later default changes. Each machine's existing <code>settings.json</code> needs a one-time cleanup (windows.md "Settings cleanup"). G32 (OCR read Latin only on Windows) by <code>a48f41c</code>: <code>OCR_LANGUAGES</code> defaults to <code>en,es,de,fr,ru</code> on every machine. G19 (no global hotkeys on macOS) went away with the hotkeys themselves in <code>57cf0dd</code>. Their ids stay reserved.</p>
+  <p class="count">Closed while this map was written: G10 and G11 by <code>fa80d39</code> (Windows a11y reads the page, not the browser UI), G13 by <code>81277a8</code> (capture-time data kept on backlog skips), G20 by <code>399a565</code> (UI events on by default, live on the main instance since 2026-10-07). G2 (one SCK timeout disabled SCK until restart) by the SCK retry change on 2026-10-08. G38 (no log file without a console) and G39 (machines on different settings) by <code>c377a8c</code>: every start writes <code>screenmind.log</code>, the code defaults are the shared settings, the startup log and the e2e status header list what differs, and <code>.env</code> is read from the checkout root. Behaviour change: a dashboard value left at the default is no longer stored, so it follows later default changes. Each machine's existing <code>settings.json</code> needs a one-time cleanup (windows.md "Settings cleanup"). G32 (OCR read Latin only on Windows) by <code>a48f41c</code>: <code>OCR_LANGUAGES</code> defaults to <code>en,es,de,fr,ru</code> on every machine. G19 (no global hotkeys on macOS) went away with the hotkeys themselves in <code>57cf0dd</code>. G15 (Gemma got a bag of words), G18 (no system audio for transcripts) and G33 (<code>-ngl 15</code> on the Windows laptop) are obsolete: Gemma removed 2026-10-08 (<code>069c137</code>). Their ids stay reserved.</p>
 </section>
 
 <!-- 9 -->
@@ -654,7 +648,7 @@ flowchart TB
     <tbody>
       <tr><td>ui-events.md "Windows: no browser URL": no <code>get_browser_url()</code>, so <code>active_url</code> and <code>ui_events.url</code> are NULL on Windows.</td><td><code>WindowsAdapter.get_browser_url()</code> exists since <code>16f933a</code> (UIA <code>Document</code> value). Only <code>meetings.url</code> is missing (G16).</td></tr>
       <tr><td>setup-ocr-and-upstream-prs.md "OCR known limits": EasyOCR <code>canvas_size</code>, <code>OCR_CANVAS_SIZE</code>, <code>_merge_readings</code>, extra Readers.</td><td>RapidOCR since <code>4cb9030</code>. <code>OCR_CANVAS_SIZE</code> and <code>_merge_readings</code> do not exist. One recognizer per frame (G14).</td></tr>
-      <tr><td>docs/plans/ui-events.md Windows notes: a11y capped at 20,000 chars.</td><td>300,000 chars on both OSes since <code>87b058d</code>. Only the Gemma prompt is trimmed (8,000).</td></tr>
+      <tr><td>docs/plans/ui-events.md Windows notes: a11y capped at 20,000 chars.</td><td>300,000 chars on both OSes since <code>87b058d</code>.</td></tr>
     </tbody>
   </table></div>
 </section>
@@ -663,7 +657,7 @@ flowchart TB
 <section id="update">
   <h2><span class="n">10</span>How to update</h2>
   <ul>
-    <li><b>Same-commit rule.</b> A change to capture code (<code>screenmind/capture/</code>, <code>capture_worker.py</code>, <code>audio_worker.py</code>, <code>call_detection.py</code>, <code>a11y_extractor.py</code>, <code>ocr.py</code>, what <code>analyzer.py</code> sends to Gemma), a platform adapter (<code>screenmind/platform_support/</code>), a privacy filter or a DB migration updates <code>docs/architecture/capture.md</code> in the same commit.</li>
+    <li><b>Same-commit rule.</b> A change to capture code (<code>screenmind/capture/</code>, <code>capture_worker.py</code>, <code>audio_worker.py</code>, <code>call_detection.py</code>, <code>a11y_extractor.py</code>, <code>ocr.py</code>, <code>labels.py</code>), a platform adapter (<code>screenmind/platform_support/</code>), a privacy filter or a DB migration updates <code>docs/architecture/capture.md</code> in the same commit.</li>
     <li>Update the matrix row, the detail section and the gap table. Close a gap by deleting its row and naming the commit. Keep gap ids stable; don't reuse a deleted id.</li>
     <li>A new migration: add its columns to section 5 with <code>(vN)</code> and update "the latest is vN".</li>
     <li>Mermaid: keep labels in double quotes and check the diagram renders.</li>

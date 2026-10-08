@@ -213,6 +213,12 @@ class TestLookupKnownCategory:
     def test_zoom(self):
         assert _lookup_known_category("zoom") == "meeting"
 
+    def test_claude_desktop_is_coding(self):
+        assert _lookup_known_category("Claude") == "coding"
+
+    def test_jira_title_in_browser(self):
+        assert _site_category(None, "Jira") == "writing"
+
     def test_greedy_prefix_not_matches_notion(self):
         """'not' should NOT match 'notion' — too short for reverse prefix."""
         assert _lookup_known_category("not") is None

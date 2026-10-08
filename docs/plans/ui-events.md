@@ -9,7 +9,7 @@ Record what the user does, not only what the screen shows. We listen for clicks,
 We get two things from this:
 
 1. **Better captures.** Today `CaptureWorker.run()` polls every 5s and forces a capture every `capture_interval` (40s by default). With events, we can capture right after an app switch, a click, or a pause in typing. Those are the moments when something happened.
-2. **Better context for Gemma.** Each frame gets a short "what the user did" block, for example: `clicked button "Send" in Slack`, `typed "fix login bug" in Linear title field`. Chat and search can then answer "what did I send to Alex?" from typed text, not only from OCR.
+2. **Better context for Gemma.** Each frame gets a short "what the user did" block, for example: `clicked button "Send" in Slack`, `typed "fix login bug" in Linear title field`. Chat and search can then answer "what did I send to Alex?" from typed text, not only from OCR. (Update 2026-10-08: Gemma was removed, branch `claude/practical-dijkstra-f83cbe`. `user_actions` is still stored, searched and exported, but no prompt uses it.)
 
 Linux is out of scope. Wayland blocks global input hooks, and X11 would need a third backend.
 
@@ -154,6 +154,8 @@ Limits:
 
 ### Gemma context
 
+Update 2026-10-08: Gemma was removed (branch `claude/practical-dijkstra-f83cbe`). This step no longer applies. `user_actions` is still filled in.
+
 In `AnalysisWorker`, before calling `analyze_fn`, load the events attached to the activity. Turn them into at most 10 short lines:
 
 ```
@@ -211,7 +213,7 @@ Each phase can ship on its own.
 - `user_actions` hint in the analyzer prompt
 - `GET /api/activity/{id}` returns events, Actions list in the UI
 - FTS indexing of typed and clipboard text
-- Done when: an activity shows its actions, and the Gemma summary mentions them.
+- Done when: an activity shows its actions, and the Gemma summary mentions them. (Update 2026-10-08: the Gemma part no longer applies; Gemma was removed.)
 
 **Phase 3: event-driven captures**
 - `request_capture()` and the three triggers, with the 3s limit
@@ -273,7 +275,7 @@ Checked end to end on macOS with a separate instance (port 7778, separate data d
 - `[event:click]` captures fire.
 - The timeline shows the Actions list.
 - The Settings toggle starts and stops the recorder.
-- Shutdown removes the tap and does not stop a llama-server it did not start.
+- Shutdown removes the tap and does not stop a llama-server it did not start. (Update 2026-10-08: ScreenMind no longer starts or uses llama-server.)
 
 ## Windows implementation notes (phase 4)
 

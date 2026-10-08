@@ -26,7 +26,7 @@ Since `c377a8c` (G39) the code defaults are the shared settings, and the dashboa
 The user's decisions of 2026-10-08, per key:
 - `capture_interval: 10`: the code default since 2026-10-08, so the key has no effect once the main instance runs that code, and can go then.
 - `ui_events_types: "click,app_switch,text,clipboard"`: the code default since 2026-10-08 (the user's call on G31), so this key too can go once the main instance runs that code. No Mac step. Typed text and clipboard stay on, with the sensitive-data filter and password redaction. G31 stays open.
-- `performance_mode`: Windows follows the default (`balanced`). The Mac keeps `maximum` on purpose: with `balanced`, Apple Silicon ran Gemma on about 4 CPU cores and took 10.5 s per frame against 6.2 s on the GPU. This is the one key where the machines differ.
+- `performance_mode`: Windows follows the default (`balanced`). The Mac keeps `maximum` on purpose: with `balanced`, Apple Silicon ran Gemma on about 4 CPU cores and took 10.5 s per frame against 6.2 s on the GPU. This is the one key where the machines differ. (Update 2026-10-08: Gemma was removed, branch `claude/practical-dijkstra-f83cbe`. `performance_mode`, `context_window`, `kv_cache_quant`, `flash_attention`, `analysis_mode`, `defer_analysis`, `meeting_transcription`, `active_model` and `model_variants` are ignored now and can go from both files.)
 
 Windows `~/.screenmind/settings.json`, whole file:
 
@@ -45,7 +45,7 @@ What that drops, by key:
 - Keys of removed features, ignored since `cd95561`: `break_reminder_minutes`, `obsidian_*`, `notion_*`, `webhook_*`, `agents_*`, `auto_bookmark*`, `smart_notifications`, `distraction_minutes`, `dashboard_lock_timeout`, `*_hotkey`.
 - Kept: `setup_complete` and `capture_paused` are state, not settings.
 
-Mac `~/.screenmind/settings.json` gets the same file without `setup_complete` (the Mac file never had it). It keeps `performance_mode: maximum` and drops `capture_active_monitor: true` (a leftover from a 2026-10-06 test), `model_variants` and the old `sensitive_filter_types`. In the checkout's `.env`:
+Mac `~/.screenmind/settings.json` gets the same file without `setup_complete` (the Mac file never had it). It keeps `performance_mode: maximum` (update 2026-10-08: ignored now, can go too) and drops `capture_active_monitor: true` (a leftover from a 2026-10-06 test), `model_variants` and the old `sensitive_filter_types`. In the checkout's `.env`:
 - `OCR_LANGUAGES`: drop it once the G32 default `en,es,de,fr,ru` is on `custom`.
 - `CAPTURE_ON_START=true`: drop it. Both machines then restore the last capture state (`capture_paused`). The Windows laptop has never had it.
 - Since `c377a8c` the `.env` is read from the checkout root, so a start at login (LaunchAgent, cwd `/`) now loads it too. Until now such a start ran without it.
@@ -77,6 +77,8 @@ Refs: `platform_support/windows.py` `UiaWorker`, `run_uia()`; `screenmind/watchd
 ### dev-instance.sh crashes on Windows without a console
 Status: fixed 2026-10-08 (`c5e2598`)
 
+Update 2026-10-08: obsolete. Gemma and llama-server were removed (branch `claude/practical-dijkstra-f83cbe`), so `setup_llama.py` and `LLAMA_SERVER_SHARED` are gone.
+
 Started with stdout redirected (from a Claude session, a scheduler, a pipe), `setup_llama.ensure_llama_server()` prints box-drawing characters to a cp1252 stdout and dies with `UnicodeEncodeError`. When stdin looks like a TTY, it offers to download llama-server instead, which a dev instance must never do (it shares the main one, `LLAMA_SERVER_SHARED`). Workaround (G37 session, 2026-10-08): `PYTHONIOENCODING=utf-8 ... scripts/dev-instance.sh </dev/null`. Fix: plain ASCII or a UTF-8-safe writer for that output, and no interactive prompt when `llama_server_shared` is set.
 
 Fixed: with `llama_server_shared`, `ensure_llama_server()` only logs and returns: no lookup, prompt or download, and `main()` adopts the shared server (before, a dev instance logged "Starting without Gemma 4" with it up). `setup_llama` prints ASCII, and `run()` sets stdout to `errors="backslashreplace"`. Live: `scripts/dev-instance.sh </dev/null > dev.log 2>&1` without `PYTHONIOENCODING` starts and analyzes. The cause of the prompt: a stdin of NUL (`</dev/null`) is a TTY to `isatty()` on Windows.
@@ -86,7 +88,7 @@ Refs: `screenmind/setup_llama.py` `ensure_llama_server()`, `scripts/dev-instance
 ## Parked
 
 ### G33: Gemma runs mostly on the CPU here
-Status: idea (parked, 2026-10-08)
+Status: closed, obsolete (2026-10-08). Gemma and llama-server were removed (branch `claude/practical-dijkstra-f83cbe`), so there is nothing to tune.
 
 `performance_mode=balanced` gives `-ngl 15`. On this laptop: ~26 s per new frame, ~8 cores busy, `llama-server` 2.5 GB resident and 7.5 GB committed, and about half the frames skipped as backlog while active. `maximum` (`-ngl 99`) would probably fit in 8 GB, but parked under the lowest-resource principle; per-frame Gemma is going to be reworked anyway.
 

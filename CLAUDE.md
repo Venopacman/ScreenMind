@@ -2,7 +2,7 @@
 
 ## Principle: lowest resource use
 
-ScreenMind runs all day on the user's machines (a Mac and a Windows laptop). Aim for the lowest CPU, RAM, GPU and battery use in the long term. Prefer changes that make it lighter. Don't make it heavier for better per-frame analysis (for example more GPU layers for Gemma); park such ideas in the backlog instead. The budget is in `docs/plans/packaging.md` ("Resource budget").
+ScreenMind runs all day on the user's machines (a Mac and a Windows laptop). Aim for the lowest CPU, RAM, GPU and battery use in the long term. Prefer changes that make it lighter. Don't make it heavier for better per-frame analysis (for example a local model per frame; Gemma was removed for this reason); park such ideas in the backlog instead. The budget is in `docs/plans/packaging.md` ("Resource budget").
 
 ## Main instance vs worktrees
 
@@ -10,7 +10,6 @@ The user's everyday ScreenMind runs from the main checkout (`/Users/pavel/projec
 
 - dashboard on port 7777
 - data in `~/.screenmind` (DB, screenshots, `settings.json`)
-- shared `llama-server` on port 5809
 
 Do not stop, restart or reconfigure it unless the user asks. That includes `POST /api/settings` on port 7777.
 
@@ -35,15 +34,13 @@ It uses the worktree's `.venv` if there is one, else the main checkout's.
 - `scripts/dev-instance.sh info` prints the port and data dir.
 - `scripts/dev-instance.sh reset` deletes the worktree's data for a fresh start.
 - Stop it with Ctrl+C or `kill -INT <pid>`. Shutdown takes up to a minute.
-- Stop it when you are done. It captures the screen and uses the shared `llama-server`.
-- It never starts or stops `llama-server` (the script sets `LLAMA_SERVER_SHARED=1`). If the main instance is down, the dev instance captures without analysis until the main instance is back.
+- Stop it when you are done. It captures the screen and runs OCR.
 
 ## What is still shared
 
 - The main checkout's `.venv` is the main instance's environment. Never run `uv sync`, `uv pip` or `pip` against it.
 - To add a dependency, run `uv add <package>` in your worktree. It updates `pyproject.toml`, `uv.lock` and your worktree's own `.venv`. Commit both files. Tell the user when a lock change is merged, because the main `.venv` then needs a `uv sync` and a restart.
-- Models in `~/.screenmind/models`.
-- `llama-server` on port 5809. The dev instance reuses it and never stops it. Don't kill it.
+- OCR models in `~/.screenmind/models/ocr`.
 
 ## Tests
 

@@ -30,18 +30,6 @@ from screenmind.workers.daemon_executor import DaemonExecutor
 
 logger = logging.getLogger("screenmind.workers.analysis_worker")
 
-# Regex for extracting URLs from OCR/A11y text
-_URL_RE = re.compile(
-    r'https?://[^\s<>"\']+'   # Standard http(s) URLs
-    r'|(?<![\w@./])'
-    r'(?:www\.)[^\s<>"\']+'    # www. prefixed URLs
-    , re.IGNORECASE
-)
-# Common noise URLs that aren't the "active page"
-_URL_NOISE = {'http://localhost', 'http://127.0.0.1', 'https://fonts.googleapis.com',
-              'https://cdn.', 'http://schemas.', 'chrome-extension://'}
-
-
 # The Windows adapter leaves window chrome out of a11y text by element type,
 # in any UI language. The macOS and Linux walkers do not, so there English
 # chrome words still mark window chrome (see _a11y_is_content).
@@ -122,35 +110,6 @@ def _a11y_is_content(text: Optional[str], window_title: Optional[str] = None,
                 continue
         content.append(line)
     return sum(len(l) for l in content) >= _A11Y_MIN_CONTENT_CHARS
-
-
-def _extract_url(text: str) -> str | None:
-    """Extract the most likely active-page URL from OCR/A11y text.
-
-    Strategy: find all URLs, filter noise, pick the first "real" one.
-    Address bar text usually appears near the top of OCR output.
-    """
-    urls = _extract_all_urls(text)
-    return urls[0] if urls else None
-
-
-def _extract_all_urls(text: str) -> list[str]:
-    """Extract all unique, non-noise URLs from OCR/A11y text."""
-    if not text:
-        return []
-    matches = _URL_RE.findall(text)
-    seen = set()
-    result = []
-    for url in matches:
-        url = url.rstrip('.,;:)]\'"')  # Strip trailing punctuation
-        if len(url) < 10:
-            continue
-        if any(url.startswith(n) for n in _URL_NOISE):
-            continue
-        if url.lower() not in seen:
-            seen.add(url.lower())
-            result.append(url)
-    return result
 
 
 class AnalysisWorker:
