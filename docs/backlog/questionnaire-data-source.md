@@ -17,20 +17,13 @@ Measured on live frames, morning vs evening:
 
 ## Tools
 
-- **Replay benchmark, `bench/replay.py`.** On branch `claude/questionnaire-screenshots-extraction-1904e8` (`d563d8b`, `a477a15`). **Not merged into custom, not pushed.**
+- **Replay benchmark, `bench/replay.py`.** On `custom`; see `bench/README.md`.
   - It freezes real frames as fixtures and replays them through `AnalysisWorker._process` against a throwaway data dir, then checks the stored row.
   - Fixtures and `scenarios.yaml` are in `~/.screenmind-bench/`. They hold private screen content, so they stay outside the repo.
   - Last score on `custom` (`752b04c`): 8 pass, 3 known gaps, 1 fail.
 - **Data-quality scan, `~/.screenmind-bench/scan/scan.py`.** It reads `~/.screenmind` read-only, with snapshots and a running log (`notes.md`) in the same folder. It is not in the repo and not scheduled.
 
 ## Items
-
-### Merge the replay benchmark into custom
-Status: open (waiting for the user's decision)
-
-`bench/` exists only on the session branch. Without it on `custom`, other sessions can't check capture or analysis changes against real frames. It may also need a small README.
-
-Refs: branch `claude/questionnaire-screenshots-extraction-1904e8`, `bench/replay.py`, `bench/scenarios.example.yaml`.
 
 ### Do not backfill rows from before 55a9198
 Status: open (rule for the feed design)
