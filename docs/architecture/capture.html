@@ -428,7 +428,7 @@ flowchart TB
     <li>Default <code>en,es,de,fr,ru</code> on every machine, not taken from the OS languages, so the Mac and Windows read the same text without a <code>.env</code>. It gives the East Slavic model (<code>eslav</code>): the English model's characters (é, ü, ñ, ç included) plus Cyrillic, at the same cost per frame as <code>en</code>.</li>
     <li>Readings under 0.5 confidence are dropped. <code>_fix_lookalikes()</code> makes mixed Cyrillic/Latin words one script.</li>
     <li>Models (~15 MB) in <code>~/.screenmind/models/ocr</code>.</li>
-    <li>onnxruntime: memory pattern and arena off, <code>OCR_THREADS</code> threads (default 2). Less memory, about 40% less CPU per frame.</li>
+    <li>onnxruntime: memory pattern off, <code>OCR_THREADS</code> threads (default 1), memory arena on and given back after each run. Less memory, and about half the CPU per frame of 2 threads without the arena.</li>
     <li>Runs in the analysis worker. Skipped when a11y text is real content, and on "identical" cache hits.</li>
     <li>Output: text and boxes (<code>ocr_boxes</code> JSON). <code>organize_ocr_text()</code> groups boxes into regions (<code>organized_text</code>).</li>
   </ul>

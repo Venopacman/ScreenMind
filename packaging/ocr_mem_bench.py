@@ -8,8 +8,9 @@ working set (USS) on Windows.
     uv run --with psutil python packaging/ocr_mem_bench.py tuned
     uv run --with psutil python packaging/ocr_mem_bench.py default
 
-"tuned" is the app as it is (OCR_THREADS, memory pattern off). "default" is
-onnxruntime's defaults as before 2026-10-07: all cores, memory pattern on.
+"tuned" is the app as it is (OCR_THREADS, memory pattern off, arena given back
+after each run). "default" is onnxruntime's defaults as before 2026-10-07: all
+cores, memory pattern on, arena off.
 
 Options: --frames N (default 20), --dir PATH (default: the newest day folder in
 ~/.screenmind/screenshots), --dump FILE (write text and boxes per frame as JSON,
@@ -64,9 +65,11 @@ def main() -> None:
         def untuned(threads):
             so = tuned(threads)
             so.enable_mem_pattern = True
+            so.enable_cpu_mem_arena = False
             return so
 
         ocr_mod._session_options = untuned
+        ocr_mod._run_options = lambda: None  # arena shrinkage needs the arena
 
     start = memory_mb()
     ocr = OCRExtractor()

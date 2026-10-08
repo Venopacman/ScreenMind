@@ -198,7 +198,7 @@ class TestOnnxOptions:
     def test_session_options(self):
         so = ocr._session_options(2)
         assert so.enable_mem_pattern is False
-        assert so.enable_cpu_mem_arena is False
+        assert so.enable_cpu_mem_arena is True  # given back after each run
         assert so.intra_op_num_threads == 2
         assert ocr._session_options(0).intra_op_num_threads == 0  # onnxruntime picks
 
@@ -216,6 +216,9 @@ class TestOnnxOptions:
 
             def get_providers(self):
                 return ["CPUExecutionProvider"]
+
+            def run(self, output_names, input_feed, run_options=None):
+                return output_names, input_feed, run_options
 
         def part(name):
             return types.SimpleNamespace(session=types.SimpleNamespace(
@@ -240,6 +243,9 @@ class TestOnnxOptions:
             assert s.options.enable_mem_pattern is False
             assert s.options.intra_op_num_threads == 3
             assert s.providers == ["CPUExecutionProvider"]
+            # RapidOCR runs without run options; ours free the arena after each run.
+            _, _, ro = s.run(["out"], {"x": 1})
+            assert ro.get_run_config_entry("memory.enable_memory_arena_shrinkage") == "cpu:0"
 
     def test_tuning_failure_keeps_ocr_working(self, fake_rapidocr, monkeypatch):
         # The fake engine has no text_det etc., so tuning fails.

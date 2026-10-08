@@ -93,20 +93,52 @@ def _session_options(threads: int):
     """onnxruntime options for the OCR models, tuned for memory and CPU.
 
     The memory pattern plans one big buffer per input shape and keeps it.
-    Screen frames give many shapes, so that memory piles up. The memory arena
-    is off too (RapidOCR's default). See docs/plans/packaging.md, "Resource
-    budget", for the measured saving.
+    Screen frames give many shapes, so that memory piles up. See
+    docs/plans/packaging.md, "Resource budget", for the measured saving.
+
+    The memory arena is on, but every run gives it back (_run_options), so
+    memory stays at the level of one run. Without the arena, each operator
+    allocates and frees its own buffers. On Windows the big ones go straight
+    back to the OS, and the next operator page-faults them in again: about
+    2 million page faults and over 1 CPU-s of kernel time per frame.
     """
     import onnxruntime as ort
 
     so = ort.SessionOptions()
     so.log_severity_level = 4  # as RapidOCR
     so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    so.enable_cpu_mem_arena = False
+    so.enable_cpu_mem_arena = True
     so.enable_mem_pattern = False
     if threads > 0:
         so.intra_op_num_threads = threads
     return so
+
+
+def _run_options():
+    """Run options that free the arena's memory after each model run."""
+    import onnxruntime as ort
+
+    ro = ort.RunOptions()
+    ro.add_run_config_entry("memory.enable_memory_arena_shrinkage", "cpu:0")
+    return ro
+
+
+class _ShrinkingSession:
+    """An onnxruntime session whose runs use _run_options() by default.
+
+    RapidOCR calls session.run(names, feed) without run options; everything
+    else goes to the wrapped session.
+    """
+
+    def __init__(self, session, run_options):
+        self._session = session
+        self._run_options = run_options
+
+    def run(self, output_names, input_feed, run_options=None):
+        return self._session.run(output_names, input_feed, run_options or self._run_options)
+
+    def __getattr__(self, name):
+        return getattr(self._session, name)
 
 
 def _tune_sessions(engine, threads: int) -> None:
@@ -120,14 +152,15 @@ def _tune_sessions(engine, threads: int) -> None:
     """
     import onnxruntime as ort
 
+    run_options = _run_options()
     for part in (engine.text_det, engine.text_cls, engine.text_rec):
         wrapper = part.session  # RapidOCR's OrtInferSession
         old = wrapper.session
-        wrapper.session = ort.InferenceSession(
+        wrapper.session = _ShrinkingSession(ort.InferenceSession(
             old._model_path,
             sess_options=_session_options(threads),
             providers=old.get_providers(),
-        )
+        ), run_options)
 
 
 def _ocr_models_dir():

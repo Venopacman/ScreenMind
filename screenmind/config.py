@@ -276,10 +276,11 @@ class Settings(BaseSettings):
                     "(ru/uk/be: East Slavic, es/de/fr...: Latin). Every script model also reads English.",
     )
     ocr_threads: int = Field(
-        default=2,
+        default=1,
         ge=0,
-        description="CPU threads per OCR model run. 2 uses about 40% less CPU per frame than "
-                    "all cores, but each frame takes longer. 0 = onnxruntime's default (all cores).",
+        description="CPU threads per OCR model run. 1 uses the least CPU per frame; more threads "
+                    "finish a frame sooner but cost more CPU in total (Windows laptop: 2 threads "
+                    "+50% CPU for 25% less wait). 0 = onnxruntime's default (all cores).",
     )
 
     # ── Privacy & Security ────────────────────────────────────────────────
