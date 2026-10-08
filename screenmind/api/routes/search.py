@@ -9,6 +9,17 @@ from screenmind.api.dependencies import db
 router = APIRouter(prefix="/api", tags=["search"])
 
 
+def _snippet(text: str, q: str, width: int = 80) -> str:
+    """The part of text around the first match of q, or "" when q is not in it."""
+    idx = text.lower().find(q.lower())
+    if idx < 0:
+        return ""
+    start = max(0, idx - width)
+    end = min(len(text), idx + len(q) + width)
+    return (("..." if start > 0 else "") + " ".join(text[start:end].split())
+            + ("..." if end < len(text) else ""))
+
+
 @router.get("/search")
 async def search_activities(
     q: str = Query(..., description="Search query"),
@@ -41,8 +52,9 @@ async def search_activities(
 
         fts_rows = conn.execute(
             f"""
-            SELECT a.id, a.timestamp, a.app_name, a.category, a.summary,
-                   a.details, a.screenshot_path, a.mood, fts.rank
+            SELECT a.id, a.timestamp, COALESCE(a.app_name, a.detected_app) AS app_name,
+                   a.category, a.summary, a.window_title, a.ocr_text, a.user_actions,
+                   fts.rank
             FROM activities_fts fts
             JOIN activities a ON a.id = fts.rowid
             WHERE activities_fts MATCH ? AND a.status = 'ok'{fts_date_where}
@@ -57,6 +69,11 @@ async def search_activities(
             # FTS5 rank is negative (closer to 0 = better match)
             # Convert to 0.3-0.7 range based on position in results
             row_dict.pop("rank", None)
+            # Where the words matched: screen text first, then the actions
+            ocr_text = row_dict.pop("ocr_text", None) or ""
+            user_actions = row_dict.pop("user_actions", None) or ""
+            row_dict["ocr_snippet"] = (_snippet(ocr_text, q) or _snippet(user_actions, q)
+                                       or " ".join(ocr_text[:160].split()))
             row_dict["screenshot_url"] = f"/api/screenshot/{row_dict['id']}"
             row_dict["relevance_score"] = round(0.7 - (i * 0.4 / max(len(fts_rows) - 1, 1)), 3)
             row_dict["match_type"] = "keyword"

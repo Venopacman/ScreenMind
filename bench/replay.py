@@ -41,7 +41,6 @@ sys.path.insert(0, str(REPO))
 BENCH = Path(os.environ.get("SCREENMIND_BENCH_DIR", "~/.screenmind-bench")).expanduser()
 SOURCE_DATA = Path("~/.screenmind").expanduser()
 
-GENERIC = re.compile(r"\b(is interacting with|likely|is working (on|within))\b", re.I)
 BROWSER_WORDS = {"chrome", "chromium", "safari", "firefox", "edge", "brave", "arc", "opera", "vivaldi"}
 
 
@@ -204,9 +203,8 @@ def check(row, expect: dict, elapsed: float) -> list:
     if row is None:
         return [("row_written", False, "no activity row")]
     out = []
-    summary = f"{row.get('summary') or ''} {row.get('details') or ''}"
     text = row.get("ocr_text") or ""
-    low_sum, low_text = summary.lower(), text.lower()
+    low_text = text.lower()
 
     def add(name, ok, detail):
         out.append((name, bool(ok), detail))
@@ -220,14 +218,6 @@ def check(row, expect: dict, elapsed: float) -> list:
         add("category_in", row.get("category") in expect["category_in"], row.get("category"))
     if "category_not_in" in expect:
         add("category_not_in", row.get("category") not in expect["category_not_in"], row.get("category"))
-    if "summary_any" in expect:
-        hits = [k for k in expect["summary_any"] if k.lower() in low_sum]
-        add("summary_any", hits, hits or (row.get("summary") or "")[:80])
-    if "summary_none" in expect:
-        bad = [k for k in expect["summary_none"] if k.lower() in low_sum]
-        add("summary_none", not bad, bad or "clean")
-    if expect.get("summary_not_generic"):
-        add("summary_not_generic", not GENERIC.search(row.get("summary") or ""), (row.get("summary") or "")[:80])
     if "text_max_chars" in expect:
         add("text_max_chars", len(text) <= expect["text_max_chars"], len(text))
     if "text_min_chars" in expect:
@@ -276,7 +266,7 @@ async def _run(scenarios: dict, only: list, repeat: int):
                 "gap": spec.get("known_gap"),
                 "checks": [{"check": c, "ok": ok, "got": d} for c, ok, d in checks],
                 "row": {k: (row or {}).get(k) for k in
-                        ("app_name", "category", "summary", "active_url", "analysis_method")}
+                        ("app_name", "category", "window_title", "active_url", "analysis_method")}
                        | {"text_chars": len((row or {}).get("ocr_text") or ""),
                           "text_word_ratio": _word_ratio((row or {}).get("ocr_text")),
                           "text_source": _text_source(row or {})},
@@ -293,7 +283,7 @@ def _print_result(r):
     failed = [c for c in r["checks"] if not c["ok"]]
     status = "PASS" if not failed else ("GAP " if r["gap"] else "FAIL")
     _say(f"{status} {r['name']} (run {r['run']}, {r['seconds']}s)  "
-          f"[{r['row']['category']}] {(r['row']['summary'] or '')[:90]}")
+          f"[{r['row']['category']}] {r['row']['app_name']}: {(r['row']['window_title'] or '')[:80]}")
     for c in failed:
         _say(f"       x {c['check']}: got {c['got']}")
     if failed and r["gap"]:
@@ -306,12 +296,10 @@ def _summary(results):
         return {}
     passed = sum(all(c["ok"] for c in r["checks"]) for r in done)
     gaps = sum(1 for r in done if r["gap"] and not all(c["ok"] for c in r["checks"]))
-    generic = sum(bool(GENERIC.search(r["row"]["summary"] or "")) for r in done)
     secs = sorted(r["seconds"] for r in done)
     return {
         "runs": len(done), "passed": passed, "known_gaps": gaps,
         "failed": len(done) - passed - gaps,
-        "generic_summary_share": round(generic / len(done), 2),
         "median_seconds": secs[len(secs) // 2],
         "max_text_chars": max(r["row"]["text_chars"] for r in done),
     }
@@ -344,7 +332,7 @@ def main():
     f.add_argument("--force", action="store_true")
     r = sub.add_parser("run", help="replay all scenarios and check expectations")
     r.add_argument("--only", nargs="*", default=[])
-    r.add_argument("--repeat", type=int, default=1, help="runs per scenario, to see flaky output")
+    r.add_argument("--repeat", type=int, default=1, help="runs per scenario, to see time variance")
     a = p.parse_args()
     if a.cmd == "freeze":
         freeze(a.activity_id, a.name, a.db, a.force)

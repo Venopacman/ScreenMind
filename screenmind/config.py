@@ -12,7 +12,7 @@ import sys
 import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import List, Optional
 
 from pydantic_settings import BaseSettings
 from pydantic import Field, PrivateAttr, ValidationError
@@ -80,14 +80,13 @@ _setup_logging()
 logger = logging.getLogger("screenmind.config")
 
 # Settings keys that can be overridden at runtime (from dashboard or settings.json)
+# Keys of removed settings (active_model, analysis_mode, performance_mode...)
+# in an old settings.json are ignored.
 _ALLOWED_OVERRIDES = {
-    "capture_interval", "performance_mode",
-    "context_window", "kv_cache_quant", "flash_attention",
-    "analysis_mode",
+    "capture_interval",
     "auto_pause_heavy_apps", "heavy_apps",
-    "defer_analysis", "meeting_transcription",
     "meeting_apps", "call_end_grace_s",
-    "active_model", "model_variants", "retention_days",
+    "retention_days",
     "sensitive_filter_enabled", "sensitive_filter_types",
     "encryption_enabled",
     "capture_active_monitor",
@@ -164,28 +163,6 @@ class Settings(BaseSettings):
         description="Always start capturing on launch, ignoring the persisted capture_paused state.",
     )
 
-    # ── Model ────────────────────────────────────────────────────────────
-    active_model: str = Field(
-        default="gemma-4-e2b",
-        description="Active model key for llama-server",
-    )
-    model_variants: dict = Field(
-        default_factory=dict,
-        description="Per-model variant selection, e.g. {'gemma-4-e2b': 'Q8_0'}",
-    )
-    llama_server_host: str = Field(
-        default="http://127.0.0.1:5809",
-        description="llama-server URL",
-    )
-    llama_server_port: int = Field(
-        default=5809,
-        description="llama-server port",
-    )
-    llama_server_shared: bool = Field(
-        default=False,
-        description="Another process owns llama-server: use it if it runs, never start or stop it. "
-                    "Set by scripts/dev-instance.sh.",
-    )
     # ── Privacy ──────────────────────────────────────────────────────────
     blocked_apps: str = Field(
         default="",
@@ -193,28 +170,6 @@ class Settings(BaseSettings):
     )
 
     # ── Resource Management ──────────────────────────────────────────────
-    performance_mode: Literal["minimal", "balanced", "maximum"] = Field(
-        default="balanced",
-        description="'minimal' (CPU-heavy, saves VRAM), 'balanced' (default), 'maximum' (full GPU)",
-    )
-    context_window: int = Field(
-        default=6144,
-        description="Context window size for llama-server (-c flag). Lower saves VRAM.",
-        ge=2048,
-        le=16384,
-    )
-    analysis_mode: Literal["fast", "balanced", "merged"] = Field(
-        default="fast",
-        description="'fast' (~12s, no thinking), 'balanced' (~40s, thinking), or 'merged' (~76s, thinking+layout)",
-    )
-    kv_cache_quant: bool = Field(
-        default=False,
-        description="Enable KV cache quantization (saves ~200MB VRAM but adds ~10s per inference)",
-    )
-    flash_attention: bool = Field(
-        default=True,
-        description="Enable flash attention (faster, less VRAM). Disable if GPU doesn't support it.",
-    )
     auto_pause_heavy_apps: bool = Field(
         default=True,
         description="Auto-pause capture when heavy apps (games, editors) are in foreground",
@@ -223,16 +178,8 @@ class Settings(BaseSettings):
         default="game,valorant,fortnite,minecraft,unity,unreal,premiere,resolve,blender,obs,davinci",
         description="Comma-separated substrings to match against foreground app names",
     )
-    defer_analysis: bool = Field(
-        default=False,
-        description="When ON, queue screenshots and analyze only when idle (60s no new captures)",
-    )
 
-    # ── Meeting Transcription ────────────────────────────────────────────
-    meeting_transcription: bool = Field(
-        default=False,
-        description="Transcribe and summarize detected calls (calls are tracked either way)",
-    )
+    # ── Call tracking ────────────────────────────────────────────────────
     meeting_apps: str = Field(
         default="zoom,teams,meet,webex,slack,discord",
         description="Call apps to detect. Built-in rules for zoom, teams, meet, webex, slack, "
@@ -320,7 +267,7 @@ class Settings(BaseSettings):
         "env_file_encoding": "utf-8",
         "case_sensitive": False,
         # A .env can still hold keys of removed features (BOOKMARK_HOTKEY,
-        # WORKSPACE_DIRS, GEMMA_MODE...). Ignore them instead of failing.
+        # WORKSPACE_DIRS, GEMMA_MODE, ANALYSIS_MODE, LLAMA_SERVER_HOST...). Ignore them instead of failing.
         "extra": "ignore",
         "validate_assignment": True,
     }
@@ -383,12 +330,6 @@ class Settings(BaseSettings):
     def tray_icon_on(self) -> bool:
         """Whether to show the tray icon (Windows only; see tray_icon)."""
         return is_frozen() if self.tray_icon is None else self.tray_icon
-
-    @property
-    def num_gpu_layers(self) -> int:
-        """Map performance_mode to GPU layers for llama-server (-ngl flag)."""
-        mode_map = {"minimal": 0, "balanced": 15, "maximum": 99}
-        return mode_map.get(self.performance_mode, 15)
 
     def model_post_init(self, __context):
         self._base = {k: getattr(self, k) for k in _ALLOWED_OVERRIDES if hasattr(self, k)}

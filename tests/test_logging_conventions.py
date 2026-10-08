@@ -26,7 +26,7 @@ def _source_files():
 def test_no_bare_print_in_source():
     """No bare print() calls in source (all output via logging)."""
     # Allowed files: setup scripts
-    EXCLUDED = {'setup_llama.py', 'setup_wizard.py'}
+    EXCLUDED = {'setup_wizard.py'}
     bare_prints = []
     for filepath in _source_files():
         basename = os.path.basename(filepath)

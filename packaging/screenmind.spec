@@ -1,5 +1,5 @@
 # PyInstaller spec for the packaging spike. Not a release build: unsigned,
-# no llama-server inside, no models inside.
+# no models inside (OCR downloads its models on first use).
 #
 # Build from the repo root (macOS or Windows):
 #   uv run --with pyinstaller pyinstaller packaging/screenmind.spec --noconfirm \
@@ -74,7 +74,6 @@ if sys.platform == "darwin":
             "CFBundleDisplayName": "ScreenMind",
             # Background app: no Dock icon. The UI is the browser dashboard.
             "LSUIElement": True,
-            "NSMicrophoneUsageDescription": "ScreenMind records call audio to transcribe meetings.",
             "LSMinimumSystemVersion": "14.0",
         },
     )

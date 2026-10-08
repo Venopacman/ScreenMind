@@ -113,11 +113,9 @@ def db(tmp_path):
 
 @pytest.fixture
 def worker(db, monkeypatch):
-    monkeypatch.setattr(settings, "meeting_transcription", False)
     monkeypatch.setattr(settings, "meeting_apps", ",".join(KEYWORDS))
     monkeypatch.setattr(settings, "call_end_grace_s", GRACE)
-    with patch.object(aw.AudioWorker, "_init_transcription"), \
-            patch("screenmind.capture.window.get_window_url",
+    with patch("screenmind.capture.window.get_window_url",
                   return_value="https://meet.google.com/dsv-einb-rbg?authuser=0&pli=1"):
         yield aw.AudioWorker(database=db)
 
@@ -132,7 +130,7 @@ def tick(worker, t, windows, mic=None):
 
 
 class TestCallTracking:
-    def test_meet_call_tracked_without_transcription(self, worker, db):
+    def test_meet_call_tracked(self, worker, db):
         tick(worker, 0, [FOCUSED_CLAUDE, MEET_DAILY])
         assert rows(db) == []  # one sighting is not enough
         tick(worker, 5, [FOCUSED_CLAUDE, MEET_DAILY])
@@ -142,7 +140,7 @@ class TestCallTracking:
         assert r["url"] == "https://meet.google.com/dsv-einb-rbg"  # query dropped
         assert r["start_time"] == datetime.fromtimestamp(T0).isoformat()
         assert r["end_time"] is None and r["transcript"] is None
-        assert worker.stats["in_meeting"] and not worker.stats["recording"]
+        assert worker.stats["in_meeting"]
 
         # Meet window hidden for 60s (inside the grace), then back
         tick(worker, 60, [FOCUSED_CLAUDE])
@@ -217,13 +215,11 @@ class TestCallTracking:
         assert rows(db)[0]["end_time"] is not None
         assert not worker.in_meeting
 
-    def test_recording_starts_only_with_transcription_and_audio_model(self, worker, db, monkeypatch):
-        monkeypatch.setattr(settings, "meeting_transcription", True)
-        worker._available = True
-        with patch("screenmind.engine.model_manager.is_audio_capable", return_value=False):
-            tick(worker, 0, [MEET_DAILY])
-            tick(worker, 5, [MEET_DAILY])
-        assert worker.in_meeting and not worker.stats["recording"]
+    def test_no_audio_is_recorded(self, worker, db):
+        tick(worker, 0, [MEET_DAILY])
+        tick(worker, 5, [MEET_DAILY])
+        assert worker.in_meeting
+        assert "recording" not in worker.stats
         assert rows(db)[0]["transcript"] is None
 
 

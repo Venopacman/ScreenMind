@@ -1,4 +1,4 @@
-"""A stop must not wait for a Gemma call in flight.
+"""A stop must not wait for an OCR call in flight.
 
 asyncio.run() and the interpreter wait for executor threads at exit, so
 analysis runs on a DaemonExecutor that a stop abandons. The frame whose call
@@ -93,12 +93,10 @@ class TestStopDuringAnalysis:
 
     async def test_stop_abandons_the_call_and_the_frame_stays_pending(self, db, tmp_path, monkeypatch):
         from PIL import Image
-        from screenmind.config import settings
         from screenmind.storage.models import ScreenshotEntry
         from screenmind.workers.analysis_worker import AnalysisWorker
         from screenmind.workers.capture_worker import CaptureResult
 
-        monkeypatch.setattr(settings, "defer_analysis", False)
         shot = tmp_path / "shot.jpg"
         Image.new("RGB", (64, 64), "teal").save(shot)
         activity_id = db.insert_activity(ScreenshotEntry(
@@ -107,23 +105,18 @@ class TestStopDuringAnalysis:
         ))
         queue: asyncio.Queue = asyncio.Queue(maxsize=10)
         worker = AnalysisWorker(queue=queue, database=db)
-        worker._ocr = MagicMock(is_available=True)
-        worker._ocr.extract_text_with_boxes.return_value = ("Inbox: 3 unread messages", [])
-
         in_call = threading.Event()
         release = threading.Event()
         call_threads = []
 
-        def slow_gemma(**_kwargs):
+        def slow_ocr(_image):
             call_threads.append(threading.current_thread())
             in_call.set()
             release.wait(30)
-            raise ConnectionError("llama-server went away")  # what a stop used to cause
+            raise RuntimeError("OCR interrupted")
 
-        worker._analyzer = MagicMock()
-        worker._analyzer.analyze_screenshot_fast.side_effect = slow_gemma
-        worker._analyzer.analyze_screenshot_balanced.side_effect = slow_gemma
-        worker._analyzer.analyze_screenshot.side_effect = slow_gemma
+        worker._ocr = MagicMock(is_available=True)
+        worker._ocr.extract_text_with_boxes.side_effect = slow_ocr
 
         await queue.put(CaptureResult(
             filepath=shot, timestamp=datetime.now(), window_title="Inbox", app_name="Mail",
@@ -135,7 +128,7 @@ class TestStopDuringAnalysis:
                 if in_call.is_set():
                     break
                 await asyncio.sleep(0.05)
-            assert in_call.is_set(), "the Gemma call never started"
+            assert in_call.is_set(), "the OCR call never started"
             # Not the default executor: the exit joins its threads
             assert call_threads[0].daemon
 

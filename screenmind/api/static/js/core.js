@@ -73,6 +73,28 @@ function $$(sel) { return document.querySelectorAll(sel); }
 function formatTime(ts) {
   return new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 }
+function escapeHtml(text) {
+  return String(text ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+// analysis_method badge colour. Old labels (full:fast, cache:minor, reanalyze) stay on old frames.
+function methodColorFor(method) {
+  const m = (method || '').replace(/^backfill:/, '');
+  if (method.startsWith('backfill:')) return '#22d3ee';
+  if (m === 'rules') return '#a78bfa';
+  if (m.startsWith('cache:')) return '#34d399';
+  if (m.startsWith('rule:')) return '#94a3b8';
+  if (m.startsWith('full')) return '#c084fc';
+  if (m === 'reanalyze') return '#f97316';
+  return '#6b7280';
+}
+// One line of text for a frame: its window title, else the old Gemma
+// summary, else the start of its screen text.
+function frameLine(a) {
+  if (a.window_title) return a.window_title;
+  if (a.summary) return a.summary;
+  const text = (a.ocr_text || '').replace(/\s+/g, ' ').trim();
+  return text ? (text.length > 140 ? text.substring(0, 140) + '…' : text) : '';
+}
 function catColor(cat) {
   return getComputedStyle(document.documentElement).getPropertyValue(`--cat-${cat || 'other'}`).trim() || '#64748b';
 }
@@ -88,38 +110,17 @@ window.openModal = async function(src, activityId) {
       const time = new Date(a.timestamp).toLocaleString();
       const cat = a.category || 'other';
       const method = a.analysis_method || 'unknown';
-      const methodColors = {'full': '#a78bfa', 'cache:identical': '#34d399', 'cache:minor': '#fbbf24', 'skipped': '#6b7280', 'backfill:full': '#22d3ee', 'backfill:cache:identical': '#22d3ee', 'backfill:cache:minor': '#22d3ee', 'reanalyze': '#f97316'};
-      const methodColor = methodColors[method] || '#6b7280';
-
-      // Mood emoji mapping
-      const moodEmojis = {'productive': '🔥', 'distracted': '😵‍💫', 'collaborative': '🤝', 'learning': '📚', 'neutral': '😐'};
-      const moodColors = {'productive': '#10b981', 'distracted': '#f59e0b', 'collaborative': '#8b5cf6', 'learning': '#3b82f6', 'neutral': '#6b7280'};
-      const mood = a.mood || 'neutral';
-      const moodEmoji = moodEmojis[mood] || '😐';
-      const moodColor = moodColors[mood] || '#6b7280';
-
-      // Confidence bar
-      const conf = Math.round((a.confidence || 0) * 100);
-      const confColor = conf >= 80 ? '#10b981' : conf >= 60 ? '#f59e0b' : '#ef4444';
+      const methodColor = methodColorFor(method);
+      const app = a.app_name || a.detected_app || 'Unknown';
 
       $('#modal-meta').innerHTML = `
         <div class="meta-row"><span class="time">${time}</span></div>
-        <div class="meta-row"><strong>${a.app_name || 'Unknown'}</strong> <span class="badge badge-${cat}">${cat}</span> <span class="badge" style="background:${methodColor}22;color:${methodColor};border:1px solid ${methodColor}44;font-size:0.7rem;padding:2px 8px;border-radius:10px;margin-left:6px">${method}</span></div>
-        <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
-          <span style="display:inline-flex;align-items:center;gap:4px;background:${moodColor}18;color:${moodColor};border:1px solid ${moodColor}33;padding:3px 10px;border-radius:10px;font-size:0.75rem;font-weight:500">${moodEmoji} ${mood}</span>
-          <div style="display:flex;align-items:center;gap:6px;flex:1">
-            <span style="font-size:0.7rem;color:var(--text-muted)">Confidence</span>
-            <div style="flex:1;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;max-width:120px">
-              <div style="width:${conf}%;height:100%;background:${confColor};border-radius:3px;transition:width 0.5s ease"></div>
-            </div>
-            <span style="font-size:0.7rem;color:${confColor};font-weight:600">${conf}%</span>
-          </div>
-        </div>
+        <div class="meta-row"><strong>${escapeHtml(app)}</strong> <span class="badge badge-${cat}">${cat}</span> <span class="badge" style="background:${methodColor}22;color:${methodColor};border:1px solid ${methodColor}44;font-size:0.7rem;padding:2px 8px;border-radius:10px;margin-left:6px">${method}</span></div>
         ${a.active_url ? `<div style="margin-top:6px"><a href="${a.active_url}" target="_blank" rel="noopener" style="font-size:0.75rem;color:#60a5fa;text-decoration:none;word-break:break-all;display:inline-flex;align-items:center;gap:4px" title="${a.active_url}">🔗 ${a.active_url.length > 80 ? a.active_url.substring(0, 80) + '…' : a.active_url}</a></div>` : ''}`;
-      // Modal shows detailed context (timeline cards already show the short summary)
-      $('#modal-summary').textContent = a.details || a.summary || 'No analysis yet';
+      // Older frames keep their Gemma summary; new frames show the window title
+      $('#modal-summary').textContent = a.window_title || a.details || a.summary || '(no window title)';
 
-      $('#modal-ocr').textContent = a.scene_description || 'No scene description yet';
+      $('#modal-ocr').textContent = a.organized_text || a.ocr_text || a.scene_description || 'No screen text';
     } catch { $('#modal-summary').textContent = 'Unable to load details'; }
   }
 };
@@ -163,13 +164,6 @@ function moveIndicator(btn) {
 function navigate(view) {
   currentView = view;
   window.location.hash = view;
-
-  // Close Model Hub overlay on navigation
-  closeModelHub();
-
-  // Show/hide timeline pill (only visible on Timeline)
-  const pill = document.getElementById('mh-timeline-pill');
-  if (pill) pill.style.display = view === 'timeline' ? '' : 'none';
 
   // Update nav
   const btns = $$('.nav-item');
@@ -224,28 +218,6 @@ async function pollStatus() {
       dot.className = 'status-dot'; txt.textContent = `Capturing (${count})`;
       if (pauseBtn) { pauseBtn.classList.remove('paused'); pauseIcon.textContent = '\u23f8'; pauseLabel.textContent = 'Stop Capturing'; }
     }
-
-    // ── Model state tracking (unified _modelState) ──
-    if (s.model) {
-      const prev = _modelState.status;
-      _modelState.status = s.model.status;
-      _modelState.activeModel = s.model.active_model;
-      _modelState.modelDownloaded = s.model.model_downloaded;
-      _modelState.download = s.model.download;
-      _modelState.message = s.model.message || '';
-      _modelState.externalModel = s.model.external_model || null;
-      if (s.model.capabilities) _modelState.capabilities = s.model.capabilities;
-
-      if (prev !== 'ready' && _modelState.status === 'ready') {
-        showToast('\ud83c\udf89 Model ready! Screen analysis is running.', 'success');
-      }
-
-      // Adaptive poll: 5s during lifecycle, 15s otherwise (#7)
-      const fast = ['downloading', 'starting', 'cancelling'].includes(_modelState.status);
-      _setPollInterval(fast ? 5000 : 15000);
-
-      _updateModelUI();
-    }
   } catch { $('#status-text').textContent = 'Offline'; $('#status-dot').className = 'status-dot error'; }
 }
 
@@ -275,21 +247,7 @@ function animateValue(el, end, duration = 600) {
   requestAnimationFrame(update);
 }
 
-// ══════════════════════════════════════════════════════════
-//  MODEL HUB — Unified state + overlay + pill + dispatcher
-// ══════════════════════════════════════════════════════════
-
-const _modelState = {
-  status: 'ready',
-  activeModel: null,
-  modelDownloaded: false,
-  download: null,
-  message: '',
-  models: [],
-  capabilities: null,  // null until first poll — prevents false audio warnings
-};
-
-// Adaptive poll interval — faster during active lifecycle
+// ── Status poll interval ──────────────────────────────────
 let _pollIntervalId = null;
 let _currentPollMs = 15000;
 function _setPollInterval(ms) {
@@ -304,405 +262,4 @@ function _formatBytes(bytes) {
   if (bytes > 1024*1024) return Math.round(bytes/(1024*1024)) + ' MB';
   if (bytes > 1024) return Math.round(bytes/1024) + ' KB';
   return bytes + ' B';
-}
-
-// Named Escape handler — no stacking
-function _modelHubEscHandler(e) {
-  if (e.key === 'Escape') closeModelHub();
-}
-
-window.openModelHub = async function() {
-  const overlay = document.getElementById('mh-overlay');
-  if (!overlay) return;
-  overlay.classList.add('visible');
-  document.addEventListener('keydown', _modelHubEscHandler);
-  await _renderModelHubCards();
-  _updateModelHubFooter();
-};
-
-window.closeModelHub = function() {
-  const overlay = document.getElementById('mh-overlay');
-  if (!overlay) return;
-  overlay.classList.remove('visible');
-  document.removeEventListener('keydown', _modelHubEscHandler);
-};
-
-async function _renderModelHubCards() {
-  const container = document.getElementById('mh-cards');
-  if (!container) return;
-  try {
-    const data = await api('/api/models');
-    _modelState.models = data.models || [];
-  } catch {
-    container.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:20px">Could not load models</div>';
-    return;
-  }
-
-  const isLifecycleActive = ['downloading', 'starting', 'cancelling'].includes(_modelState.status);
-
-  // External/unknown model warning card
-  let externalCard = '';
-  if (_modelState.externalModel && _modelState.status === 'ready') {
-    externalCard = `
-      <div class="mh-card" style="border:1px solid rgba(251,191,36,0.4);background:rgba(251,191,36,0.06);animation-delay:0s">
-        <div class="mh-card-top">
-          <div class="mh-card-info">
-            <div class="mh-card-name">\u26a0\ufe0f ${_modelState.externalModel}
-              <span class="mh-badge" style="background:rgba(251,191,36,0.2);color:#fbbf24">External</span>
-            </div>
-            <div class="mh-card-meta" style="color:#fbbf24">Unknown model — may lack vision or audio support. Screen analysis and call transcription may not work correctly.</div>
-          </div>
-        </div>
-        <div class="mh-card-caps">
-          <span class="mh-card-cap" style="opacity:0.5">\u2753 Audio unknown</span>
-          <span class="mh-card-cap" style="opacity:0.5">\u2753 Vision unknown</span>
-        </div>
-      </div>`;
-  }
-
-  container.innerHTML = externalCard + _modelState.models.map((m, i) => {
-    const isDownloading = isLifecycleActive && _modelState.download && _modelState.download.model === m.key;
-
-    // Build variant rows — each variant is its own row with individual actions
-    const variantRows = (m.variants || []).map(v => {
-      const isThisActive = m.status === 'active' && v.quant === m.active_variant;
-      const isThisDownloaded = v.downloaded;
-
-      // Badge
-      let vBadge = '';
-      if (isThisActive) vBadge = '<span class="mh-badge mh-badge-active">\u2713 Active</span>';
-      else if (isThisDownloaded) vBadge = '<span class="mh-badge mh-badge-downloaded">Downloaded</span>';
-
-      // Action button
-      let vAction = '';
-      if (isDownloading) {
-        vAction = '<button class="mh-action-btn" disabled>Busy</button>';
-      } else if (isLifecycleActive) {
-        vAction = '<button class="mh-action-btn" disabled>Busy</button>';
-      } else if (isThisActive) {
-        vAction = '';  // No action for active variant
-      } else if (isThisDownloaded) {
-        vAction = `<button class="mh-action-btn mh-btn-switch" onclick="hubSwitchVariant('${m.key}', '${v.quant}')">Switch</button>`;
-      } else {
-        vAction = `<button class="mh-action-btn mh-btn-download" onclick="hubDownloadVariant('${m.key}', '${v.quant}')">Download</button>`;
-      }
-
-      // Delete button — enabled for downloaded non-active, disabled for active
-      let vDelete = '';
-      if (isThisActive) {
-        vDelete = '<button class="mh-btn-delete" disabled title="Cannot delete active variant">\ud83d\uddd1</button>';
-      } else if (isThisDownloaded && !isLifecycleActive) {
-        vDelete = `<button class="mh-btn-delete" onclick="hubDeleteVariant('${m.key}', '${v.quant}')" title="Delete variant">\ud83d\uddd1</button>`;
-      }
-
-      return `
-        <div class="mh-variant-item ${isThisActive ? 'mh-variant-active' : ''}">
-          <div class="mh-variant-info">
-            <span class="mh-variant-quant">${v.quant}</span>
-            <span class="mh-variant-size">${v.file_size}</span>
-            ${vBadge}
-          </div>
-          <div class="mh-variant-actions">
-            ${vDelete}
-            ${vAction}
-          </div>
-        </div>`;
-    }).join('');
-
-    // Download progress bar (shown at model level during download)
-    let progressHtml = '';
-    if (isDownloading) {
-      const bytes = _modelState.download ? _modelState.download.downloaded_bytes || 0 : 0;
-      progressHtml = `
-        <div class="mh-progress mh-progress-indeterminate" data-progress-key="${m.key}">
-          <div class="mh-progress-bar"><div class="mh-progress-fill"></div></div>
-          <div class="mh-progress-text">
-            <span class="mh-progress-bytes">\ud83d\udce6 ${_formatBytes(bytes)} downloaded</span>
-            <span>\u2713 Auto-unlocks when ready</span>
-          </div>
-        </div>`;
-    }
-
-    return `
-      <div class="mh-card" data-model-key="${m.key}" style="animation-delay:${i * 0.08}s">
-        <div class="mh-card-top">
-          <div class="mh-card-info">
-            <div class="mh-card-name">${m.name} ${m.tier >= 2 ? '\u2b50' : ''}
-              ${isDownloading ? '<span class="mh-badge mh-badge-downloading">Downloading...</span>' : ''}
-            </div>
-            <div class="mh-card-meta">${m.size} params \u00b7 ${m.vram} VRAM \u00b7 ${m.quality}</div>
-          </div>
-          ${isDownloading ? '<button class="mh-action-btn mh-btn-cancel" onclick="hubCancelDownload()">Cancel</button>' : ''}
-        </div>
-        <div class="mh-card-caps">
-          ${m.audio ? '<span class="mh-card-cap">\ud83d\udd0a Audio</span>' : '<span class="mh-card-cap" style="opacity:0.4">\ud83d\udd07 No Audio</span>'}
-          ${m.vision ? '<span class="mh-card-cap">\ud83d\udc41 Vision</span>' : ''}
-        </div>
-        <div class="mh-variant-list">
-          ${variantRows}
-        </div>
-        ${progressHtml}
-      </div>`;
-  }).join('');
-}
-
-function _updateModelHubOverlay() {
-  const overlay = document.getElementById('mh-overlay');
-  if (!overlay || !overlay.classList.contains('visible')) return;
-
-  // Update download progress bytes in-place (avoids full re-render flicker)
-  if (_modelState.download && _modelState.download.model) {
-    const card = overlay.querySelector(`[data-model-key="${_modelState.download.model}"].mh-card`);
-    if (card) {
-      const bytesEl = card.querySelector('.mh-progress-bytes');
-      if (bytesEl) {
-        const bytes = _modelState.download.downloaded_bytes || 0;
-        bytesEl.textContent = '\ud83d\udce6 ' + _formatBytes(bytes) + ' downloaded';
-      }
-    }
-  }
-
-  _updateModelHubFooter();
-}
-
-function _updateModelHubFooter() {
-  const footer = document.getElementById('mh-footer');
-  if (!footer) return;
-  const dot = footer.querySelector('.mh-footer-dot');
-  const text = footer.querySelector('.mh-footer-text');
-  if (!dot || !text) return;
-
-  const st = _modelState;
-  if (st.status === 'ready') {
-    if (st.externalModel) {
-      dot.className = 'mh-footer-dot mh-dot-starting';
-      text.innerHTML = 'Running \u00b7 ' + st.externalModel + ' (external)';
-    } else {
-      const info = st.models.find(m => m.key === st.activeModel);
-      const name = info ? info.name : (st.activeModel || 'Unknown');
-      dot.className = 'mh-footer-dot mh-dot-ready';
-      text.innerHTML = 'Running \u00b7 ' + name + ' loaded';
-    }
-  } else if (st.status === 'starting') {
-    dot.className = 'mh-footer-dot mh-dot-starting';
-    text.innerHTML = 'Starting server...';
-  } else if (st.status === 'error') {
-    dot.className = 'mh-footer-dot mh-dot-error';
-    text.innerHTML = 'Server stopped \u00b7 <a onclick="retryModelStart()">Retry</a>';
-  } else if (st.status === 'downloading') {
-    dot.className = 'mh-footer-dot mh-dot-download';
-    text.innerHTML = 'Downloading...';
-  } else {
-    dot.className = 'mh-footer-dot mh-dot-nomodel';
-    text.innerHTML = 'No model installed';
-  }
-}
-
-window.hubDownloadVariant = async function(key, quant) {
-  _modelState.status = 'downloading';
-  _modelState.download = { model: key, downloaded_bytes: 0, message: 'Starting download...' };
-  _updateModelUI();
-  try {
-    const res = await fetch('/api/models/pull', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, quant }),
-    });
-    if (res.status === 409) {
-      const j = await res.json();
-      showToast(j.error || 'Download already in progress', 'warning');
-      try {
-        const status = await api('/api/status');
-        if (status.model) {
-          _modelState.status = status.model.status;
-          _modelState.download = status.model.download;
-          _modelState.message = status.model.message || '';
-          _updateModelUI();
-        }
-      } catch {}
-    } else if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      showToast(j.error || 'Download failed to start', 'warning');
-      _modelState.status = 'no_model';
-      _modelState.download = null;
-      _updateModelUI();
-    }
-  } catch (e) {
-    showToast('Failed to start download: ' + e.message, 'warning');
-    _modelState.status = 'no_model';
-    _modelState.download = null;
-    _updateModelUI();
-  }
-};
-
-window.hubSwitchVariant = async function(key, quant) {
-  // Audio capability check
-  if (typeof _confirmAudioLoss === 'function' && !_confirmAudioLoss(key)) return;
-  // Confirm server restart
-  if (!confirm('Switching requires a server restart. Continue?')) return;
-  // Save variant preference then switch model
-  try {
-    await fetch('/api/models/variant', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, quant }),
-    });
-    // If it's a different model, switch to it; if same model, variant endpoint already restarts
-    if (_modelState.activeModel !== key) {
-      await fetch('/api/models/switch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key }),
-      });
-    }
-    showToast(`Switching to ${key} (${quant})...`, 'info');
-    await _renderModelHubCards();
-  } catch (e) {
-    showToast('Failed to switch: ' + e.message, 'warning');
-  }
-};
-
-window.hubDeleteVariant = async function(key, quant) {
-  if (!confirm(`Delete the ${quant} variant? The model file will be removed from disk.`)) return;
-  try {
-    const res = await fetch('/api/models/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, quant }),
-    });
-    const j = await res.json();
-    if (res.ok) {
-      showToast(j.message || 'Variant deleted', 'info');
-      await _renderModelHubCards();
-    } else {
-      showToast(j.error || 'Delete failed', 'warning');
-    }
-  } catch (e) {
-    showToast('Delete failed: ' + e.message, 'warning');
-  }
-};
-
-// Shared audio-loss confirmation — called by both overlay and Settings switch/install
-function _confirmAudioLoss(key) {
-  const m = _modelState.models.find(x => x.key === key);
-  if (m && m.audio === false) {
-    return confirm(
-      `${m.name} has no audio support.\n\n` +
-      `Call transcription will be unavailable ` +
-      `until you switch back to Gemma 4 E2B/E4B.\n\nContinue?`
-    );
-  }
-  return true;
-}
-
-
-window.retryModelStart = async function() {
-  showToast('Retrying server start...', 'info');
-  try { await fetch('/api/models/restart', { method: 'POST' }); } catch (e) { showToast('Retry failed: ' + e.message, 'warning'); }
-};
-
-window.hubCancelDownload = async function() {
-  try {
-    const res = await fetch('/api/models/cancel', { method: 'POST' });
-    if (res.ok) {
-      showToast('Cancelling download...', 'warning');
-      // Don't jump straight to idle — use 'cancelling' to avoid
-      // race where user clicks Download before backend releases lock (#4)
-      _modelState.status = 'cancelling';
-      _modelState.download = null;
-      _modelState.message = 'Cancelling...';
-      _updateModelUI();
-      // Backend releases lock within ~2s; next poll will set real state
-    } else {
-      showToast('No active download to cancel', 'info');
-    }
-  } catch (e) {
-    showToast('Cancel failed: ' + e.message, 'warning');
-  }
-};
-
-// ── Timeline Pill ─────────────────────────────────────────
-function _injectTimelinePill() {
-  if (document.getElementById('mh-timeline-pill')) return;
-  const headerActions = document.getElementById('header-actions');
-  if (!headerActions) return;
-  const pill = document.createElement('button');
-  pill.id = 'mh-timeline-pill';
-  pill.className = 'mh-trigger';
-  pill.onclick = function() { openModelHub(); };
-  pill.innerHTML = '<span class="mh-trigger-icon">\ud83e\udde0</span><span class="mh-trigger-text">Model Hub</span><span class="mh-trigger-dot mh-dot-ready"></span>';
-  headerActions.appendChild(pill);
-  _updateTimelinePill();
-}
-
-function _updateTimelinePill() {
-  const pill = document.getElementById('mh-timeline-pill');
-  if (!pill) return;
-  const textEl = pill.querySelector('.mh-trigger-text');
-  const dotEl = pill.querySelector('.mh-trigger-dot');
-  if (!textEl || !dotEl) return;
-
-  const st = _modelState;
-  if (st.status === 'ready') {
-    if (st.externalModel) {
-      // Unknown external model — amber dot
-      textEl.textContent = st.externalModel;
-      dotEl.className = 'mh-trigger-dot mh-dot-starting';
-    } else {
-      const info = st.models.find(m => m.key === st.activeModel);
-      textEl.textContent = info ? info.name : (st.activeModel || 'Model Hub');
-      dotEl.className = 'mh-trigger-dot mh-dot-ready';
-    }
-  } else if (st.status === 'downloading') {
-    textEl.textContent = 'Downloading...';
-    dotEl.className = 'mh-trigger-dot mh-dot-download';
-  } else if (st.status === 'starting') {
-    textEl.textContent = 'Starting...';
-    dotEl.className = 'mh-trigger-dot mh-dot-starting';
-  } else if (st.status === 'cancelling') {
-    textEl.textContent = 'Cancelling...';
-    dotEl.className = 'mh-trigger-dot mh-dot-starting';
-  } else if (st.status === 'error') {
-    textEl.textContent = 'Error';
-    dotEl.className = 'mh-trigger-dot mh-dot-error';
-  } else {
-    textEl.textContent = 'No Model';
-    dotEl.className = 'mh-trigger-dot mh-dot-nomodel';
-  }
-}
-
-// ── Unified Model UI Dispatcher ───────────────────────────
-function _updateModelUI() {
-  _updateModelHubOverlay();
-  _updateTimelinePill();
-
-  // Settings model list — in-place badge/button update (avoids flicker #5)
-  if (currentView === 'settings') {
-    _updateSettingsInPlace();
-  }
-}
-
-// In-place Settings model list update — only re-render on state transitions
-let _lastSettingsState = '';
-function _updateSettingsInPlace() {
-  const listEl = document.getElementById('model-list');
-  if (!listEl) return;
-
-  // Patch download progress bytes in-place every poll (no full re-render)
-  if (_modelState.download && _modelState.download.model) {
-    const bytesEls = listEl.querySelectorAll('[data-progress-bytes]');
-    bytesEls.forEach(el => {
-      const bytes = _modelState.download.downloaded_bytes || 0;
-      const bytesStr = typeof _formatBytes === 'function' ? _formatBytes(bytes) : bytes + ' B';
-      el.textContent = '\ud83d\udce6 ' + bytesStr;
-    });
-  }
-
-  // Full re-render only when state actually changed (avoids redundant API calls)
-  const stateKey = _modelState.status + '|' + _modelState.activeModel + '|' +
-    (_modelState.models || []).map(m => m.status + m.active_variant).join(',');
-  if (stateKey !== _lastSettingsState) {
-    _lastSettingsState = stateKey;
-    if (typeof loadModels === 'function') loadModels();
-  }
 }

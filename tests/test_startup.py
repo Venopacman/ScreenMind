@@ -345,28 +345,6 @@ class TestPortCheck:
         assert _is_port_in_use(port) is False
 
 
-# ── AI Prompt Guard ──────────────────────────────────────────────────────────
-
-
-class TestAIPromptGuard:
-    """Tests for non-interactive AI prompt handling."""
-
-    def test_is_interactive_false_when_no_stdin(self):
-        """_is_interactive should return False when stdin is None."""
-        from screenmind.main import _is_interactive
-        with patch("screenmind.main.sys") as mock_sys:
-            mock_sys.stdin = None
-            assert _is_interactive() is False
-
-    def test_is_interactive_false_when_not_tty(self):
-        """_is_interactive should return False for non-TTY stdin."""
-        from screenmind.main import _is_interactive
-        with patch("screenmind.main.sys") as mock_sys:
-            mock_sys.stdin = MagicMock()
-            mock_sys.stdin.isatty.return_value = False
-            assert _is_interactive() is False
-
-
 # ── Background Mode ──────────────────────────────────────────────────────────
 
 
@@ -393,18 +371,3 @@ class TestBackgroundMode:
             # subprocess.Popen([pythonw, "-m", "screenmind"]) — no --background
             cmd = [r"C:\Python312\pythonw.exe", "-m", "screenmind"]
             assert "--background" not in cmd
-
-
-class TestLlamaServerCheck:
-    def test_not_running_yet_is_info_without_manual_hint(self, caplog):
-        """main() starts llama-server right after this check fails."""
-        import logging
-        from screenmind import main
-        with patch("screenmind.engine.llm_client.get_server_status",
-                   return_value={"status": "unreachable"}):
-            with caplog.at_level(logging.INFO, logger="screenmind.main"):
-                assert main.check_llama_server() is False
-        assert all(r.levelno == logging.INFO for r in caplog.records)
-        msgs = [r.getMessage() for r in caplog.records]
-        assert any("not running" in m for m in msgs)
-        assert not any("Start it with" in m or "-ngl" in m for m in msgs)

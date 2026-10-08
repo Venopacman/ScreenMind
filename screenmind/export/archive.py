@@ -28,7 +28,7 @@ from screenmind.privacy.url_filter import sanitize_url
 
 logger = logging.getLogger("screenmind.export.archive")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MAX_DAYS = 31
 # The workflows mapper takes uploads up to 1 MB. Leave some room.
 MAX_TEXT_FILE_BYTES = 900_000

@@ -87,7 +87,7 @@ CHECKS = [
     ("redact_typed", "Typed secret is redacted", {"macos": [], "windows": []}),
     ("password_field", "Password field is not stored", {"macos": [], "windows": []}),
     ("calls", "Call detection", {"macos": [], "windows": ["G16", "G17"]}),
-    ("analysis", "Analysis (Gemma)", {"macos": ["G15"], "windows": ["G15"]}),
+    ("analysis", "Analysis (text + rule labels)", {"macos": [], "windows": []}),
     ("retention", "Retention cleanup at startup", {"macos": [], "windows": []}),
 ]
 CHECK_LABELS = {cid: label for cid, label, _ in CHECKS}
@@ -737,7 +737,6 @@ TEXT_COLUMNS = {
     "ui_events": ["window_title", "element_name", "element_value", "text", "url"],
     "meetings": ["window_title", "transcript", "summary", "url"],
 }
-GEMMA_COLUMNS = {"summary", "details", "visible_text", "scene_description"}
 
 
 def _ui_status_text(st):
@@ -1007,9 +1006,7 @@ def run_checks(rep: Report, sc: Scenario, inst: Instance, ui_status: dict, displ
     hits = _find_text(conn, sc.typed_secret)
     if hits:
         where = ", ".join(f"{c} ({n})" for c, n in hits)
-        note = " (Gemma read it from the image; images are not redacted)" if all(
-            c.split(".")[1] in GEMMA_COLUMNS for c, _ in hits) else ""
-        rep.add("redact_typed", FAIL, f"secret stored in {where}{note}")
+        rep.add("redact_typed", FAIL, f"secret stored in {where}")
     else:
         red_ev = [e for e in events if "password: [REDACTED" in (e["text"] or "")]
         red_act = [a for a in editor_rows if "[REDACTED:password]" in (a["ocr_text"] or "")]
@@ -1055,17 +1052,15 @@ def run_checks(rep: Report, sc: Scenario, inst: Instance, ui_status: dict, displ
     if ok_rows:
         sample = [a for a in ok_rows if a in editor_rows or a in url_rows or a in page_rows]
         ev = f"status {stxt}"
-        # No summary text: Gemma may describe other windows on the screen
         if sample:
             s = sample[0]
-            ev += (f"; sample ({s['detected_app']}): category={s['category']}, "
-                   f"summary {len(s['summary'] or '')} chars")
-        with_summary = sum(1 for a in ok_rows if a["summary"])
-        ev += f"; summary set on {with_summary} of {len(ok_rows)} ok rows"
+            ev += (f"; sample ({s['detected_app']}): app={s['app_name']}, category={s['category']}, "
+                   f"text {len(s['ocr_text'] or '')} chars")
+        with_text = sum(1 for a in ok_rows if a["ocr_text"])
+        ev += f"; text set on {with_text} of {len(ok_rows)} ok rows"
         rep.add("analysis", PASS, ev)
     else:
-        why = "llama-server not reachable" if "Cannot reach llama-server" in log_text else "no frame finished"
-        rep.add("analysis", FAIL, f"status {stxt}; {why}")
+        rep.add("analysis", FAIL, f"status {stxt}; no frame finished")
 
     # Retention
     left = (conn.execute("SELECT COUNT(*) FROM activities WHERE detected_app = ?", (SEED_APP,)).fetchone()[0]
@@ -1229,8 +1224,6 @@ def write_placeholder(os_key: str):
         "there, in a normal terminal. "
         "It takes 3 to 5 minutes. "
         "Hands off the mouse and keyboard until it says you can use the computer again.",
-        "Gemma analysis needs llama-server. If it is not running, ScreenMind starts its own and "
-        "stops it at the end. Without llama-server the Analysis row is a FAIL; the rest still works.",
         "Then commit this file and `summary.md` (`git add docs/status`), and push to `custom`.",
     ]
     if os_key == "windows":

@@ -43,7 +43,6 @@ def create_app(database: Database, capture_worker=None, analysis_worker=None, au
     from screenmind.api.routes.screenshots import router as screenshots_router
     from screenmind.api.routes.meetings import router as meetings_router
     from screenmind.api.routes.settings import router as settings_router
-    from screenmind.api.routes.models import router as models_router
     from screenmind.api.routes.data import router as data_router
     from screenmind.api.routes.ui_events import router as ui_events_router
     from screenmind.api.routes.export import router as export_router
@@ -56,7 +55,6 @@ def create_app(database: Database, capture_worker=None, analysis_worker=None, au
     app.include_router(meetings_router)
     app.include_router(settings_router)
     app.include_router(ui_events_router)
-    app.include_router(models_router)
     app.include_router(data_router)
     app.include_router(export_router)
 

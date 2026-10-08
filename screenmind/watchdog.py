@@ -10,8 +10,8 @@ anyway. It costs nothing between wakes and does nothing while all is well.
 - UI-event enricher (`UiEventRecorder.ticks`): no tick for 2 min while it
   runs. Logs stacks and restarts the recorder, at most 3 times per hour.
 - Analysis (`AnalysisWorker.last_beat`, set on each loop pass): frames
-  waiting and no pass for 20 min. Logs stacks. One Gemma call may take
-  300 s, with retries.
+  waiting and no pass for 20 min. Logs stacks. One OCR call takes
+  seconds, so this is a wide margin.
 
 The stack dump says where each thread waits, so a freeze can be diagnosed
 from the log (G37). See docs/plans/uptime.md.
@@ -38,8 +38,7 @@ ANALYSIS_STUCK_S = 1200.0
 REPORT_AGAIN_S = 600.0
 RECORDER_MAX_RESTARTS = 3
 _RESTART_WINDOW_S = 3600.0
-# A normal stop takes up to ~25 s (recorder 7 s, call recording 5 s,
-# llama-server 10 s).
+# A normal stop takes up to ~10 s (recorder 7 s, the rest).
 SHUTDOWN_DEADLINE_S = 45.0
 # Exit code of a stop that had to be forced. A normal stop exits with 0. A
 # supervisor must not restart on either: both are stops the user asked for.

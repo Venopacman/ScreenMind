@@ -15,8 +15,6 @@ async function renderTimeline(el) {
   $('#next-day').addEventListener('click', () => shiftDate(1));
   $('#clear-timeline').addEventListener('click', confirmClearTimeline);
   loadTimeline();
-  // Inject Model Hub pill into header-actions (guard against duplicates)
-  _injectTimelinePill();
   // Auto-refresh timeline every 30s
   if (window._tlRefresh) clearInterval(window._tlRefresh);
   window._tlRefresh = setInterval(() => { if (currentView === 'timeline') loadTimeline(true); }, 30000);
@@ -51,10 +49,10 @@ async function loadTimeline(silent = false) {
         <h2>🚀 ScreenMind is Running!</h2>
         <div class="subtitle">The first capture is coming soon...</div>
         <div class="feature-grid">
-          <div class="feature-card"><div class="fc-icon">📋</div><div class="fc-title">Timeline</div><div class="fc-desc">Every captured frame with app, page, screen text and a label</div></div>
-          <div class="feature-card"><div class="fc-icon">🔍</div><div class="fc-title">Search</div><div class="fc-desc">Keyword search over screen text and labels</div></div>
+          <div class="feature-card"><div class="fc-icon">📋</div><div class="fc-title">Timeline</div><div class="fc-desc">Every captured frame with app, window, page and screen text</div></div>
+          <div class="feature-card"><div class="fc-icon">🔍</div><div class="fc-title">Search</div><div class="fc-desc">Keyword search over screen text, apps and actions</div></div>
           <div class="feature-card"><div class="fc-icon">📊</div><div class="fc-title">Analytics</div><div class="fc-desc">Time per category and app</div></div>
-          <div class="feature-card"><div class="fc-icon">🎙️</div><div class="fc-title">Meetings</div><div class="fc-desc">Calls with start, end and an optional transcript</div></div>
+          <div class="feature-card"><div class="fc-icon">🎙️</div><div class="fc-title">Meetings</div><div class="fc-desc">Calls with app, start and end</div></div>
           <div class="feature-card"><div class="fc-icon">🛡️</div><div class="fc-title">100% Local</div><div class="fc-desc">No cloud, no telemetry. Data leaves only when you export it.</div></div>
         </div>
         <div class="waiting-pulse"><span class="pulse-dot"></span> Waiting for first capture...</div>
@@ -78,10 +76,12 @@ function meetingCard(m) {
   const startTime = formatTime(m.start_time);
   const endTime = m.end_time ? formatTime(m.end_time) : 'ongoing';
   const duration = m.duration_minutes ? `${Math.round(m.duration_minutes)} min` : '';
-  const summaryText = (m.summary || 'No summary').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const transcriptText = (m.transcript || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  // First meaningful line of summary for preview
-  const previewLine = summaryText.split('\n').find(l => l.trim() && !l.startsWith('⏳')) || 'Meeting recorded';
+  // Only calls from before Gemma was removed have a summary and transcript
+  const summaryText = _tlEscape(m.summary || '');
+  const transcriptText = _tlEscape(m.transcript || '');
+  // First meaningful line of the summary, else the call window's title
+  const previewLine = summaryText.split('\n').find(l => l.trim() && !l.startsWith('⏳'))
+    || _tlEscape(m.window_title || 'Call tracked');
   const tid = `tl-mtg-transcript-${m.id}`;
   const sid = `tl-mtg-summary-${m.id}`;
   return `
@@ -118,9 +118,8 @@ function timelineCard(a, i) {
 
   // Analysis method badge — color-coded
   const method = a.analysis_method || '';
-  const methodColors = {'full': '#a78bfa', 'cache:identical': '#34d399', 'cache:minor': '#fbbf24', 'skipped': '#6b7280', 'backfill:full': '#22d3ee', 'backfill:cache:identical': '#22d3ee', 'backfill:cache:minor': '#22d3ee', 'reanalyze': '#f97316'};
-  const methodColor = methodColors[method] || '';
-  const methodBadge = method && methodColor ? ` <span style="background:${methodColor}18;color:${methodColor};border:1px solid ${methodColor}33;font-size:0.65rem;padding:1px 6px;border-radius:8px;font-weight:500">${method}</span>` : '';
+  const methodColor = method ? methodColorFor(method) : '';
+  const methodBadge = method ? ` <span style="background:${methodColor}18;color:${methodColor};border:1px solid ${methodColor}33;font-size:0.65rem;padding:1px 6px;border-radius:8px;font-weight:500">${method}</span>` : '';
 
   // UI events recorded before this frame (clicks, typed text, app switches)
   const actionLines = (a.user_actions || '').split('\n').filter(Boolean).map(l => l.replace(/^- /, ''));
@@ -132,20 +131,16 @@ function timelineCard(a, i) {
       <div class="info">
         <div class="top">
           <span class="time">${time}</span>
-          <span class="app-name">${a.app_name || 'Unknown'}</span>
+          <span class="app-name">${_tlEscape(a.app_name || a.detected_app || 'Unknown')}</span>
           <span class="badge badge-${cat}">${cat}</span>${methodBadge}
         </div>
-        <div class="summary">${a.summary || 'No analysis'}</div>
+        <div class="summary">${_tlEscape(frameLine(a))}</div>
         ${a.active_url ? `<div style="margin-top:2px"><a href="${a.active_url}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:0.7rem;color:#60a5fa;text-decoration:none;opacity:0.8;word-break:break-all" title="${a.active_url}">🔗 ${(() => { try { return new URL(a.active_url).hostname } catch(e) { return a.active_url.substring(0, 40) } })()}</a></div>` : ''}
         ${userActions}
       </div>
       <div class="card-menu-wrap">
         <button class="card-menu-trigger" onclick="event.stopPropagation(); toggleCardMenu(this)" title="Actions">⋮</button>
         <div class="card-menu">
-          <button class="menu-item reanalyze-item" onclick="event.stopPropagation(); reanalyzeActivity(${a.id}, this)">
-            <span class="menu-icon">↻</span> Re-analyze
-          </button>
-          <div class="menu-divider"></div>
           <button class="menu-item delete-item" onclick="event.stopPropagation(); deleteActivity(${a.id}, this)">
             <span class="menu-icon">✕</span> Delete
           </button>
@@ -176,20 +171,6 @@ document.addEventListener('click', function() {
   document.querySelectorAll('.card-menu.open').forEach(function(m) { m.classList.remove('open'); });
   document.querySelectorAll('.card-menu-trigger.active').forEach(function(t) { t.classList.remove('active'); });
 });
-
-window.reanalyzeActivity = async function(id, el) {
-  el.closest('.card-menu').classList.remove('open');
-  el.closest('.card-menu-wrap').querySelector('.card-menu-trigger').classList.remove('active');
-  showToast('↻ Re-analyzing screenshot...', 'info');
-  try {
-    const r = await fetch(`/api/activities/${id}/reanalyze`, { method: 'POST' });
-    if (!r.ok) throw new Error('Failed');
-    showToast('✓ Re-analysis complete!', 'success');
-    loadTimeline(true);
-  } catch (err) {
-    showToast('Re-analysis failed: ' + err.message, 'warning');
-  }
-};
 
 window.deleteActivity = async function(id, btn) {
   if (!btn.classList.contains('confirm-delete')) {

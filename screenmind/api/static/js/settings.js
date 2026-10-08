@@ -28,9 +28,6 @@ async function renderSettings(el) {
   + '<div class="settings-input-row"><label class="settings-label">App keywords (comma-separated):</label>'
   + '<input type="text" id="heavy-apps-input" class="settings-text-input" value="' + (cfg.heavy_apps || '') + '" placeholder="game,valorant,blender,obs..."></div></div>'
 
-  + '<div class="settings-card"><div class="settings-card-header"><div><div class="settings-title">Deferred Analysis</div><div class="settings-desc">Queue screenshots and analyze only when system is idle</div></div>'
-  + _sw('defer-toggle', cfg.defer_analysis) + '</div></div>'
-
   + '<div class="settings-card"><div class="settings-card-header"><div><div class="settings-title">Capture Active Monitor <span style="background:var(--accent-primary);color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px;vertical-align:middle">Beta</span></div><div class="settings-desc">Captures the screen with your active window instead of primary monitor. Recommended for multi-monitor setups. Works on Windows, Linux X11, and macOS.</div></div>'
   + _sw('capture-active-monitor', cfg.capture_active_monitor) + '</div></div>'
 
@@ -38,40 +35,9 @@ async function renderSettings(el) {
   + _sw('startup-toggle', startupStatus.installed) + '</div>'
   + '<div class="settings-note" id="startup-status"></div></div>'
 
-  // ── AI & MODELS ──
-  + _sec('&#129504;', 'AI &amp; Models')
-  + '<div class="settings-card settings-card-accent" id="model-card"><div class="settings-card-header"><div><div class="settings-title">AI Model</div><div class="settings-desc">Select which Gemma model labels screens and transcribes calls</div></div></div>'
-  + '<div id="model-list" class="model-list"><div class="spinner" style="margin:12px auto"></div></div></div>'
-
-  + '<div class="settings-card"><div class="settings-card-header"><div><div class="settings-title">Performance Mode</div><div class="settings-desc">Controls GPU layer offloading for inference</div></div></div>'
-  + '<div class="settings-note">Minimal = CPU-only (0 VRAM). Balanced = ~15 layers on GPU (~2GB). Maximum = all layers on GPU (~3GB, fastest).</div>'
-  + '<div class="radio-group" id="perf-mode">' + _rp('perf','minimal','Minimal',cfg.performance_mode) + _rp('perf','balanced','Balanced',cfg.performance_mode) + _rp('perf','maximum','Maximum',cfg.performance_mode) + '</div></div>'
-
-  + '<div class="settings-card"><div class="settings-card-header"><div><div class="settings-title">Context Window</div><div class="settings-desc">Max tokens per request (prompt + image + output)</div></div>'
-  + '<span class="settings-value" id="ctx-value">' + (cfg.context_window || 6144) + '</span></div>'
-  + '<input type="range" id="ctx-slider" class="settings-slider" min="2048" max="8192" step="1024" value="' + (cfg.context_window || 6144) + '">'
-  + '<div class="settings-note">Lower = less VRAM. 6144 fits all features. Increase to 8192 for larger models (E4B). Decrease to 4096 if low on VRAM (may truncate long transcripts).</div></div>'
-
-  + '<div class="settings-card"><div class="settings-card-header"><div><div class="settings-title">KV Cache Quantization</div><div class="settings-desc">Compress attention cache to save VRAM</div></div>'
-  + _sw('kv-cache-quant', cfg.kv_cache_quant === true) + '</div>'
-  + '<div class="settings-note">Saves ~200MB VRAM but adds ~10s per inference due to quant/dequant overhead on CPU layers. Only enable if you are running out of VRAM. Disabled by default for faster inference.</div></div>'
-
-  + '<div class="settings-card"><div class="settings-card-header"><div><div class="settings-title">Flash Attention</div><div class="settings-desc">Optimized attention computation</div></div>'
-  + _sw('flash-attention', cfg.flash_attention !== false) + '</div>'
-  + '<div class="settings-note">Faster inference and lower VRAM usage. Disable if llama-server fails to start — some older GPUs (pre-Turing) don\'t support it.</div></div>'
-
-  + '<div class="settings-card"><div class="settings-card-header"><div><div class="settings-title">Analysis Mode</div><div class="settings-desc">How screenshots are analyzed</div></div>'
-  + '<div class="radio-group" id="analysis-mode-group">' + _rp('analysis_mode','merged','\u26a1 Accurate (~76s)',cfg.analysis_mode) + _rp('analysis_mode','balanced','\u2696\ufe0f Balanced (~40s)',cfg.analysis_mode) + _rp('analysis_mode','fast','\ud83d\ude80 Fast (~12s)',cfg.analysis_mode) + '</div>'
-  + '<div class="settings-note">Accurate: best quality, AI reasons about layout. Balanced: AI thinking without layout. Fast: no thinking, fastest.</div></div>'
-
-
-  + '<div class="settings-note" style="margin-top:4px;color:#f59e0b;font-size:0.78rem">⚠️ Context Window, KV Cache, and Flash Attention changes require restarting ScreenMind.</div>'
-
-  // ── AUDIO & MEETINGS ──
-  + _sec('&#127908;', 'Audio &amp; Meetings')
-  + '<div class="settings-card"><div class="settings-card-header"><div><div class="settings-title">Meeting Transcription</div><div class="settings-desc">Auto-record and summarize meetings</div></div>'
-  + _sw('meeting-toggle', cfg.meeting_transcription) + '</div>'
-  + '<div class="settings-note">Uses Gemma 4 audio decoding. Requires <code>sounddevice</code>. Call start and end times are tracked even when this is off.</div>'
+  // ── MEETINGS ──
+  + _sec('&#127908;', 'Meetings')
+  + '<div class="settings-card"><div class="settings-card-header"><div><div class="settings-title">Call Tracking</div><div class="settings-desc">Record when calls start and end, with app, window title and room link. No audio is recorded.</div></div></div>'
   + '<div class="settings-input-row"><label class="settings-label">Call apps to detect:</label>'
   + '<input type="text" id="meeting-apps-input" class="settings-text-input" value="' + (cfg.meeting_apps || '') + '" placeholder="zoom,teams,meet,webex,slack..."></div></div>'
 
@@ -100,7 +66,7 @@ async function renderSettings(el) {
   + _sw('encryption-enabled', cfg.encryption_enabled) + '</div>'
   + '<div class="settings-note">Key stored in OS keyring. Uses the <code>cryptography</code> and <code>keyring</code> packages.</div></div>'
 
-  + '<div class="settings-card" id="ui-events-card"><div class="settings-card-header"><div><div class="settings-title">UI Events <span style="background:var(--accent-primary);color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px;vertical-align:middle">Beta</span></div><div class="settings-desc">Record clicks, typed text, app switches and clipboard through OS accessibility APIs. Gives the AI exact context for each screenshot.</div></div>'
+  + '<div class="settings-card" id="ui-events-card"><div class="settings-card-header"><div><div class="settings-title">UI Events <span style="background:var(--accent-primary);color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px;vertical-align:middle">Beta</span></div><div class="settings-desc">Record clicks, typed text, app switches and clipboard through OS accessibility APIs. Shows what you did between screenshots.</div></div>'
   + _sw('ui-events-enabled', cfg.ui_events_enabled) + '</div>'
   + '<div class="settings-note">Clicks, app switches, typed text and clipboard are on by default. Typed text and clipboard can hold private content: password fields are never recorded, and the Sensitive Data Filter runs on all text. Paused capture and blocked apps stop recording too. Works on macOS and Windows.</div>'
   + '<div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px">'
@@ -135,12 +101,6 @@ async function renderSettings(el) {
   slider.addEventListener('input', function() {
     document.getElementById('interval-value').textContent = slider.value + 's';
   });
-  var ctxSlider = document.getElementById('ctx-slider');
-  if (ctxSlider) {
-    ctxSlider.addEventListener('input', function() {
-      document.getElementById('ctx-value').textContent = ctxSlider.value;
-    });
-  }
 
   // Track changes for save button state
   setTimeout(function() { _trackSettingsChanges(el); }, 100);
@@ -168,7 +128,6 @@ async function renderSettings(el) {
 
   updateStorageEstimate();
   initExportCard();
-  loadModels();
   loadUiEventsStatus();
 }
 
@@ -235,192 +194,15 @@ async function updateStorageEstimate() {
   }
 }
 
-async function loadModels() {
-  const listEl = document.getElementById('model-list');
-  if (!listEl) return;
-  try {
-    const data = await api('/api/models');
-    const models = data.models || [];
-    // Sync to global state so overlay stays in sync
-    if (typeof _modelState !== 'undefined') _modelState.models = models;
-
-    const isLifecycleActive = typeof _modelState !== 'undefined'
-      && ['downloading', 'starting'].includes(_modelState.status);
-    const dlModel = typeof _modelState !== 'undefined' && _modelState.download
-      ? _modelState.download.model : null;
-    // External/unknown model warning card
-    let externalCard = '';
-    const extModel = typeof _modelState !== 'undefined' ? _modelState.externalModel : null;
-    if (extModel && (typeof _modelState === 'undefined' || _modelState.status === 'ready')) {
-      externalCard = `
-        <div class="model-row" style="border:1px solid rgba(251,191,36,0.3);background:rgba(251,191,36,0.05);margin-bottom:8px">
-          <div class="model-info">
-            <div class="model-name">\u26a0\ufe0f ${extModel}
-              <span class="model-badge" style="background:rgba(251,191,36,0.2);color:#fbbf24">External</span>
-            </div>
-            <div class="model-meta" style="color:#fbbf24;font-size:0.75rem">Unknown model running on server — may lack vision or audio support</div>
-          </div>
-        </div>`;
-    }
-
-    listEl.innerHTML = externalCard + models.map(m => {
-      const isDownloading = isLifecycleActive && dlModel === m.key;
-
-      // Build per-variant rows
-      const variantRows = (m.variants || []).map(v => {
-        const isThisActive = m.status === 'active' && v.quant === m.active_variant;
-        const isThisDownloaded = v.downloaded;
-
-        // Badge
-        let vBadge = '';
-        if (isThisActive) vBadge = '<span class="model-badge model-active">\u2713 Active</span>';
-        else if (isThisDownloaded) vBadge = '<span class="model-badge model-downloaded">Downloaded</span>';
-
-        // Action button
-        let vAction = '';
-        if (isDownloading || isLifecycleActive) {
-          vAction = '<button class="btn-sm" disabled style="opacity:0.4">Busy</button>';
-        } else if (isThisActive) {
-          vAction = '';
-        } else if (isThisDownloaded) {
-          vAction = `<button class="btn-sm btn-switch" onclick="settingsSwitchVariant('${m.key}', '${v.quant}')">Switch</button>`;
-        } else {
-          vAction = `<button class="btn-sm btn-install" onclick="settingsInstallVariant('${m.key}', '${v.quant}')">Download</button>`;
-        }
-
-        // Delete button
-        let vDelete = '';
-        if (isThisActive) {
-          vDelete = '<button class="btn-sm" disabled style="opacity:0.3;padding:2px 8px" title="Cannot delete active variant">\ud83d\uddd1</button>';
-        } else if (isThisDownloaded && !isLifecycleActive) {
-          vDelete = `<button class="btn-sm" onclick="settingsDeleteVariant('${m.key}', '${v.quant}')" title="Delete variant" style="color:#f87171;border-color:rgba(239,68,68,0.3);padding:2px 8px">\ud83d\uddd1</button>`;
-        }
-
-        return `
-          <div class="model-variant-item ${isThisActive ? 'model-variant-active' : ''}" data-model-key="${m.key}">
-            <div class="model-variant-info">
-              <span class="model-variant-quant">${v.quant}</span>
-              <span class="model-variant-size">${v.file_size}</span>
-              ${vBadge}
-            </div>
-            <div class="model-variant-actions">
-              ${vDelete}
-              ${vAction}
-            </div>
-          </div>`;
-      }).join('');
-
-      // Download progress
-      let progressHtml = '';
-      if (isDownloading) {
-        const bytes = _modelState.download ? _modelState.download.downloaded_bytes || 0 : 0;
-        const bytesStr = typeof _formatBytes === 'function' ? _formatBytes(bytes) : bytes + ' B';
-        progressHtml = `<div style="padding:4px 12px;font-size:0.75rem;color:var(--accent)"><span data-progress-bytes>\ud83d\udce6 ${bytesStr}</span> <button class="btn-sm" onclick="hubCancelDownload()" style="color:#f87171;border-color:rgba(239,68,68,0.3);margin-left:6px">Cancel</button></div>`;
-      }
-
-      return `
-        <div class="model-row" data-model-key="${m.key}">
-          <div class="model-info">
-            <div class="model-name">${m.name}
-              ${isDownloading ? '<span class="model-badge" style="background:rgba(139,92,246,0.15);color:var(--accent)">Downloading...</span>' : ''}
-            </div>
-            <div class="model-meta">${m.size} params \u00b7 ${m.vram} VRAM \u00b7 ${m.quality}</div>
-          </div>
-        </div>
-        ${variantRows}
-        ${progressHtml}`;
-    }).join('');
-  } catch (e) {
-    listEl.innerHTML = '<div class="settings-note">\u26a0\ufe0f Could not load models.</div>';
-  }
-}
-
-
-
-window.settingsInstallVariant = async function(key, quant) {
-  if (typeof _confirmAudioLoss === 'function' && !_confirmAudioLoss(key)) return;
-  if (!confirm(`Download ${key} (${quant})?\nThis will download the model. Continue?`)) return;
-  try {
-    const res = await fetch('/api/models/pull', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, quant }),
-    });
-    if (res.ok) {
-      showToast('Download started. Check Model Hub for progress.', 'info');
-    } else {
-      const j = await res.json().catch(() => ({}));
-      showToast(j.error || 'Download failed to start', 'warning');
-    }
-    loadModels();
-  } catch (e) {
-    showToast('Failed to start download: ' + e.message, 'warning');
-    loadModels();
-  }
-};
-
-window.settingsSwitchVariant = async function(key, quant) {
-  if (typeof _confirmAudioLoss === 'function' && !_confirmAudioLoss(key)) return;
-  if (!confirm('Switching requires a server restart. Continue?')) return;
-  try {
-    // Save variant preference
-    await fetch('/api/models/variant', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, quant }),
-    });
-    // Switch to this model if it's a different model
-    const activeModel = typeof _modelState !== 'undefined' ? _modelState.activeModel : null;
-    if (activeModel !== key) {
-      await fetch('/api/models/switch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key }),
-      });
-    }
-    showToast(`Switching to ${key} (${quant})...`, 'info');
-    loadModels();
-  } catch (e) {
-    showToast('Failed to switch: ' + e.message, 'warning');
-  }
-};
-
-window.settingsDeleteVariant = async function(key, quant) {
-  if (!confirm(`Delete the ${quant} variant? The model file will be removed from disk.`)) return;
-  try {
-    const res = await fetch('/api/models/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, quant }),
-    });
-    const j = await res.json();
-    if (res.ok) {
-      showToast(j.message || 'Variant deleted', 'info');
-      loadModels();
-    } else {
-      showToast(j.error || 'Delete failed', 'warning');
-    }
-  } catch (e) {
-    showToast('Delete failed: ' + e.message, 'warning');
-  }
-};
 // Hotkey capture function
 window.saveSettings = async function() {
-  var perf = document.querySelector('input[name="perf"]:checked');
   var retention = document.querySelector('input[name="retention"]:checked');
 
   var body = {
-    performance_mode: perf ? perf.value : 'balanced',
-    context_window: parseInt(document.getElementById('ctx-slider').value) || 6144,
-    kv_cache_quant: document.getElementById('kv-cache-quant').checked,
-    flash_attention: document.getElementById('flash-attention').checked,
-    analysis_mode: (document.querySelector('input[name="analysis_mode"]:checked') || {}).value || 'merged',
     auto_pause_heavy_apps: document.getElementById('auto-pause-toggle').checked,
     heavy_apps: document.getElementById('heavy-apps-input').value,
-    defer_analysis: document.getElementById('defer-toggle').checked,
     capture_interval: parseInt(document.getElementById('interval-slider').value),
     capture_active_monitor: document.getElementById('capture-active-monitor').checked,
-    meeting_transcription: document.getElementById('meeting-toggle').checked,
     meeting_apps: document.getElementById('meeting-apps-input').value,
     retention_days: retention ? parseInt(retention.value) : 7,
     // Privacy
@@ -551,7 +333,7 @@ function _initApp() {
   });
   navigate(initialView);
   pollStatus();
-  _setPollInterval(15000); // adaptive: core.js switches to 5s during downloads
+  _setPollInterval(15000);
 }
 
 window.shutdownScreenMind = async function() {

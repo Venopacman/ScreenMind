@@ -2,7 +2,6 @@
 #   .venv/bin/python bench/replay.py freeze <activity_id> --name <key>
 # Checks (all optional), on the row analysis writes:
 #   status, app_name_any, category_in, category_not_in,
-#   summary_any (one must appear in summary+details), summary_none, summary_not_generic,
 #   text_any, text_none, text_min_chars, text_max_chars, text_source_in (a11y|ocr|a11y+ocr|none),
 #   active_url, active_url_prefix, max_seconds
 # known_gap: <reason> reports a failing scenario as GAP instead of FAIL.
@@ -13,9 +12,8 @@ scenarios:
     expect:
       status: ok
       app_name_any: [Chrome]
-      category_in: [coding, browsing, writing]
-      summary_any: [ABC-123, ticket title words]
-      summary_not_generic: true
+      category_in: [browsing]
+      text_any: [ABC-123, ticket title words]
       active_url_prefix: https://linear.app/
       max_seconds: 120
 

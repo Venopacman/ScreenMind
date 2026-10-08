@@ -45,7 +45,7 @@ async function renderSearch(el) {
   el.innerHTML = `
     <div class="search-box">
       <span class="search-icon">🔍</span>
-      <input type="text" id="search-input" placeholder="Search screen text and labels... (e.g. 'auth module')">
+      <input type="text" id="search-input" placeholder="Search screen text, apps and actions... (e.g. 'auth module')">
     </div>
     <div class="search-filters">
       <div class="search-date-pills">
@@ -62,6 +62,9 @@ async function renderSearch(el) {
         <option value="browsing">Browsing</option>
         <option value="communication">Communication</option>
         <option value="design">Design</option>
+        <option value="terminal">Terminal</option>
+        <option value="media">Media</option>
+        <option value="meeting">Meeting</option>
         <option value="other">Other</option>
       </select>
     </div>
@@ -73,7 +76,7 @@ async function renderSearch(el) {
       <input type="date" id="search-date-to" value="${today}" max="${today}">
     </div>
     <div id="search-results">
-      <div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">Search</div><div>Type words that were on screen, or in a label or a call transcript.</div></div>
+      <div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">Search</div><div>Type words that were on screen, in an app or window name, in your typed text, or in an older call transcript.</div></div>
     </div>`;
 
   // ── Event: search input ──
@@ -159,9 +162,9 @@ async function doSearch(q) {
         const score = r.relevance_score !== undefined ? `<span class="relevance">${(r.relevance_score * 100).toFixed(0)}%</span>` : '';
         const badge = r.match_type === 'keyword' ? '<span class="match-badge keyword">🔤 Keyword</span>'
                     : r.match_type === 'meeting' ? '<span class="match-badge meeting">🎙️ Meeting</span>' : '';
-        const summaryHl = highlightText(r.summary || '', q);
-        const ocrSnippet = r.ocr_snippet ? `<div class="ocr-snippet">${highlightText(r.ocr_snippet, q)}</div>` : '';
-        const detailSnippet = r.match_type === 'meeting' && r.details ? `<div class="ocr-snippet">${highlightText(r.details, q)}</div>` : '';
+        const summaryHl = highlightText(escapeHtml(r.match_type === 'meeting' ? r.summary : frameLine(r)), q);
+        const ocrSnippet = r.ocr_snippet ? `<div class="ocr-snippet">${highlightText(escapeHtml(r.ocr_snippet), q)}</div>` : '';
+        const detailSnippet = r.match_type === 'meeting' && r.details ? `<div class="ocr-snippet">${highlightText(escapeHtml(r.details), q)}</div>` : '';
         // Use highlighted screenshot (shows purple boxes over matching OCR text on the image)
         const isMeeting = r.match_type === 'meeting';
         const hlUrl = !isMeeting && r.screenshot_url ? `${r.screenshot_url}/highlight?q=${encodeURIComponent(q)}` : '';
@@ -170,7 +173,7 @@ async function doSearch(q) {
         return `<div class="timeline-item search-result" style="animation-delay:${i * 0.06}s">
           ${isMeeting ? meetingIcon : thumbUrl ? `<img class="thumb" src="${thumbUrl}" loading="lazy" onclick="openModal('${thumbUrl}', ${r.id})" alt="">` : '<div class="thumb"></div>'}
           <div class="info">
-            <div class="top"><span class="time">${date} ${time}</span><span class="app-name">${r.app_name || 'Unknown'}</span><span class="badge badge-${rCat}">${rCat}</span>${score} ${badge}</div>
+            <div class="top"><span class="time">${date} ${time}</span><span class="app-name">${escapeHtml(r.app_name || 'Unknown')}</span><span class="badge badge-${rCat}">${rCat}</span>${score} ${badge}</div>
             <div class="summary">${summaryHl}</div>
             ${ocrSnippet}
             ${detailSnippet}

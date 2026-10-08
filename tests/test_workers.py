@@ -196,8 +196,7 @@ class TestAnalysisWorkerBackfill:
 
         worker = AnalysisWorker(queue=asyncio.Queue(maxsize=100), database=db)
         worker._process = AsyncMock()
-        with patch("screenmind.engine.model_manager.is_server_running", return_value=True):
-            await worker._backfill_skipped()
+        await worker._backfill_skipped()
 
         worker._process.assert_awaited_once()
         capture = worker._process.await_args.args[0]
@@ -206,12 +205,12 @@ class TestAnalysisWorkerBackfill:
 
 
 class TestFailedAnalysis:
-    """The analyzer returns "Analysis failed" instead of raising when llama-server
-    is down. Such frames must be stored as 'failed' so the backfill retries them."""
+    """A frame whose processing raises is stored as 'failed'. The idle
+    backfill retries it once per run."""
 
     def _setup(self, db, tmp_path):
         from PIL import Image
-        from screenmind.storage.models import ScreenshotEntry, ActivityRecord
+        from screenmind.storage.models import ScreenshotEntry
         from screenmind.workers.analysis_worker import AnalysisWorker
 
         shot = tmp_path / "shot.jpg"
@@ -222,37 +221,22 @@ class TestFailedAnalysis:
         ))
         worker = AnalysisWorker(queue=asyncio.Queue(maxsize=100), database=db)
         worker._ocr = MagicMock(is_available=True)
-        worker._ocr.extract_text_with_boxes.return_value = ("Inbox: 3 unread messages", [])
-        failed = (ActivityRecord(app_name="Mail", activity_category="other",
-                                 activity_summary="Analysis failed", confidence=0.0), [])
-        worker._analyzer = MagicMock()
-        worker._analyzer.analyze_screenshot_fast.return_value = failed
-        worker._analyzer.analyze_screenshot_balanced.return_value = failed
-        worker._analyzer.analyze_screenshot.return_value = failed
+        worker._ocr.extract_text_with_boxes.side_effect = RuntimeError("onnxruntime failed")
         capture = CaptureResult(
             filepath=shot, timestamp=datetime.now(), window_title="Inbox", app_name="Mail",
             image=Image.open(shot), activity_id=activity_id, phash=1,
         )
         return worker, capture, activity_id
 
-    async def test_failed_analysis_stored_as_failed(self, db, tmp_path):
+    async def test_failed_processing_stored_as_failed(self, db, tmp_path):
         worker, capture, activity_id = self._setup(db, tmp_path)
         await worker._process(capture)
 
         row = db.get_activity_by_id(activity_id)
-        assert row["summary"] == "Analysis failed"
+        assert row["summary"].startswith("Analysis failed")
         assert row["status"] == "failed"
-        # Not cached, so a similar next frame gets a real analysis
+        # Not cached, so a similar next frame is processed again
         assert worker._app_cache == {}
-
-    async def test_backfill_waits_for_llama_server(self, db, tmp_path):
-        worker, capture, _ = self._setup(db, tmp_path)
-        await worker._process(capture)
-        worker._process = AsyncMock()
-
-        with patch("screenmind.engine.model_manager.is_server_running", return_value=False):
-            await worker._backfill_skipped()
-        worker._process.assert_not_awaited()
 
     async def test_backfill_tries_a_failed_row_once(self, db, tmp_path):
         worker, capture, activity_id = self._setup(db, tmp_path)
@@ -260,19 +244,18 @@ class TestFailedAnalysis:
         process = worker._process
         worker._process = AsyncMock(side_effect=process)
 
-        with patch("screenmind.engine.model_manager.is_server_running", return_value=True):
-            await worker._backfill_skipped()
-            await worker._backfill_skipped()
+        await worker._backfill_skipped()
+        await worker._backfill_skipped()
 
         worker._process.assert_awaited_once()
         assert worker._process.await_args.args[0].activity_id == activity_id
         assert db.get_activity_by_id(activity_id)["status"] == "failed"
 
 
-class TestEmptyScreenRule:
-    """A frame with no app, no title and no text skips Gemma and is stored as idle."""
+class TestRuleLabels:
+    """Every frame gets app and category from rules, and its text stored. No model runs."""
 
-    def _setup(self, db, tmp_path, ocr_text, app=None, title=None):
+    def _setup(self, db, tmp_path, ocr_text, app=None, title=None, url=None, phash=None):
         from PIL import Image
         from screenmind.storage.models import ScreenshotEntry
         from screenmind.workers.analysis_worker import AnalysisWorker
@@ -286,42 +269,59 @@ class TestEmptyScreenRule:
         worker = AnalysisWorker(queue=asyncio.Queue(maxsize=100), database=db)
         worker._ocr = MagicMock(is_available=True)
         worker._ocr.extract_text_with_boxes.return_value = (ocr_text, [])
-        worker._analyzer = MagicMock()
-        worker._analyzer.analyze_screenshot_fast.side_effect = RuntimeError("gemma called")
-        worker._analyzer.analyze_screenshot_balanced.side_effect = RuntimeError("gemma called")
-        worker._analyzer.analyze_screenshot.side_effect = RuntimeError("gemma called")
         capture = CaptureResult(
             filepath=shot, timestamp=datetime.now(), window_title=title, app_name=app,
-            image=Image.open(shot), activity_id=activity_id,
+            image=Image.open(shot), activity_id=activity_id, browser_url=url, phash=phash,
         )
         return worker, capture, activity_id
 
-    def _gemma_called(self, worker):
-        a = worker._analyzer
-        return (a.analyze_screenshot_fast.called or a.analyze_screenshot_balanced.called
-                or a.analyze_screenshot.called)
-
-    async def test_wallpaper_only_is_idle_without_gemma(self, db, tmp_path):
+    async def test_wallpaper_only_is_idle(self, db, tmp_path):
         worker, capture, activity_id = self._setup(db, tmp_path, ocr_text="")
         await worker._process(capture)
 
         row = db.get_activity_by_id(activity_id)
         assert row["category"] == "idle"
         assert row["analysis_method"] == "rule:empty_screen"
-        assert not self._gemma_called(worker)
 
-    async def test_unlabeled_display_with_text_still_analyzed(self, db, tmp_path):
+    async def test_unlabeled_display_with_text_gets_rules(self, db, tmp_path):
         """A floating call window has no normal window but plenty of text."""
-        worker, capture, _ = self._setup(
+        worker, capture, activity_id = self._setup(
             db, tmp_path, ocr_text="Max Bigin  Daniil Golovin  Pavel Granin  Leave call")
         await worker._process(capture)
-        assert self._gemma_called(worker)
+        row = db.get_activity_by_id(activity_id)
+        assert row["analysis_method"] == "rules"
+        assert row["status"] == "ok"
+        assert "Leave call" in row["ocr_text"]
 
-    async def test_labeled_frame_never_hits_rule(self, db, tmp_path):
-        worker, capture, _ = self._setup(
-            db, tmp_path, ocr_text="", app="Google Chrome", title="New Tab")
+    async def test_browser_frame(self, db, tmp_path):
+        worker, capture, activity_id = self._setup(
+            db, tmp_path, ocr_text="Pull request #12 Files changed", app="Google Chrome",
+            title="Fix login by me · Pull Request #12 · org/repo", url="https://github.com/org/repo/pull/12")
         await worker._process(capture)
-        assert self._gemma_called(worker)
+        row = db.get_activity_by_id(activity_id)
+        assert row["app_name"] == "Google Chrome"
+        assert row["category"] == "coding"
+        assert row["active_url"] == "https://github.com/org/repo/pull/12"
+        assert row["status"] == "ok" and row["analysis_method"] == "rules"
+        # Nothing looked at the image
+        assert row["summary"] == "" and row["scene_description"] == ""
+
+    async def test_identical_frame_reuses_text_without_ocr(self, db, tmp_path):
+        worker, capture, first_id = self._setup(
+            db, tmp_path, ocr_text="Inbox: 3 unread messages", app="Mail", title="Inbox", phash=1)
+        await worker._process(capture)
+        from screenmind.storage.models import ScreenshotEntry
+        second_id = db.insert_activity(ScreenshotEntry(
+            timestamp=capture.timestamp, screenshot_path=str(capture.filepath),
+            window_title="Inbox", detected_app_name="Mail"))
+        capture.activity_id = second_id
+        await worker._process(capture)
+
+        assert worker._ocr.extract_text_with_boxes.call_count == 1
+        row = db.get_activity_by_id(second_id)
+        assert row["analysis_method"] == "cache:identical"
+        assert row["ocr_text"] == "Inbox: 3 unread messages"
+        assert row["category"] == "communication"
 
 
 class TestCaptureAllMonitors:
@@ -518,7 +518,6 @@ class TestBacklogSkip:
         worker = AnalysisWorker(queue=queue, database=db)
         worker._backfill_skipped = AsyncMock()
         worker._ocr = MagicMock(is_available=True)
-        worker._analyzer = MagicMock()
         await queue.put(capture)
         task = asyncio.create_task(worker.run())
         try:
@@ -547,7 +546,6 @@ class TestBacklogSkip:
         assert row["category"] is None
         assert row["summary"] is None
         assert not worker._ocr.extract_text_with_boxes.called
-        assert not worker._analyzer.method_calls
 
     async def test_skipped_frames_not_in_analytics(self, db, tmp_path):
         capture = self._stale_capture(db, tmp_path, a11y_text="text")
@@ -572,8 +570,7 @@ class TestBacklogSkip:
 
         worker = AnalysisWorker(queue=asyncio.Queue(maxsize=10), database=db)
         worker._process = AsyncMock()
-        with patch("screenmind.engine.model_manager.is_server_running", return_value=True):
-            await worker._backfill_skipped()
+        await worker._backfill_skipped()
 
         again = worker._process.await_args.args[0]
         assert again.a11y_text == "Browse channels"
@@ -783,10 +780,9 @@ class TestOcrBoxRedaction:
     async def test_secrets_redacted_in_boxes_and_organized_text(self, db, tmp_path, monkeypatch):
         import json
         from PIL import Image
-        from screenmind.storage.models import ActivityRecord, ScreenshotEntry
+        from screenmind.storage.models import ScreenshotEntry
         from screenmind.workers.analysis_worker import AnalysisWorker
 
-        monkeypatch.setattr(settings_mod.settings, "analysis_mode", "fast")
         shot = tmp_path / "shot.jpg"
         Image.new("RGB", (400, 200), "white").save(shot)
         activity_id = db.insert_activity(ScreenshotEntry(
@@ -806,12 +802,6 @@ class TestOcrBoxRedaction:
         worker = AnalysisWorker(queue=asyncio.Queue(maxsize=10), database=db)
         worker._ocr = MagicMock(is_available=True)
         worker._ocr.extract_text_with_boxes.return_value = (raw, boxes)
-        worker._analyzer = MagicMock()
-        worker._analyzer.analyze_screenshot_fast.return_value = (
-            ActivityRecord(app_name="Notepad", activity_category="writing",
-                           activity_summary="Editing notes", scene_description="A text file"),
-            [],
-        )
         capture = CaptureResult(
             filepath=shot, timestamp=datetime.now(), window_title="notes.txt - Notepad",
             app_name="notepad", image=Image.open(shot), activity_id=activity_id,
@@ -825,5 +815,4 @@ class TestOcrBoxRedaction:
             assert secret not in stored_boxes
             assert secret not in row["organized_text"]
             assert secret not in row["ocr_text"]
-            assert secret not in worker._analyzer.analyze_screenshot_fast.call_args.kwargs["ocr_text"]
         assert "Server login notes" in row["organized_text"]

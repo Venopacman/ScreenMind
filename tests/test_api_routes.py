@@ -93,7 +93,8 @@ async def test_settings_get(client):
     assert resp.status_code == 200
     data = resp.json()
     assert "capture_interval" in data
-    assert "performance_mode" in data
+    for removed in ("performance_mode", "analysis_mode", "context_window", "meeting_transcription"):
+        assert removed not in data
 
 
 @pytest.mark.asyncio
@@ -145,12 +146,11 @@ async def test_meetings_empty(client):
 
 
 @pytest.mark.asyncio
-async def test_models_list(client):
+async def test_models_routes_removed(client):
     resp = await client.get("/api/models")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "models" in data
-    assert len(data["models"]) >= 1
+    assert resp.status_code == 404
+    resp = await client.get("/api/status")
+    assert "model" not in resp.json()
 
 
 @pytest.mark.asyncio

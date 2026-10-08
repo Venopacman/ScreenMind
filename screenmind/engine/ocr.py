@@ -1,11 +1,12 @@
 """
 OCR Engine — Text Extraction from Screenshots
-Extracts visible text to enhance Gemma 4's analysis context.
+Extracts visible text when the accessibility tree has no real content.
 Uses RapidOCR (PaddleOCR models on ONNX Runtime). CPU only, no PyTorch.
 """
 
 import logging
 import time
+from pathlib import Path
 from typing import Optional
 
 from PIL import Image
@@ -131,16 +132,17 @@ def _tune_sessions(engine, threads: int) -> None:
 
 
 def _ocr_models_dir():
-    from screenmind.engine.model_manager import _models_dir
-    d = _models_dir() / "ocr"
+    """Where RapidOCR keeps its models: ~/.screenmind/models/ocr, shared by
+    every data dir (dev instances too). RapidOCR downloads them on first use.
+    A copy inside the app bundle would be looked up here, before this one."""
+    d = Path.home() / ".screenmind" / "models" / "ocr"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 class OCRExtractor:
     """
-    Lightweight OCR that extracts screen text to feed into Gemma 4
-    as additional context, improving analysis accuracy.
+    Lightweight OCR that extracts screen text for storage and search.
 
     Text detection uses PP-OCRv6 tiny (best on dark UIs and fastest in our
     tests); recognition uses the PP-OCRv5 model for the configured language.

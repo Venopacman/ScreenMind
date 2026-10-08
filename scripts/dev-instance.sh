@@ -3,14 +3,9 @@
 #
 # The main instance runs from the main checkout: port 7777, data in ~/.screenmind.
 # A worktree instance gets its own data dir and port, so it never touches the
-# main DB, screenshots or settings. It shares the downloaded models
-# (~/.screenmind/models) and the running llama-server. It uses the worktree's
-# own venv if it has one (`uv sync` in the worktree), else the main checkout's.
-#
-# The dev instance never starts or stops llama-server (LLAMA_SERVER_SHARED=1).
-# If none is running, it captures without analysis. Start the main instance
-# to get analysis. A server started here would die with the dev instance,
-# even after the main instance began to use it.
+# main DB, screenshots or settings. It shares the downloaded OCR models
+# (~/.screenmind/models/ocr). It uses the worktree's own venv if it has one
+# (`uv sync` in the worktree), else the main checkout's.
 #
 # Usage (from the worktree root):
 #   scripts/dev-instance.sh [run|info|reset]
@@ -61,8 +56,6 @@ case "${1:-run}" in
         export SCREENMIND_DATA_DIR="$DATA"
         export API_PORT="$PORT"
         export SETUP_COMPLETE=true
-        # Use the main instance's llama-server, never start or stop it
-        export LLAMA_SERVER_SHARED=1
 
         mkdir -p "$DATA"
         # A missing DB means "first run", which rewrites ~/Desktop/ScreenMind.command

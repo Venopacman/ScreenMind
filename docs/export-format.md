@@ -4,7 +4,7 @@ ScreenMind can export captured data as a zip archive. The archive has one folder
 
 Code: [`screenmind/export/`](../screenmind/export/) and [`screenmind/api/routes/export.py`](../screenmind/api/routes/export.py). Tests: [`tests/test_export.py`](../tests/test_export.py).
 
-Format version: **2** (`manifest.json` → `schema_version`). Change `SCHEMA_VERSION` in `archive.py` and this file when a field changes meaning or goes away. Adding a field does not need a new version.
+Format version: **3** (`manifest.json` → `schema_version`). Change `SCHEMA_VERSION` in `archive.py` and this file when a field changes meaning or goes away. Adding a field does not need a new version.
 
 ## Dashboard
 
@@ -84,7 +84,7 @@ To add a rule: write a class with `name`, `params()` and `split(activities)`, an
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Format version, `2`. Version 2 dropped `bookmarked` and `dev_context` from `activities.jsonl` and the `Repo:` line (bookmarks and git context were removed from ScreenMind). |
+| `schema_version` | Format version, `3`. Version 3: `category` comes from rules (app and site), and `summary`, `details`, `scene_description`, `mood`, `confidence`, `visible_text` are empty for frames captured after Gemma was removed. Version 2 dropped `bookmarked` and `dev_context` from `activities.jsonl` and the `Repo:` line (bookmarks and git context were removed from ScreenMind). |
 | `generator`, `app_version`, `git_sha` | `ScreenMind`, the package version, the commit (null for an installed package) |
 | `exported_at` | Local time with offset |
 | `user` | As typed |
@@ -111,7 +111,7 @@ Then `## Meetings` (if any) and `## Timeline`. Each activity is one block:
 ### 16:46:02 | Google Chrome | meeting
 Window: Meet - distillery daily #2
 URL: https://meet.google.com/dsv-einb-rbg
-Summary: ...
+Summary: ...          (only frames from before Gemma was removed)
 Details: ...
 User actions: ...
 Screenshot: screenshots/1290_16-46-02_118_m2.jpg
@@ -145,12 +145,13 @@ One JSON object per line, one line per captured screen, oldest first. Full text,
 | `detected_app` | App name from the OS |
 | `window_title` | |
 | `url` | Sanitized browser URL or null |
-| `category`, `summary`, `details`, `scene_description`, `mood`, `confidence` | From the Gemma analysis |
+| `category` | From rules: the app (`KNOWN_APP_CATEGORIES`) or, in a browser, the site (`SITE_CATEGORIES`) in `screenmind/engine/labels.py`. `other` when no rule knows the app. Frames from before Gemma was removed keep Gemma's category |
+| `summary`, `details`, `scene_description`, `mood`, `confidence` | From the Gemma analysis, on frames captured before it was removed. Empty or null on newer frames |
 | `screen_text` | `ocr_text`: a11y text or OCR text |
 | `organized_text` | OCR text in layout order, or null |
-| `visible_text` | Key snippets, a list |
+| `visible_text` | Key snippets from Gemma, a list. Empty on newer frames |
 | `user_actions` | Readable summary of the UI events for this frame |
-| `analysis_method` | For example `full:fast`, `cache:minor` |
+| `analysis_method` | `rules`, `cache:identical`, `rule:empty_screen`, with a `backfill:` prefix when done in idle time. Older frames: `full:fast`, `cache:minor` and so on |
 | `screenshot` | Path in the day folder, or null |
 
 Left out on purpose: `ocr_boxes`, `embedding`, `screenshot_path` (a local path), `status`, `analyzed`, `analysis_error`.
@@ -161,7 +162,7 @@ One line per event: `id`, `timestamp`, `session_id`, `activity_id`, `type` (`cli
 
 ### `meetings.jsonl`
 
-One line per recorded call: `id`, `start`, `end`, `session_ids`, `app`, `window_title`, `url`, `duration_minutes`, `summary`, `transcript` (full).
+One line per tracked call: `id`, `start`, `end`, `session_ids`, `app`, `window_title`, `url`, `duration_minutes`, `summary`, `transcript` (full). `summary` and `transcript` are null for calls tracked after transcription was removed.
 
 ## Privacy
 

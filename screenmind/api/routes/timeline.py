@@ -1,21 +1,12 @@
-"""Timeline routes — list activities, activity detail, delete, reanalyze."""
+"""Timeline routes — list activities, activity detail, delete."""
 
-import asyncio
-import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 
-from screenmind.config import settings
 from screenmind.api.dependencies import db
-from screenmind.workers.daemon_executor import DaemonExecutor
 
 router = APIRouter(prefix="/api", tags=["timeline"])
-
-# Re-analysis runs its Gemma call here, not in the default executor: the
-# interpreter joins those threads at exit, so a stop would wait for the call.
-_reanalyze_executor = DaemonExecutor("reanalyze")
-
 
 @router.get("/timeline")
 async def get_timeline(
@@ -69,96 +60,3 @@ async def delete_activity(activity_id: int):
     conn.execute("DELETE FROM activities WHERE id = ?", (activity_id,))
     conn.commit()
     return {"deleted": True, "activity_id": activity_id}
-
-
-@router.post("/activities/{activity_id}/reanalyze")
-async def reanalyze_activity(activity_id: int):
-    """Re-run Gemma analysis + layout detection on a single activity."""
-    conn = db._get_conn()
-    row = conn.execute(
-        "SELECT screenshot_path, ocr_text, ocr_boxes, detected_app, window_title FROM activities WHERE id = ?",
-        (activity_id,),
-    ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Activity not found")
-
-    ss_path = row[0]
-    if not ss_path or not Path(ss_path).exists():
-        raise HTTPException(status_code=400, detail="Screenshot not found")
-
-    from PIL import Image as _Image
-    from screenmind.engine.analyzer import GemmaAnalyzer
-    from screenmind.engine.layout_analyzer import organize_ocr_text, cluster_ocr_layout
-    from screenmind.config import settings as app_settings
-
-    try:
-        from screenmind.privacy.encryption import open_image as _enc_open
-        img = _enc_open(ss_path)
-
-        # Re-run Gemma analysis (respects analysis_mode setting)
-        ocr_text = row[1] or ""
-        app_name = row[3] or None
-        window_title = row[4] or None
-
-        # Extract URLs from OCR text (same as analysis_worker)
-        from screenmind.workers.analysis_worker import _extract_all_urls
-        active_urls = _extract_all_urls(ocr_text) if ocr_text else []
-
-        analyzer = GemmaAnalyzer()
-        try:
-            _MODE_MAP = {
-                "fast": analyzer.analyze_screenshot_fast,
-                "balanced": analyzer.analyze_screenshot_balanced,
-                "merged": analyzer.analyze_screenshot,
-            }
-            analyze_fn = _MODE_MAP.get(app_settings.analysis_mode, analyzer.analyze_screenshot_fast)
-            record, layout_regions = await asyncio.wait_for(
-                asyncio.get_running_loop().run_in_executor(
-                    _reanalyze_executor,
-                    lambda: analyze_fn(
-                        image=img,
-                        window_title=window_title,
-                        app_name_hint=app_name,
-                        ocr_text=ocr_text,
-                        active_urls=active_urls,
-                    ),
-                ),
-                timeout=300,
-            )
-        except asyncio.TimeoutError:
-            raise HTTPException(status_code=504, detail="Re-analysis timed out (server unresponsive)")
-
-
-        # Organize text using layout regions (Gemma regions or OCR clustering)
-        organized_text = ""
-        ocr_boxes_raw = row[2]
-        if ocr_boxes_raw:
-            ocr_boxes = json.loads(ocr_boxes_raw)
-            try:
-                screen_w, screen_h = img.size
-                regions = layout_regions if layout_regions else cluster_ocr_layout(ocr_boxes, screen_w, screen_h)
-                organized_text = organize_ocr_text(
-                    ocr_boxes, regions, screen_w, screen_h
-                )
-            except Exception as e:
-                organized_text = ""  # Non-fatal — skip layout on error
-
-        # Update DB (handles FTS5 sync automatically)
-        db.update_activity_analysis(
-            activity_id=activity_id,
-            analysis=record,
-            ocr_text=ocr_text,
-            organized_text=organized_text,
-            analysis_method="reanalyze",
-        )
-
-        return {
-            "reanalyzed": True,
-            "activity_id": activity_id,
-            "summary": record.activity_summary,
-            "category": record.activity_category,
-        }
-    except HTTPException:
-        raise  # Re-raise timeout 504
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Re-analysis failed: {str(e)[:200]}")

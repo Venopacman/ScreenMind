@@ -1,9 +1,6 @@
-"""Tests for engine/layout_analyzer.py — pure geometry logic, no GPU/LLM needed."""
+"""Tests for engine/layout_analyzer.py — pure geometry logic."""
 import pytest
 from screenmind.engine.layout_analyzer import (
-    _parse_layout_json,
-    _validate_regions,
-    _fallback_regions,
     _is_timestamp,
     _group_into_rows,
     _format_rows_simple,
@@ -11,81 +8,6 @@ from screenmind.engine.layout_analyzer import (
     cluster_ocr_layout,
     organize_ocr_text,
 )
-
-
-# ── _parse_layout_json ──────────────────────────────────────────────────
-
-class TestParseLayoutJson:
-    def test_valid_json_array(self):
-        raw = '[{"name":"sidebar","x_start":0.0,"x_end":0.2,"y_start":0.0,"y_end":1.0,"content_type":"navigation"}]'
-        result = _parse_layout_json(raw)
-        assert len(result) == 1
-        assert result[0]["name"] == "sidebar"
-
-    def test_json_with_markdown_fences(self):
-        raw = '```json\n[{"name":"main","x_start":0.0,"x_end":1.0}]\n```'
-        result = _parse_layout_json(raw)
-        assert len(result) >= 1
-        assert result[0]["name"] == "main"
-
-    def test_truncated_json_recovery(self):
-        raw = '[{"name":"a","x_start":0.0,"x_end":0.5},{"name":"b","x_start":0.5,"x_end":1.0'
-        result = _parse_layout_json(raw)
-        # Should recover at least the first complete object
-        assert len(result) >= 1
-
-    def test_garbage_input_returns_fallback(self):
-        result = _parse_layout_json("this is not json at all")
-        assert len(result) == 1
-        assert result[0]["name"] == "full_screen"
-
-    def test_empty_string_returns_fallback(self):
-        result = _parse_layout_json("")
-        assert len(result) == 1
-
-    def test_json_embedded_in_text(self):
-        raw = 'Here are the regions: [{"name":"content","x_start":0.0,"x_end":1.0}] end.'
-        result = _parse_layout_json(raw)
-        assert result[0]["name"] == "content"
-
-
-# ── _validate_regions ───────────────────────────────────────────────────
-
-class TestValidateRegions:
-    def test_valid_region(self):
-        regions = [{"name": "sidebar", "x_start": 0.0, "x_end": 0.2}]
-        result = _validate_regions(regions)
-        assert len(result) == 1
-        assert result[0]["y_start"] == 0.0  # default filled
-        assert result[0]["y_end"] == 1.0
-        assert result[0]["content_type"] == "unknown"
-
-    def test_missing_required_fields_filtered(self):
-        regions = [
-            {"name": "good", "x_start": 0.0, "x_end": 1.0},
-            {"name": "bad"},  # missing x_start, x_end
-        ]
-        result = _validate_regions(regions)
-        assert len(result) == 1
-        assert result[0]["name"] == "good"
-
-    def test_all_invalid_returns_fallback(self):
-        regions = [{"foo": "bar"}]
-        result = _validate_regions(regions)
-        assert result[0]["name"] == "full_screen"
-
-    def test_empty_list_returns_fallback(self):
-        result = _validate_regions([])
-        assert result[0]["name"] == "full_screen"
-
-
-# ── _fallback_regions ───────────────────────────────────────────────────
-
-def test_fallback_regions():
-    result = _fallback_regions()
-    assert len(result) == 1
-    assert result[0]["x_start"] == 0.0
-    assert result[0]["x_end"] == 1.0
 
 
 # ── _is_timestamp ───────────────────────────────────────────────────────

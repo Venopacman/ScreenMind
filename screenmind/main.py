@@ -29,23 +29,6 @@ from screenmind.watchdog import Watchdog, start_shutdown_deadline
 logger = logging.getLogger("screenmind.main")
 
 
-def check_llama_server() -> bool:
-    """Check if llama-server is reachable and ready for inference."""
-    from screenmind.engine import llm_client
-
-    status = llm_client.get_server_status()
-    if status["status"] == "ok":
-        logger.info(f"OK - llama-server online at {settings.llama_server_host}")
-        return True
-    elif status["status"] == "unreachable":
-        # Normal on a cold start: main() starts the server right after this.
-        logger.info(f"llama-server is not running at {settings.llama_server_host} yet")
-        return False
-    else:
-        logger.info(f"WARN - llama-server issue: {status['detail']}")
-        return False
-
-
 def check_disk_space():
     """Warn if disk space is low."""
     try:
@@ -78,14 +61,6 @@ def print_first_run_help():
         except Exception:
             pass  # Non-critical — don't block startup
 
-
-
-def _is_interactive() -> bool:
-    """Check if stdin is attached to a TTY (interactive terminal)."""
-    try:
-        return sys.stdin is not None and sys.stdin.isatty()
-    except Exception:
-        return False
 
 
 def _is_port_in_use(port: int) -> bool:
@@ -125,7 +100,7 @@ async def main():
 
     _safe_print("=" * 60)
     _safe_print("  ScreenMind — Privacy-First Screen Activity Journal")
-    _safe_print("  Powered by Gemma 4 E2B (100% Local)")
+    _safe_print("  100% local: screen text, apps and actions")
     _safe_print("=" * 60)
     _safe_print()
 
@@ -136,45 +111,11 @@ async def main():
     logger.info(f"Data directory: {settings.data_path}")
     logger.info("Settings that differ from the defaults: %s", settings.describe_non_defaults())
     logger.info(f"Capture interval: {settings.capture_interval}s")
-    logger.info(f"Model: {settings.active_model}")
     if settings.blocked_apps_list:
         logger.info(f"Privacy zones: {', '.join(settings.blocked_apps_list)}")
     _safe_print()
 
-    # ── llama-server setup ─────────────────────────────────────────────
-    # Check if llama-server binary is available; offer to install if missing
-    from screenmind.setup_llama import ensure_llama_server
-    llama_binary_available = ensure_llama_server()
-
-    # ── Health checks ────────────────────────────────────────────────
-    from screenmind.engine import model_manager
-    if llama_binary_available:
-        # Binary exists — check if server is running, start if not
-        if not check_llama_server():
-            if not settings.llama_server_shared:  # shared: start_server only adopts
-                logger.info("Starting llama-server automatically...")
-            llm_server_ok = model_manager.start_server(settings.active_model, timeout=120)
-        else:
-            llm_server_ok = True
-            # Detect what model the external server has loaded
-            detection = model_manager.detect_running_model()
-            if detection:
-                model_manager.adopt_external_server(detection)
-    else:
-        llm_server_ok = False
-
     check_disk_space()
-    if not llm_server_ok:
-        _safe_print()
-        logger.warning("Starting without Gemma 4 -- screenshots will be captured")
-        logger.warning("but NOT analyzed until llama-server is available.")
-        logger.warning("The dashboard and API will still work with existing data.")
-        if not llama_binary_available and is_frozen():
-            from screenmind.setup_llama import LLAMA_DIR
-            logger.info(f"Put llama-server in {LLAMA_DIR} or on PATH to get analysis.")
-        elif not llama_binary_available:
-            logger.info("Run 'python -m screenmind.setup_llama' to install llama-server.")
-        _safe_print()
     _safe_print()
 
     # ── Shared services ──────────────────────────────────────────────
@@ -202,7 +143,7 @@ async def main():
         capture_worker.resume(source="startup_restore")
         logger.info("Capture auto-resumed from previous session.")
 
-    # ── Audio Worker (call tracking + meeting transcription) ─────────
+    # ── Audio Worker (call tracking) ────────────────────────────────
     audio_worker = AudioWorker(database=db)
     audio_worker.start()  # own thread, independent of capture timing
 
@@ -325,7 +266,7 @@ async def main():
     server.should_exit = True
 
     capture_task.cancel()
-    # Abandons a Gemma call in flight; its frame stays 'pending' for backfill
+    # Abandons an OCR call in flight; its frame stays 'pending' for backfill
     analysis_task.cancel()
     retention_task.cancel()
 
@@ -335,7 +276,6 @@ async def main():
         pass
 
     db.close()
-    model_manager.stop_server()
     logger.info("Goodbye!")
 
 

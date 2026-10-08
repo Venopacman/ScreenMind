@@ -1,20 +1,12 @@
 """
 Analysis Worker
 Consumes screenshots from the capture queue, extracts text (a11y/OCR),
-labels them with Gemma 4, then stores everything.
+redacts sensitive data, labels the frame by rules (app and category from
+the OS app name, window title and URL), then stores everything.
+No model looks at the image.
 
-Three analysis modes (configurable via settings.analysis_mode):
-  - "merged" (Accurate): Single LLM call with thinking (~76s). Gemma detects
-    layout regions + produces analysis in one pass. Best for complex layouts.
-  - "balanced": thinking for the analysis, no layout (~40s).
-  - "fast": No-thinking LLM call for analysis (~12s) + instant OCR-based
-    layout clustering. 6x faster, no LLM needed for layout.
-
-Per-app pHash cache avoids redundant processing for similar screens:
-  - identical (diff <= 3): skip OCR + Gemma, reuse everything from cache
-  - minor (diff 4-10, cache younger than 240 s for chat apps or 420 s for
-    others): reuse layout + Gemma analysis, re-run OCR
-  - full (otherwise): run full pipeline
+Per-app pHash cache: a frame almost identical (diff <= 3) to the last one
+of the same app and title reuses its text, so OCR does not run again.
 """
 
 import asyncio
@@ -28,11 +20,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PIL import Image
-
 from screenmind.config import settings
-from screenmind.engine import model_manager
-from screenmind.engine.analyzer import GemmaAnalyzer
+from screenmind.engine.labels import label_frame
 from screenmind.engine.ocr import OCRExtractor
 from screenmind.storage.database import Database
 from screenmind.storage.models import ScreenshotEntry, ActivityRecord
@@ -166,10 +155,11 @@ def _extract_all_urls(text: str) -> list[str]:
 
 class AnalysisWorker:
     """
-    Background worker that processes queued screenshots through the full pipeline:
-    1. OCR text extraction (fast, feeds into Gemma as context)
-    2. Gemma 4 analysis (merged, balanced or fast mode) + Layout detection (Gemma or OCR clustering)
-    3. Database storage
+    Background worker that processes queued screenshots through the pipeline:
+    1. Text: a11y text from capture time, OCR when a11y has no real content
+    2. Sensitive data filter, layout clustering of the OCR boxes
+    3. Labels from rules (app name, category)
+    4. Database storage
     """
 
     _APP_CACHE_MAX = 30  # Max entries in per-app LRU cache
@@ -177,7 +167,6 @@ class AnalysisWorker:
     def __init__(self, queue: asyncio.Queue, database: Database):
         self._queue = queue
         self._db = database
-        self._analyzer = GemmaAnalyzer()
         self._ocr = OCRExtractor()
         self._running = False
         self._processed = 0
@@ -186,13 +175,13 @@ class AnalysisWorker:
         # Rows backfill already tried in this run. A row that fails again stays
         # 'failed' and is not retried until restart, so one bad frame can't loop.
         self._backfill_tried: set[int] = set()
-        # OCR and Gemma calls run here, not in the default executor, so a stop
-        # does not wait for a call in flight. run() abandons it on exit; the
+        # OCR runs here, not in the default executor, so a stop does not
+        # wait for a call in flight. run() abandons it on exit; the
         # cancelled _process writes nothing, so the frame stays 'pending'.
         self._executor = DaemonExecutor("analysis")
 
-        # Per-app analysis cache: (app_name, title) -> cached results
-        # Avoids redundant Gemma calls for identical/similar screens
+        # Per-app text cache: (app_name, title) -> last frame's text
+        # Avoids OCR for identical screens
         self._app_cache: OrderedDict = OrderedDict()
         self._cache_hits = 0
         self._cache_skips = 0
@@ -202,7 +191,7 @@ class AnalysisWorker:
         try:
             await self._run()
         finally:
-            # Leave a call in flight behind: the stop must not wait for Gemma
+            # Leave an OCR call in flight behind: the stop must not wait for it
             self._executor.shutdown(wait=False, cancel_futures=True)
 
     async def _run(self):
@@ -241,25 +230,12 @@ class AnalysisWorker:
                         self._last_queue_log = now
                     continue
 
-                # Deferred analysis: wait until idle (60s no new items)
-                if settings.defer_analysis:
-                    while True:
-                        try:
-                            next_item = await asyncio.wait_for(
-                                self._queue.get(), timeout=60.0
-                            )
-                            # Got another item before idle timeout — keep the latest
-                            capture = next_item
-                        except asyncio.TimeoutError:
-                            # 60s idle — time to process
-                            break
-
-                # Time-based staleness skip: don't analyze captures > 3 min old
-                # (they're stale — user has moved on).
+                # Time-based staleness skip: don't OCR captures > 3 min old
+                # now; the idle backfill picks them up later.
                 age_seconds = (datetime.now() - capture.timestamp).total_seconds()
                 if age_seconds > 180:
                     if capture.activity_id:
-                        # Keep what was read at capture time; no OCR, no Gemma.
+                        # Keep what was read at capture time; no OCR.
                         self._db.mark_skipped(
                             capture.activity_id,
                             ocr_text=filter_sensitive(capture.a11y_text),
@@ -314,55 +290,42 @@ class AnalysisWorker:
         try:
             logger.info(f"Processing #{activity_id} ({capture.app_name or 'unknown'})...")
 
-            # 2. Per-app cache check — skip OCR + Gemma for identical screens
-            #    Compare pHash against last analyzed frame for same (app, title).
+            # Only the URL the browser itself reports. A URL found in the screen
+            # text is usually a link in the page or a chat, not the page (Chrome
+            # hides https:// in the address bar), and a wrong URL is worse than none.
+            active_url = capture.browser_url
+            labels = label_frame(capture.app_name, capture.window_title, active_url)
+
+            # 1. Per-app cache: an identical screen reuses the last frame's text.
+            #    Compare pHash against last processed frame for same (app, title).
             cache_key = (capture.app_name or "unknown", (capture.window_title or "")[:100])
             cached = self._app_cache.get(cache_key)
-            tier = "full"  # default: full Gemma call
-
-            if cached and capture.phash:
-                phash_diff = capture.phash - cached["phash"]
-                cache_age = time.time() - cached["timestamp"]
-
-                # Communication apps change content faster — shorter stale window
-                _app_lower = (capture.app_name or "").lower()
-                _is_comms = any(c in _app_lower for c in ("discord", "slack", "teams", "whatsapp", "telegram", "gmail", "outlook", "mail"))
-                stale_limit = 240 if _is_comms else 420  # 4min comms, 7min others
-
-                if phash_diff <= 3:
-                    tier = "identical"
-                elif phash_diff <= 10 and cache_age < stale_limit:
-                    tier = "minor"
-                # else: 11+ or stale -> full pipeline
-
-            # --- Tier "identical": copy everything from cache, skip OCR entirely ---
-            if tier == "identical":
-                active_url = capture.browser_url or cached.get("active_url")
+            if cached and capture.phash and capture.phash - cached["phash"] <= 3:
                 method_label = "backfill:cache:identical" if self._is_backfill else "cache:identical"
                 self._db.update_activity_analysis(
                     activity_id=activity_id,
-                    analysis=cached["analysis"],
+                    analysis=labels,
                     ocr_text=cached.get("ocr_text"),
                     ocr_boxes=cached.get("ocr_boxes_json"),
                     organized_text=cached.get("organized_text"),
                     analysis_method=method_label,
-                    active_url=active_url,
+                    active_url=active_url or cached.get("active_url"),
                 )
                 self._cache_hits += 1
                 elapsed = time.time() - start
                 self._processed += 1
                 logger.info(f"#{self._processed} in {elapsed:.1f}s: "
-                      f"{cached['analysis'].app_name} ({cached['analysis'].activity_category}) "
+                      f"{labels.app_name} ({labels.activity_category}) "
                       f"[cache: identical]")
                 return
 
-            # 3. Text extraction (only for minor/full tiers)
+            # 2. Text extraction
             ocr_text = None
             ocr_boxes = None
             ocr_boxes_json = None
             text_method = "none"
 
-            # 3a. Use a11y text captured at screenshot time (correct window)
+            # 2a. Use a11y text captured at screenshot time (correct window)
             a11y_text = capture.a11y_text
 
             # Detect if a11y text is just window chrome (buttons, menus, tabs,
@@ -378,7 +341,7 @@ class AnalysisWorker:
                 # A11y got some text but it's chrome — keep for metadata, will use OCR as primary
                 text_method = "a11y"
 
-            # 3b. OCR — runs when a11y text is chrome-only or insufficient
+            # 2b. OCR — runs when a11y text is chrome-only or insufficient
             needs_ocr = not a11y_is_content or text_method == "none"
             if needs_ocr and self._ocr.is_available:
                 ocr_raw, ocr_boxes = await asyncio.get_running_loop().run_in_executor(
@@ -407,7 +370,7 @@ class AnalysisWorker:
                             ocr_text = ocr_raw
                             text_method = "ocr"
 
-            # 3c. Sensitive data filter — redact before AI + storage. The boxes
+            # 2c. Sensitive data filter — redact before storage. The boxes
             #     too: they are stored and organized_text is built from them.
             ocr_text = filter_sensitive(ocr_text)
             if ocr_boxes and settings.sensitive_filter_enabled:
@@ -419,10 +382,9 @@ class AnalysisWorker:
             if ocr_boxes:
                 ocr_boxes_json = json.dumps(ocr_boxes)
 
-            # 3c'. Nothing on screen: no window label and almost no text (e.g. a
-            #      display showing only the wallpaper). Skip Gemma. Without hints
-            #      it guesses a category ("coding"), and an empty display would
-            #      count as work time. Also saves a GPU call per empty display.
+            # 2d. Nothing on screen: no window label and almost no text (e.g. a
+            #     display showing only the wallpaper). Label it idle, so an
+            #     empty display does not count as work time.
             if (not capture.app_name and not capture.window_title
                     and _screen_text_len(ocr_text) < _EMPTY_SCREEN_MAX_TEXT):
                 self._db.update_activity_analysis(
@@ -439,164 +401,45 @@ class AnalysisWorker:
                 )
                 self._processed += 1
                 logger.info(f"#{self._processed} in {time.time() - start:.1f}s: "
-                            f"empty display (idle) [no Gemma]")
+                            f"empty display (idle)")
                 return
 
-            # 3d. Extract URLs from text (for Gemma hint + DB storage)
-            found_urls = _extract_all_urls(ocr_text)
-            if capture.browser_url and capture.browser_url not in found_urls:
-                found_urls.insert(0, capture.browser_url)
-            # Only the URL the browser itself reports. A URL found in the screen
-            # text is usually a link in the page or a chat, not the page (Chrome
-            # hides https:// in the address bar), and a wrong URL is worse than none.
-            active_url = capture.browser_url
-
-            # --- Tier "minor": run OCR (already done above), reuse Gemma + layout ---
-            if tier == "minor":
-                analysis = cached["analysis"]
-                layout_regions = cached["regions"]
-
-                # Rebuild organized text with NEW OCR boxes + CACHED layout regions
-                organized_text = None
-                if layout_regions and ocr_boxes:
-                    try:
-                        from screenmind.engine.layout_analyzer import organize_ocr_text
-                        screen_w, screen_h = capture.image.size
-                        organized_text = organize_ocr_text(ocr_boxes, layout_regions, screen_w, screen_h)
-                        if organized_text:
-                            text_method += "+layout"
-                    except Exception as e:
-                        logger.debug(f"Text organization failed (non-fatal): {e}")
-
-                self._cache_hits += 1
-                tier_label = "cache: minor"
-                logger.info(f"Processing #{activity_id} [{tier_label}] ...")
-                # Falls through to: DB update
-            else:
-                # --- Tier "full": run Gemma analysis + layout detection ---
-                tier_label = "full"
-
-                async def _run_analysis():
-                    """Gemma 4 analysis + layout with smart OOM retry."""
-                    OOM_KEYWORDS = {"memory", "oom", "resource", "allocat", "failed to load"}
-                    _MODE_MAP = {
-                        "fast": self._analyzer.analyze_screenshot_fast,
-                        "balanced": self._analyzer.analyze_screenshot_balanced,
-                        "merged": self._analyzer.analyze_screenshot,
-                    }
-                    analyze_fn = _MODE_MAP.get(settings.analysis_mode, self._analyzer.analyze_screenshot_fast)
-                    max_retries = 3
-                    for attempt in range(max_retries):
-                        try:
-                            return await asyncio.get_running_loop().run_in_executor(
-                                self._executor,
-                                lambda: analyze_fn(
-                                    image=capture.image,
-                                    window_title=capture.window_title,
-                                    app_name_hint=capture.app_name,
-                                    ocr_text=ocr_text,
-                                    active_urls=found_urls,
-                                    user_actions=capture.user_actions,
-                                ),
-                            )
-                        except Exception as e:
-                            err_msg = str(e).lower()
-                            is_oom = any(kw in err_msg for kw in OOM_KEYWORDS)
-                            if attempt < max_retries - 1:
-                                wait = 15 * (attempt + 1) if is_oom else 2 ** (attempt + 1)
-                                kind = "OOM" if is_oom else "Error"
-                                logger.warning(f"{kind} (attempt {attempt + 1}), retry in {wait}s: {e}", exc_info=is_oom)
-                                await asyncio.sleep(wait)
-                            else:
-                                retry_count = getattr(capture, '_retry_count', 0)
-                                if retry_count < 2 and is_oom:
-                                    capture._retry_count = retry_count + 1
-                                    await self._queue.put(capture)
-                                    logger.warning(f"Re-queued (attempt {retry_count + 1}/2): {e}", exc_info=True)
-                                    return None
-                                raise
-
-                result = await _run_analysis()
-
-                if result is None:
-                    return  # Re-queued or fatal
-
-                analysis, layout_regions = result
-
-                # ── Quality gate: retry once if critical fields are missing ──
-                _missing = []
-                if not analysis.activity_summary:
-                    _missing.append("summary")
-                if not analysis.scene_description:
-                    _missing.append("scene_description")
-                if not analysis.activity_category or analysis.activity_category == "other":
-                    _missing.append("category")
-
-                if _missing and not getattr(capture, '_quality_retried', False):
-                    capture._quality_retried = True
-                    logger.debug(f"Missing fields ({', '.join(_missing)}) — retrying analysis...")
-                    await asyncio.sleep(1)
-                    retry_result = await _run_analysis()
-                    if retry_result:
-                        retry_analysis, retry_regions = retry_result
-                        # Take retry if it filled more fields
-                        retry_missing = []
-                        if not retry_analysis.activity_summary:
-                            retry_missing.append("summary")
-                        if not retry_analysis.scene_description:
-                            retry_missing.append("scene_description")
-                        if len(retry_missing) < len(_missing):
-                            analysis, layout_regions = retry_analysis, retry_regions
-                            logger.debug(f"Retry filled: {set(_missing) - set(retry_missing)}")
-                        else:
-                            logger.debug(f"Retry didn't improve — keeping original")
-
-                # Organize text using layout regions + OCR boxes (geometry only, no LLM)
-                organized_text = None
-                if ocr_boxes:
-                    try:
-                        from screenmind.engine.layout_analyzer import organize_ocr_text, cluster_ocr_layout
-                        screen_w, screen_h = capture.image.size
-                        # Use Gemma regions if available, otherwise OCR clustering
-                        regions = layout_regions if layout_regions else cluster_ocr_layout(ocr_boxes, screen_w, screen_h)
-                        organized_text = organize_ocr_text(ocr_boxes, regions, screen_w, screen_h)
-                        if organized_text:
-                            logger.debug(f"Organized text: {len(organized_text)} chars ({len(regions)} regions)")
-                            text_method += "+layout"
-                    except Exception as e:
-                        logger.debug(f"Text organization failed (non-fatal): {e}")
+            # 3. Organize OCR text by screen region (geometry only)
+            organized_text = None
+            if ocr_boxes:
+                try:
+                    from screenmind.engine.layout_analyzer import organize_ocr_text, cluster_ocr_layout
+                    screen_w, screen_h = capture.image.size
+                    regions = cluster_ocr_layout(ocr_boxes, screen_w, screen_h)
+                    organized_text = organize_ocr_text(ocr_boxes, regions, screen_w, screen_h)
+                    if organized_text:
+                        logger.debug(f"Organized text: {len(organized_text)} chars ({len(regions)} regions)")
+                        text_method += "+layout"
+                except Exception as e:
+                    logger.debug(f"Text organization failed (non-fatal): {e}")
 
             # 4. Update DB with all results
-            analysis_label = f"cache:minor" if tier == "minor" else f"full:{settings.analysis_mode}"
-            if self._is_backfill:
-                analysis_label = f"backfill:{analysis_label}"
-            # The analyzer returns "Analysis failed..." instead of raising when
-            # llama-server is down. Store it as 'failed' so the idle backfill retries it.
-            failed = (analysis.activity_summary or "").startswith("Analysis failed")
+            analysis_label = "backfill:rules" if self._is_backfill else "rules"
             self._db.update_activity_analysis(
                 activity_id=activity_id,
-                analysis=analysis,
+                analysis=labels,
                 ocr_text=ocr_text,
                 ocr_boxes=ocr_boxes_json,
                 organized_text=organized_text,
                 analysis_method=analysis_label,
                 active_url=active_url,
-                status="failed" if failed else "ok",
             )
 
-            # 5. Update per-app cache (for both "full" and "minor" tiers).
-            # Never cache a failure: similar frames would copy it.
-            if capture.phash and not failed:
+            # 5. Update per-app cache
+            if capture.phash:
                 self._app_cache[cache_key] = {
                     "phash": capture.phash,
-                    "analysis": analysis,
-                    "regions": layout_regions if tier == "full" else cached.get("regions", []),
                     "ocr_text": ocr_text,
                     "ocr_boxes_json": ocr_boxes_json,
                     "organized_text": organized_text,
                     "active_url": active_url,
-                    "timestamp": cached["timestamp"] if tier == "minor" else time.time(),
                 }
+                self._app_cache.move_to_end(cache_key)
                 # LRU eviction
                 if len(self._app_cache) > self._APP_CACHE_MAX:
                     self._app_cache.popitem(last=False)
@@ -608,10 +451,8 @@ class AnalysisWorker:
             text_len = len(ocr_text) if ocr_text else 0
             parts = [
                 f"#{self._processed} in {elapsed:.1f}s:",
-                f"{analysis.app_name} ({analysis.activity_category})",
-                f"-- {analysis.activity_summary[:50]}",
+                f"{labels.app_name} ({labels.activity_category})",
                 f"[text: {text_len} chars via {text_method}]",
-                f"[{tier_label}]",
             ]
             if capture.user_actions:
                 parts.append(f"[actions: {capture.user_actions.count(chr(10)) + 1}]")
@@ -639,10 +480,6 @@ class AnalysisWorker:
         Catches: entries from crashes (analyzed=0) + stale skips.
         """
         try:
-            # Without llama-server every retry fails again
-            if not model_manager.is_server_running():
-                return
-
             conn = self._db._get_conn()
             row = conn.execute(
                 """SELECT id, screenshot_path, window_title, COALESCE(detected_app, app_name), ocr_text, ocr_boxes,

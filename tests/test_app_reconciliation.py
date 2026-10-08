@@ -1,23 +1,22 @@
-"""Tests for three-signal app reconciliation (Issue #6).
+"""Tests for frame labels from rules (Issue #6).
 
-Validates that _normalize() correctly reconciles OS-detected app name,
-window title, and Gemma's visual guess to produce accurate app_name
-and activity_category values.
+Validates that label_frame() reconciles the OS-detected app name and the
+window title (and, in a browser, the URL) into app_name and
+activity_category. No model is involved.
 
 See: https://github.com/ayushh0110/ScreenMind/issues/6
 """
 
 import pytest
 
-from screenmind.engine.analyzer import (
-    GemmaAnalyzer,
+from screenmind.engine.labels import (
     _extract_app_from_title,
     _extract_simple_title,
     _is_browser_window,
-    _is_more_specific_name,
     _lookup_known_category,
+    _site_category,
+    label_frame,
 )
-from screenmind.storage.models import ActivityRecord
 
 
 # ── Helper: _extract_app_from_title ──────────────────────────────────────────
@@ -121,42 +120,6 @@ class TestExtractSimpleTitle:
 
     def test_whitespace_only(self):
         assert _extract_simple_title("   ") is None
-
-
-# ── Helper: _is_more_specific_name ───────────────────────────────────────────
-
-
-class TestIsMoreSpecificName:
-    """Test word-boundary substring matching."""
-
-    def test_code_to_vs_code(self):
-        assert _is_more_specific_name("code", "vs code") is True
-
-    def test_chrome_to_google_chrome(self):
-        assert _is_more_specific_name("chrome", "google chrome") is True
-
-    def test_obs_to_obs_studio(self):
-        assert _is_more_specific_name("obs", "obs studio") is True
-
-    def test_st_not_steam(self):
-        """'st' should NOT match 'steam' — different apps."""
-        assert _is_more_specific_name("st", "steam") is False
-
-    def test_vim_not_neovim(self):
-        """'vim' should NOT match 'neovim' — different apps."""
-        assert _is_more_specific_name("vim", "neovim") is False
-
-    def test_same_length(self):
-        assert _is_more_specific_name("discord", "discord") is False
-
-    def test_gemma_shorter(self):
-        assert _is_more_specific_name("visual studio code", "vs code") is False
-
-    def test_alacritty_not_vs_code(self):
-        assert _is_more_specific_name("alacritty", "vs code") is False
-
-    def test_hyper_to_hyper_terminal(self):
-        assert _is_more_specific_name("hyper", "hyper terminal") is True
 
 
 # ── Helper: _is_browser_window ───────────────────────────────────────────────
@@ -267,208 +230,174 @@ class TestLookupKnownCategory:
         assert _lookup_known_category("gnome-termin") == "terminal"
 
 
-# ── Full reconciliation: _normalize() scenarios ─────────────────────────────
+class TestSiteCategory:
+    """Browser windows get their category from the site."""
+
+    def test_url_host(self):
+        assert _site_category("https://www.youtube.com/watch?v=x", None) == "media"
+
+    def test_url_subdomain_of_known_site(self):
+        assert _site_category("https://team.atlassian.net/wiki/x", None) == "writing"
+
+    def test_specific_host_beats_parent(self):
+        assert _site_category("https://music.youtube.com/", None) == "media"
+        assert _site_category("https://meet.google.com/abc-defg-hij", None) == "meeting"
+
+    def test_url_without_scheme(self):
+        assert _site_category("github.com/org/repo", None) == "coding"
+
+    def test_title_words_without_url(self):
+        assert _site_category(None, "Inbox (3) - Gmail - Google Chrome") == "communication"
+
+    def test_unknown_site(self):
+        assert _site_category("https://example.com/", "Example - Google Chrome") is None
 
 
-@pytest.fixture
-def analyzer():
-    return GemmaAnalyzer()
+# ── Full labels: label_frame() scenarios ──────────────────────────────────
 
 
-def _make_record(**kwargs):
-    """Create an ActivityRecord with defaults for testing."""
-    defaults = {
-        "app_name": "unknown",
-        "activity_category": "other",
-        "activity_summary": "test",
-        "mood": "neutral",
-        "confidence": 0.8,
-    }
-    defaults.update(kwargs)
-    return ActivityRecord(**defaults)
-
-
-class TestReconcileAppName:
-    """Test the 4-level hierarchy for app name resolution."""
+class TestLabelFrame:
+    """The 4-level hierarchy for the app name, and the category rules."""
 
     @pytest.fixture(autouse=True)
     def _os_name_not_trusted(self, monkeypatch):
         # These scenarios use Windows/Linux-style process names and titles.
-        # macOS resolves the OS owner first; see TestReconcileAppNameMacOS.
-        monkeypatch.setattr("screenmind.engine.analyzer._os_app_name_is_trusted", lambda: False)
+        # macOS resolves the OS owner first; see TestLabelFrameMacOS.
+        monkeypatch.setattr("screenmind.engine.labels._os_app_name_is_trusted", lambda: False)
 
-    def test_scenario_1_alacritty_misidentified(self, analyzer):
-        """Alacritty (terminal) misidentified as VS Code."""
-        record = _make_record(app_name="VS Code", activity_category="coding")
-        result = analyzer._normalize(record, app_name_hint="Alacritty", window_title="user@host: ~")
+    def test_scenario_1_alacritty(self):
+        result = label_frame("Alacritty", "user@host: ~")
         assert result.app_name == "Alacritty"
         assert result.activity_category == "terminal"
 
-    def test_scenario_2_anytype_misidentified(self, analyzer):
-        """AnyType (notes) misidentified as VS Code."""
-        record = _make_record(app_name="VS Code", activity_category="coding")
-        result = analyzer._normalize(record, app_name_hint="AnyType", window_title="AnyType")
+    def test_scenario_2_anytype(self):
+        result = label_frame("AnyType", "AnyType")
         assert result.app_name == "AnyType"
         assert result.activity_category == "writing"
 
-    def test_scenario_3_vscode_more_specific(self, analyzer):
-        """OS gives 'code', Gemma gives friendlier 'VS Code'."""
-        record = _make_record(app_name="VS Code", activity_category="coding")
-        result = analyzer._normalize(record, app_name_hint="code",
-                                     window_title="main.py - Visual Studio Code")
-        # L1 extracts "Visual Studio Code" from title
-        # Compare: "visual studio code" is NOT a substring of "vs code" (different)
-        # So we use the title extraction: "Visual Studio Code"
+    def test_scenario_3_vscode_from_title(self):
+        result = label_frame("code", "main.py - Visual Studio Code")
         assert result.app_name == "Visual Studio Code"
+        assert result.activity_category == "coding"
 
-    def test_scenario_4_chrome_youtube(self, analyzer):
-        """Chrome showing YouTube — category should be 'media', not 'browsing'."""
-        record = _make_record(app_name="YouTube", activity_category="media")
-        result = analyzer._normalize(record, app_name_hint="chrome",
-                                     window_title="YouTube - Google Chrome")
+    def test_scenario_4_chrome_youtube(self):
+        """Chrome showing YouTube — category from the site: 'media'."""
+        result = label_frame("chrome", "YouTube - Google Chrome", "https://www.youtube.com/watch?v=1")
         assert result.app_name == "Google Chrome"
-        assert result.activity_category == "media"  # Browser: trust Gemma
+        assert result.activity_category == "media"
 
-    def test_scenario_5_firefox_gmail(self, analyzer):
-        """Firefox showing Gmail — category should be 'communication'."""
-        record = _make_record(app_name="Gmail", activity_category="communication")
-        result = analyzer._normalize(record, app_name_hint="firefox",
-                                     window_title="Gmail - Mozilla Firefox")
+    def test_scenario_5_firefox_gmail_no_url(self):
+        """Firefox showing Gmail, no URL — category from the title words."""
+        result = label_frame("firefox", "Gmail - Mozilla Firefox")
         assert result.app_name == "Mozilla Firefox"
-        assert result.activity_category == "communication"  # Browser: trust Gemma
+        assert result.activity_category == "communication"
 
-    def test_scenario_6_electron_discord_title(self, analyzer):
-        """Electron wrapper with Discord in title."""
-        record = _make_record(app_name="Discord", activity_category="communication")
-        result = analyzer._normalize(record, app_name_hint="electron",
-                                     window_title="#general - Discord")
+    def test_scenario_6_electron_discord_title(self):
+        result = label_frame("electron", "#general - Discord")
         assert result.app_name == "Discord"
         assert result.activity_category == "communication"
 
-    def test_scenario_7_electron_no_title(self, analyzer):
-        """Electron wrapper, unhelpful title — use Gemma."""
-        record = _make_record(app_name="Slack", activity_category="communication")
-        result = analyzer._normalize(record, app_name_hint="electron",
-                                     window_title="Untitled")
-        assert result.app_name == "Slack"
+    def test_scenario_7_electron_no_title(self):
+        """Generic wrapper and an unhelpful title: nothing better than the wrapper."""
+        result = label_frame("electron", "Untitled")
+        assert result.app_name == "electron"
+        assert result.activity_category == "other"
 
-    def test_scenario_8_msedge_pwa_teams(self, analyzer):
-        """Edge PWA running Teams — no browser suffix."""
-        record = _make_record(app_name="Teams", activity_category="communication")
-        result = analyzer._normalize(record, app_name_hint="msedge",
-                                     window_title="Microsoft Teams")
+    def test_scenario_8_msedge_pwa_teams(self):
+        result = label_frame("msedge", "Microsoft Teams")
         assert result.app_name == "Microsoft Teams"
         assert result.activity_category == "communication"
 
-    def test_scenario_9_msedge_browser(self, analyzer):
-        """Edge as actual browser."""
-        record = _make_record(app_name="GitHub", activity_category="browsing")
-        result = analyzer._normalize(record, app_name_hint="msedge",
-                                     window_title="GitHub - Microsoft Edge")
+    def test_scenario_9_msedge_browser_unknown_site(self):
+        result = label_frame("msedge", "Some page - Microsoft Edge")
         assert result.app_name == "Microsoft Edge"
-        assert result.activity_category == "browsing"  # Browser: trust Gemma
+        assert result.activity_category == "browsing"
 
-    def test_scenario_10_uwp_calculator(self, analyzer):
-        """Windows UWP Calculator via ApplicationFrameHost."""
-        record = _make_record(app_name="Calculator", activity_category="other")
-        result = analyzer._normalize(record, app_name_hint="ApplicationFrameHost",
-                                     window_title="Calculator")
+    def test_scenario_10_uwp_calculator(self):
+        result = label_frame("ApplicationFrameHost", "Calculator")
         assert result.app_name == "Calculator"
+        assert result.activity_category == "other"
 
-    def test_scenario_11_os_none_anytype_title(self, analyzer):
-        """OS returns None, but title says 'AnyType'."""
-        record = _make_record(app_name="VS Code", activity_category="coding")
-        result = analyzer._normalize(record, app_name_hint=None, window_title="AnyType")
+    def test_scenario_11_os_none_anytype_title(self):
+        result = label_frame(None, "AnyType")
         assert result.app_name == "AnyType"
         assert result.activity_category == "writing"
 
-    def test_scenario_12_os_none_discord_title(self, analyzer):
-        """OS returns None, Discord in title."""
-        record = _make_record(app_name="Discord", activity_category="communication")
-        result = analyzer._normalize(record, app_name_hint=None,
-                                     window_title="#general - Discord")
+    def test_scenario_12_os_none_discord_title(self):
+        result = label_frame(None, "#general - Discord")
         assert result.app_name == "Discord"
         assert result.activity_category == "communication"
 
-    def test_scenario_13_os_none_untitled(self, analyzer):
-        """OS=None, title='Untitled' — unavoidable: must use Gemma."""
-        record = _make_record(app_name="VS Code", activity_category="coding")
-        result = analyzer._normalize(record, app_name_hint=None, window_title="Untitled")
-        assert result.app_name == "VS Code"
-        assert result.activity_category == "coding"
+    def test_scenario_13_os_none_untitled(self):
+        result = label_frame(None, "Untitled")
+        assert result.app_name == "unknown"
+        assert result.activity_category == "other"
 
-    def test_scenario_14_st_not_steam(self, analyzer):
-        """Short name 'st' (terminal) should NOT match Gemma's 'Steam'."""
-        record = _make_record(app_name="Steam", activity_category="media")
-        result = analyzer._normalize(record, app_name_hint="st", window_title="user@host: ~")
+    def test_scenario_14_st_terminal_not_steam(self):
+        result = label_frame("st", "user@host: ~")
         assert result.app_name == "st"
         assert result.activity_category == "terminal"
+        assert _lookup_known_category("steam") is None
 
-    def test_scenario_15_vim_not_neovim(self, analyzer):
-        """vim should NOT be treated as a more-specific version of neovim."""
-        record = _make_record(app_name="Neovim", activity_category="coding")
-        result = analyzer._normalize(record, app_name_hint="vim", window_title="config.py")
+    def test_scenario_15_vim(self):
+        result = label_frame("vim", "config.py")
         assert result.app_name == "vim"
 
-    def test_scenario_16_gnome_terminal_truncated(self, analyzer):
-        """Linux 15-char truncation: 'gnome-terminal-'."""
-        record = _make_record(app_name="Terminal", activity_category="terminal")
-        result = analyzer._normalize(record, app_name_hint="gnome-terminal-",
-                                     window_title="user@host: ~")
+    def test_scenario_16_gnome_terminal_truncated(self):
+        result = label_frame("gnome-terminal-", "user@host: ~")
         assert result.app_name == "gnome-terminal-"
         assert result.activity_category == "terminal"
 
-    def test_scenario_17_all_agree(self, analyzer):
-        """All signals agree — no change needed."""
-        record = _make_record(app_name="Discord", activity_category="communication")
-        result = analyzer._normalize(record, app_name_hint="Discord",
-                                     window_title="#general - Discord")
-        assert result.app_name == "Discord"
-        assert result.activity_category == "communication"
-
-    def test_scenario_18_unknown_app(self, analyzer):
-        """Unknown app not in dict — use OS name, keep Gemma category."""
-        record = _make_record(app_name="VS Code", activity_category="coding")
-        result = analyzer._normalize(record, app_name_hint="myobscureapp",
-                                     window_title="Some Window")
+    def test_scenario_18_unknown_app(self):
+        result = label_frame("myobscureapp", "Some Window")
         assert result.app_name == "myobscureapp"
-        assert result.activity_category == "coding"  # Not in known dict → Gemma stays
+        assert result.activity_category == "other"
 
-    def test_scenario_19_browser_process_shadows_title(self, analyzer):
-        """Firefox tab without browser suffix — OS 'firefox' still triggers browser detection."""
-        record = _make_record(app_name="Jenkins", activity_category="browsing")
-        result = analyzer._normalize(record, app_name_hint="firefox",
-                                     window_title="Build Log - Jenkins")
-        assert result.app_name == "Jenkins"  # L1 extracts from title
-        assert result.activity_category == "browsing"  # Browser: trusts Gemma
+    def test_scenario_19_browser_process_shadows_title(self):
+        """Firefox tab without browser suffix — OS 'firefox' still marks a browser."""
+        result = label_frame("firefox", "Build Log - Jenkins")
+        assert result.app_name == "Jenkins"
+        assert result.activity_category == "browsing"
+
+    def test_url_marks_browser(self):
+        result = label_frame("Arc", "PR #12", "https://github.com/org/repo/pull/12")
+        assert result.activity_category == "coding"
+
+    def test_no_model_fields(self):
+        """Nothing looks at the image: summary and the rest stay empty."""
+        result = label_frame("Discord", "#general - Discord")
+        assert result.activity_summary == ""
+        assert result.detailed_context == ""
+        assert result.scene_description == ""
+        assert result.visible_text_snippets == []
 
 
-class TestReconcileAppNameMacOS:
+class TestLabelFrameMacOS:
     """Where the adapter trusts the OS app name (macOS), it wins over title parsing."""
 
     @pytest.fixture(autouse=True)
     def _os_name_trusted(self, monkeypatch):
-        monkeypatch.setattr("screenmind.engine.analyzer._os_app_name_is_trusted", lambda: True)
+        monkeypatch.setattr("screenmind.engine.labels._os_app_name_is_trusted", lambda: True)
 
-    def test_terminal_title_suffix_ignored(self, analyzer):
+    def test_terminal_title_suffix_ignored(self):
         """Terminal titles end in the window size, not the app name."""
-        record = _make_record(app_name="Terminal", activity_category="terminal")
-        result = analyzer._normalize(record, app_name_hint="Terminal",
-                                     window_title="ScreenMind — python — 120×30")
+        result = label_frame("Terminal", "ScreenMind — python — 120×30")
         assert result.app_name == "Terminal"
         assert result.activity_category == "terminal"
 
-    def test_owner_beats_title_segment(self, analyzer):
-        record = _make_record(app_name="Slack", activity_category="communication")
-        result = analyzer._normalize(record, app_name_hint="Slack",
-                                     window_title="general (Channel) - TripleTen - Slack")
+    def test_owner_beats_title_segment(self):
+        result = label_frame("Slack", "general (Channel) - TripleTen - Slack")
         assert result.app_name == "Slack"
+        assert result.activity_category == "communication"
 
-    def test_no_owner_falls_back_to_title(self, analyzer):
-        record = _make_record(app_name="Code", activity_category="coding")
-        result = analyzer._normalize(record, app_name_hint=None,
-                                     window_title="main.py - Visual Studio Code")
+    def test_no_owner_falls_back_to_title(self):
+        result = label_frame(None, "main.py - Visual Studio Code")
         assert result.app_name == "Visual Studio Code"
+
+    def test_macos_browser_owner(self):
+        result = label_frame("Google Chrome", "Inbox - Gmail", "https://mail.google.com/mail/u/0/")
+        assert result.app_name == "Google Chrome"
+        assert result.activity_category == "communication"
 
 
 class TestTrustsOsAppName:
@@ -489,41 +418,17 @@ class TestTrustsOsAppName:
         assert WindowsAdapter.trusts_os_app_name is PlatformAdapter.trusts_os_app_name
         assert LinuxAdapter.trusts_os_app_name is PlatformAdapter.trusts_os_app_name
 
-    def test_analyzer_reads_adapter(self, monkeypatch):
-        import screenmind.engine.analyzer as analyzer
+    def test_labels_read_adapter(self, monkeypatch):
+        import screenmind.engine.labels as analyzer
         fake = type("A", (), {"trusts_os_app_name": True})()
         monkeypatch.setattr(analyzer, "platform_adapter", lambda: fake)
         assert analyzer._os_app_name_is_trusted() is True
         fake.trusts_os_app_name = False
         assert analyzer._os_app_name_is_trusted() is False
 
-    def test_analyzer_adapter_error_means_untrusted(self, monkeypatch):
-        import screenmind.engine.analyzer as analyzer
+    def test_labels_adapter_error_means_untrusted(self, monkeypatch):
+        import screenmind.engine.labels as analyzer
         def boom():
             raise RuntimeError("no adapter")
         monkeypatch.setattr(analyzer, "platform_adapter", boom)
         assert analyzer._os_app_name_is_trusted() is False
-
-
-class TestBackwardCompatibility:
-    """Ensure old calling convention (no hints) works unchanged."""
-
-    def test_no_hints(self, analyzer):
-        """Calling _normalize without hints should behave exactly like before."""
-        record = _make_record(app_name="Chrome", activity_category="browsing", mood="productive")
-        result = analyzer._normalize(record)
-        assert result.app_name == "Chrome"
-        assert result.activity_category == "browsing"
-        assert result.mood == "productive"
-
-    def test_no_hints_invalid_category(self, analyzer):
-        record = _make_record(activity_category="invalid_thing", mood="unknown_mood")
-        result = analyzer._normalize(record)
-        assert result.activity_category == "other"
-        assert result.mood == "neutral"
-
-    def test_no_hints_confidence_clamping(self, analyzer):
-        record = _make_record(confidence=0.0)
-        result = analyzer._normalize(record)
-        # confidence=0.0 with non-empty summary → default to 0.7
-        assert result.confidence == 0.7

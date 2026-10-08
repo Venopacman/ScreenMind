@@ -11,9 +11,8 @@ router = APIRouter(prefix="/api", tags=["settings"])
 
 # Keys the dashboard reads and writes
 _DASHBOARD_KEYS = (
-    "capture_interval", "performance_mode", "context_window", "kv_cache_quant",
-    "flash_attention", "analysis_mode", "auto_pause_heavy_apps", "heavy_apps",
-    "defer_analysis", "meeting_transcription", "meeting_apps", "retention_days",
+    "capture_interval", "auto_pause_heavy_apps", "heavy_apps",
+    "meeting_apps", "retention_days",
     "sensitive_filter_enabled", "sensitive_filter_types", "encryption_enabled",
     "capture_active_monitor", "ui_events_enabled", "ui_events_types",
     "event_triggered_capture",
@@ -89,7 +88,7 @@ async def shutdown_server(request: Request):
             dependencies.request_shutdown()
             return
         # Use SIGINT for clean shutdown — allows uvicorn to run cleanup,
-        # close DB connections, stop llama-server, flush logs, run atexit.
+        # close DB connections, flush logs, run atexit.
         if sys.platform == "win32":
             # Windows: SIGINT to self doesn't work reliably, use CTRL_C_EVENT
             os.kill(os.getpid(), signal.CTRL_C_EVENT)

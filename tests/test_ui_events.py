@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PIL import Image
 
 from screenmind.capture.ui_events.base import FrontWindow, PermissionStatus, UiEventBackend
 from screenmind.capture.ui_events.models import (
@@ -740,21 +739,6 @@ class TestCaptureTriggers:
         worker._ui_recorder.flush_for_capture.assert_called_once()
         assert text == '- clicked button "Send" in Slack'
         assert db.get_activity_by_id(aid)["user_actions"] == text
-
-
-# ── Analyzer ────────────────────────────────────────────────────────
-
-
-class TestAnalyzerHint:
-    def test_user_actions_in_prompt(self):
-        from screenmind.engine.analyzer import GemmaAnalyzer, USER_ACTIONS_HINT
-        a = GemmaAnalyzer()
-        a._initialized = True
-        with patch("screenmind.engine.analyzer.llm_client.chat_with_images", return_value="{}") as chat:
-            a.analyze_screenshot_balanced(Image.new("RGB", (32, 32)), user_actions='- clicked button "Send" in Slack')
-        prompt = chat.call_args.kwargs["prompt"]
-        assert USER_ACTIONS_HINT in prompt
-        assert 'clicked button "Send"' in prompt
 
 
 def test_format_skips_unnamed_clicks():

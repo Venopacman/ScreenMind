@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ScreenMind — Local Activity Recorder</title>
-    <meta name="description" content="Records apps, windows, pages, screen text and calls. Labels them with a local Gemma model. All data stays on your machine.">
-    <link rel="stylesheet" href="/css/styles.css?v=18">
+    <meta name="description" content="Records apps, windows, pages, screen text and calls. All data stays on your machine.">
+    <link rel="stylesheet" href="/css/styles.css?v=19">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 </head>
 <body>
@@ -17,7 +17,7 @@
     <div style="color:var(--text-muted);font-size:0.9rem;margin-bottom:24px">A local recorder of what you do on screen.</div>
 
     <div style="color:var(--text-muted);font-size:0.85rem;line-height:1.6;margin-bottom:24px;text-align:left">
-      ScreenMind records which apps, windows and pages you use, the text on screen, and your calls. A local model labels each frame. Nothing leaves this machine unless you export it.
+      ScreenMind records which apps, windows and pages you use, the text on screen, and your calls. Nothing leaves this machine unless you export it.
     </div>
 
     <button class="btn btn-primary" style="padding:12px 32px;font-size:0.95rem;border-radius:12px" onclick="completeSetup()">Get Started</button>
@@ -86,45 +86,26 @@
         <div class="modal-details" id="modal-details">
             <div class="meta" id="modal-meta"></div>
             <div>
-                <div class="section-title">AI Summary</div>
+                <div class="section-title">Window</div>
                 <div class="summary-text" id="modal-summary">Loading...</div>
             </div>
             <div>
-                <div class="section-title">Scene Description</div>
-                <div class="modal-ocr" id="modal-ocr">No scene description yet</div>
+                <div class="section-title">Screen Text</div>
+                <div class="modal-ocr" id="modal-ocr">No screen text</div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Model Hub Overlay -->
-<div class="mh-overlay" id="mh-overlay" onclick="closeModelHub()">
-  <div class="mh-panel" onclick="event.stopPropagation()">
-    <button class="mh-close" onclick="closeModelHub()">✕</button>
-    <div class="mh-header">
-      <div class="mh-header-icon">🧠</div>
-      <div class="mh-header-title">Model Hub</div>
-      <div class="mh-header-desc">Manage your AI models</div>
-    </div>
-    <div class="mh-cards" id="mh-cards">
-      <div class="spinner" style="margin:20px auto"></div>
-    </div>
-    <div class="mh-footer" id="mh-footer">
-      <span class="mh-footer-dot"></span>
-      <span class="mh-footer-text">Checking status...</span>
-    </div>
-  </div>
-</div>
-
 <!-- Toast Notifications -->
 <div class="toast-container" id="toast-container"></div>
 
-<script src="/js/core.js?v=30"></script>
-<script src="/js/timeline.js?v=32"></script>
-<script src="/js/search.js?v=31"></script>
-<script src="/js/analytics.js?v=30"></script>
-<script src="/js/meetings.js?v=30"></script>
+<script src="/js/core.js?v=31"></script>
+<script src="/js/timeline.js?v=33"></script>
+<script src="/js/search.js?v=32"></script>
+<script src="/js/analytics.js?v=31"></script>
+<script src="/js/meetings.js?v=31"></script>
 <script src="/js/export.js?v=1"></script>
-<script src="/js/settings.js?v=32"></script>
+<script src="/js/settings.js?v=33"></script>
 </body>
 </html>

@@ -24,7 +24,8 @@ def test_env_file_keys_of_removed_settings_are_ignored(tmp_path, monkeypatch):
     """An old .env can still name removed settings. Startup must not fail."""
     env = tmp_path / ".env"
     env.write_text("BOOKMARK_HOTKEY=ctrl+shift+b\nWORKSPACE_DIRS=~/Projects\n"
-                   "GEMMA_MODE=local\nCAPTURE_INTERVAL=25\n")
+                   "GEMMA_MODE=local\nANALYSIS_MODE=fast\nLLAMA_SERVER_HOST=http://127.0.0.1:5809\n"
+                   "LLAMA_SERVER_SHARED=1\nPERFORMANCE_MODE=maximum\nCAPTURE_INTERVAL=25\n")
     s = Settings(_env_file=str(env), data_dir="/tmp/test")
     assert s.capture_interval == 25
     assert not hasattr(s, "bookmark_hotkey")
@@ -41,17 +42,6 @@ def test_meeting_apps_list():
     s = Settings(data_dir="/tmp/test", meeting_apps="zoom,teams,meet")
     assert "zoom" in s.meeting_apps_list
     assert len(s.meeting_apps_list) == 3
-
-
-def test_num_gpu_layers():
-    s = Settings(data_dir="/tmp/test", performance_mode="minimal")
-    assert s.num_gpu_layers == 0
-
-    s = Settings(data_dir="/tmp/test", performance_mode="balanced")
-    assert s.num_gpu_layers == 15
-
-    s = Settings(data_dir="/tmp/test", performance_mode="maximum")
-    assert s.num_gpu_layers == 99
 
 
 def test_data_path_resolution():
@@ -71,11 +61,15 @@ def test_settings_json_keys_of_removed_settings_are_ignored(tmp_path, caplog):
         "webhook_url": "https://example.com", "notion_token": "x",
         "obsidian_enabled": True, "agents_enabled": True, "auto_bookmark": True,
         "dashboard_lock_timeout": 30,
+        # Model settings, removed with Gemma
+        "performance_mode": "maximum", "analysis_mode": "merged", "active_model": "gemma-4-e2b",
+        "context_window": 6144, "defer_analysis": False, "meeting_transcription": True,
     }))
     with caplog.at_level(logging.INFO, logger="screenmind.config"):
         s.load_runtime_overrides()
     assert s.capture_interval == 25
     assert not hasattr(s, "bookmark_hotkey")
+    assert not hasattr(s, "performance_mode") and not hasattr(s, "analysis_mode")
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert "bookmark_hotkey" not in caplog.text
 

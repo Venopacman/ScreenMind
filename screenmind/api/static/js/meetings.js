@@ -3,21 +3,7 @@
 var meetingsDate = new Date().toISOString().split('T')[0];
 
 async function renderMeetings(el) {
-  // Check if current model supports audio
-  const audioWarning = (_modelState.capabilities && !_modelState.capabilities.audio && _modelState.status === 'ready')
-    ? `<div class="summary-locked-notice" style="margin-bottom:16px">
-        <div class="summary-locked-icon">🎙️</div>
-        <div class="summary-locked-text">
-          <strong>Current model doesn't support audio.</strong><br>
-          Meeting transcription requires Gemma 4 E2B/E4B.
-          <a href="#" onclick="openModelHub();return false" style="color:var(--accent)">Switch model</a> to enable audio features.
-          Existing meetings are still viewable.
-        </div>
-      </div>`
-    : '';
-
   el.innerHTML = `
-    ${audioWarning}
     <div class="date-nav" style="margin-bottom:20px">
       <button class="btn btn-ghost btn-sm" id="mtg-prev">◀</button>
       <input type="date" id="mtg-date" value="${meetingsDate}">
@@ -35,11 +21,6 @@ async function renderMeetings(el) {
   if (window._mtgRefresh) clearInterval(window._mtgRefresh);
   window._mtgRefresh = setInterval(() => { if (currentView === 'meetings') loadMeetingStatus(); }, 10000);
   loadMeetingStatus();
-
-  // Transcription quality hint — removed (Gemma handles all transcription now)
-  try {
-    // No Whisper model selection needed — Gemma 4's native audio encoder is used
-  } catch {}
 }
 
 function shiftMeetingsDate(days) {
@@ -61,9 +42,8 @@ async function loadMeetings() {
         <div class="empty-icon">🎙️</div>
         <div class="empty-title">No meetings recorded</div>
         <div style="color:var(--text-muted);font-size:0.85rem;max-width:380px;margin:0 auto;line-height:1.6">
-          <p>Meeting transcription is <strong>${(await api('/api/settings')).meeting_transcription ? '✅ enabled' : '❌ disabled'}</strong>.</p>
-          <p style="margin-top:8px">ScreenMind notices Zoom, Teams, Meet, Slack huddles and other calls on any display and records when they start and end. With transcription enabled it also records audio, transcribes with Gemma 4's native audio encoder, and generates AI-powered summaries.</p>
-          <p style="margin-top:8px;color:var(--accent)">Enable it in <a href="#settings" style="color:var(--accent);cursor:pointer" onclick="navigate('settings')">⚙️ Settings</a></p>
+          <p>ScreenMind notices Zoom, Teams, Meet, Slack huddles and other calls on any display and records the app, window title, room link, start and end. It records no audio.</p>
+          <p style="margin-top:8px">Choose which apps count as calls in <a href="#settings" style="color:var(--accent);cursor:pointer" onclick="navigate('settings')">⚙️ Settings</a>.</p>
         </div>
       </div>`;
       return;
@@ -80,14 +60,12 @@ async function loadMeetingStatus() {
     const el = $('#mtg-recording-status');
     if (!el) return;
     const app = (status.meeting_app || 'Meeting').replace(/</g, '&lt;');
-    if (status.in_meeting && status.recording) {
-      el.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;color:#ef4444;font-weight:600"><span class="pulse-dot" style="background:#ef4444"></span> Recording — ${app} (${status.transcript_chunks} chunks)</span>`;
-    } else if (status.in_meeting) {
+    if (status.in_meeting) {
       el.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-weight:600"><span class="pulse-dot"></span> In a call — ${app}</span>`;
-    } else if (status.enabled) {
-      el.innerHTML = `<span style="color:var(--text-muted)">🎙️ Listening for calls...</span>`;
+    } else if (status.tracking) {
+      el.innerHTML = `<span style="color:var(--text-muted)">Tracking calls</span>`;
     } else {
-      el.innerHTML = `<span style="color:var(--text-muted)">Tracking calls · transcription off</span>`;
+      el.innerHTML = `<span style="color:var(--text-muted)">Call tracking off (no call apps set)</span>`;
     }
   } catch { /* endpoint not available */ }
 }
@@ -96,9 +74,8 @@ function meetingDetailCard(m) {
   const startTime = new Date(m.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
   const endTime = m.end_time ? new Date(m.end_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : 'ongoing';
   const duration = m.duration_minutes ? `${Math.round(m.duration_minutes)} min` : '—';
-  // transcript is NULL for calls tracked without transcription
-  const tracked = m.transcript === null || m.transcript === undefined;
-  const summaryText = (m.summary || (tracked ? (m.end_time ? 'Call tracked. Transcription was off.' : 'Call in progress.') : '⏳ Generating summary...')).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // Only calls from before Gemma was removed have a summary and transcript
+  const summaryText = (m.summary || (m.end_time ? 'Call tracked.' : 'Call in progress.')).replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const titleLine = m.window_title ? ` · ${esc(m.window_title)}` : '';
   const urlLine = m.url ? ` · <a href="${esc(m.url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(m.url.replace(/^https?:\/\//, ''))}</a>` : '';
@@ -117,16 +94,13 @@ function meetingDetailCard(m) {
         <div class="card-menu-wrap" style="margin-left:12px">
           <button class="card-menu-trigger" style="opacity:0.6" onclick="event.stopPropagation(); toggleMtgMenu('${menuId}', this)">⋮</button>
           <div class="card-menu" id="${menuId}">
-            <button class="menu-item reanalyze-item" onclick="reanalyzeMeeting(${m.id})">
-              <span class="menu-icon">🔄</span> Re-analyze Summary
-            </button>
-            <button class="menu-item" onclick="copyMeetingTranscript(${m.id})">
+            ${transcriptText ? `<button class="menu-item" onclick="copyMeetingTranscript(${m.id})">
               <span class="menu-icon">📋</span> Copy Transcript
-            </button>
-            <button class="menu-item" onclick="copyMeetingSummary(${m.id})">
+            </button>` : ''}
+            ${m.summary ? `<button class="menu-item" onclick="copyMeetingSummary(${m.id})">
               <span class="menu-icon">📝</span> Copy Summary
-            </button>
-            <div class="menu-divider"></div>
+            </button>` : ''}
+            ${transcriptText || m.summary ? '<div class="menu-divider"></div>' : ''}
             <button class="menu-item delete-item" onclick="deleteMeeting(${m.id}, this)">
               <span class="menu-icon">🗑️</span> Delete Meeting
             </button>
@@ -154,34 +128,6 @@ function toggleMtgMenu(menuId, btn) {
     const close = (e) => { if (!menu.contains(e.target) && e.target !== btn) { menu.classList.remove('open'); btn.classList.remove('active'); document.removeEventListener('click', close); } };
     setTimeout(() => document.addEventListener('click', close), 0);
   }
-}
-
-async function reanalyzeMeeting(id) {
-  document.querySelectorAll('.card-menu.open').forEach(m => m.classList.remove('open'));
-  const sumEl = document.getElementById(`mtg-summary-${id}`);
-  if (sumEl) sumEl.textContent = '⏳ Re-generating summary...';
-  try {
-    await apiPost(`/api/meetings/${id}/reanalyze`);
-    showToast('Re-analyzing meeting — this takes ~15s...', 'info');
-    // Poll every 5s until summary changes (Gemma takes 10-20s)
-    let attempts = 0;
-    const poll = setInterval(async () => {
-      attempts++;
-      try {
-        const m = await api(`/api/meetings/${id}`);
-        const s = m.summary || '';
-        if (!s.includes('Re-generating') && !s.includes('interrupted') && s.length > 10) {
-          clearInterval(poll);
-          if (sumEl) sumEl.textContent = s;
-          showToast('Summary generated!', 'success');
-          loadMeetings(); // Full refresh to update card
-        } else if (attempts >= 6) {
-          clearInterval(poll);
-          loadMeetings(); // Show whatever we got
-        }
-      } catch { if (attempts >= 6) clearInterval(poll); }
-    }, 5000);
-  } catch (err) { showToast('Re-analyze failed: ' + err.message, 'warning'); }
 }
 
 function copyMeetingTranscript(id) {

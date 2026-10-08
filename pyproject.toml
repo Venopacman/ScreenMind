@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "screenmind"
 dynamic = ["version"]
-description = "Privacy-first AI screen activity journal -- captures, analyzes, and searches your screen history using Gemma 4, 100% locally."
+description = "Privacy-first screen activity journal -- captures screen text, apps and actions and makes them searchable, 100% locally."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.14"
 authors = [
     {name = "Ayush Shekhar"},
 ]
-keywords = ["screen-capture", "ai", "privacy", "gemma", "local-ai", "activity-tracker", "llm", "vision"]
+keywords = ["screen-capture", "privacy", "ocr", "accessibility", "activity-tracker"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -41,19 +41,9 @@ dependencies = [
     "Pillow>=10.0,<13.0",
     "imagehash>=4.3,<5.0",
 
-    # HTTP client (for llama-server communication)
-    "httpx>=0.28.0,<1.0",
-
-    # Numerical
-    "numpy>=1.26,<3.0",
-
     # OCR on ONNX Runtime (CPU, no PyTorch)
     "rapidocr>=3.9,<4.0",
     "onnxruntime>=1.18,<2.0",
-    "huggingface_hub>=0.20,<2.0",  # model downloads (Gemma)
-
-    # Audio / Meeting Transcription
-    "sounddevice>=0.5,<1.0",
 
     # Encryption (optional but included by default)
     "cryptography>=41.0,<50.0",
@@ -87,6 +77,8 @@ dev = [
     "pytest-cov",
     "flake8",
     "flake8-print",
+    "httpx>=0.28.0,<1.0",  # FastAPI TestClient / AsyncClient in tests
+    "numpy>=1.26,<3.0",  # test images (rapidocr installs it at runtime anyway)
 ]
 
 
