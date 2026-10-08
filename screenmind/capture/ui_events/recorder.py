@@ -185,8 +185,10 @@ class UiEventRecorder:
     def stop(self):
         if not self.running:
             return
-        self._backend.stop()
+        # Set the stop flag before the hook goes down, so the enricher does
+        # not take our own stop for a dead hook.
         self._stop.set()
+        self._backend.stop()
         self._thread.join(timeout=_STOP_JOIN_S)
         if self._thread.is_alive():
             logger.warning("UI events: enricher thread is stuck; leaving it behind")
@@ -314,7 +316,10 @@ class UiEventRecorder:
                         "time(s); turned it back on")
             self._seen_reenabled = reenabled
 
-        if self._started_at and not self._hook_dead_warned and not self._backend.is_running():
+        # Read the stop flag after is_running(): stop() sets it before it
+        # stops the hook, so a hook stopped by stop() is never seen as dead.
+        if (self._started_at and not self._hook_dead_warned
+                and not self._backend.is_running() and not self._stop.is_set()):
             self._hook_dead_warned = True
             self._last_error = "The input hook stopped"
             logger.warning("UI events: the input hook stopped. Clicks and keys are no longer "

@@ -50,6 +50,21 @@ class TestCaptureWorker:
         worker.pause(source="test")
         assert worker._dedup._last_hash is None
 
+    @pytest.mark.parametrize("paused, state, hint", [(True, "paused", True),
+                                                     (False, "capturing", False)])
+    def test_ready_line_says_real_state(self, paused, state, hint, caplog):
+        """main.py may resume capture before run() starts."""
+        import logging
+        worker, _ = self._make_worker()
+        worker._paused = paused
+        worker._capture_tick = AsyncMock()
+        worker._take_due_trigger = lambda: worker.stop()  # one pass only
+        with caplog.at_level(logging.INFO, logger="screenmind.workers.capture_worker"):
+            asyncio.run(worker.run())
+        msgs = [r.getMessage() for r in caplog.records]
+        assert any(m.startswith(f"Ready ({state}).") for m in msgs)
+        assert any("Start Capturing" in m for m in msgs) is hint
+
     def test_initial_counts_zero(self):
         worker, _ = self._make_worker()
         assert worker._capture_count == 0

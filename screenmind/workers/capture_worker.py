@@ -96,12 +96,14 @@ class CaptureWorker:
         UI events request extra grabs, deduped too.
         """
         self._running = True
+        # main.py may resume capture before run() starts, so log the real state.
         logger.info(
-            f"Ready (paused). Smart capture (5s poll, "
+            f"Ready ({'paused' if self._paused else 'capturing'}). Smart capture (5s poll, "
             f"{settings.capture_interval}s max), "
             f"Saving to: {settings.screenshots_dir}"
         )
-        logger.info("Click 'Start Capturing' in the dashboard to begin.")
+        if self._paused:
+            logger.info("Click 'Start Capturing' in the dashboard to begin.")
 
         while self._running:
             # Read by the watchdog: a pass every <= 5 s, paused or not

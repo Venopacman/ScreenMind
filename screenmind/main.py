@@ -37,8 +37,8 @@ def check_llama_server() -> bool:
         logger.info(f"OK - llama-server online at {settings.llama_server_host}")
         return True
     elif status["status"] == "unreachable":
-        logger.error(f"FAIL - Cannot reach llama-server at {settings.llama_server_host}")
-        logger.info(f"Start it with: llama-server -hf ggml-org/gemma-4-E2B-it-GGUF:gemma-4-E2B-it-Q4_0 --mmproj-auto -ngl 99 --port {settings.llama_server_port}")
+        # Normal on a cold start: main() starts the server right after this.
+        logger.info(f"llama-server is not running at {settings.llama_server_host} yet")
         return False
     else:
         logger.info(f"WARN - llama-server issue: {status['detail']}")
@@ -136,7 +136,7 @@ async def main():
     if llama_binary_available:
         # Binary exists — check if server is running, start if not
         if not check_llama_server():
-            logger.info("llama-server not running — starting automatically...")
+            logger.info("Starting llama-server automatically...")
             llm_server_ok = model_manager.start_server(settings.active_model, timeout=120)
         else:
             llm_server_ok = True

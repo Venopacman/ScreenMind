@@ -393,3 +393,18 @@ class TestBackgroundMode:
             # subprocess.Popen([pythonw, "-m", "screenmind"]) — no --background
             cmd = [r"C:\Python312\pythonw.exe", "-m", "screenmind"]
             assert "--background" not in cmd
+
+
+class TestLlamaServerCheck:
+    def test_not_running_yet_is_info_without_manual_hint(self, caplog):
+        """main() starts llama-server right after this check fails."""
+        import logging
+        from screenmind import main
+        with patch("screenmind.engine.llm_client.get_server_status",
+                   return_value={"status": "unreachable"}):
+            with caplog.at_level(logging.INFO, logger="screenmind.main"):
+                assert main.check_llama_server() is False
+        assert all(r.levelno == logging.INFO for r in caplog.records)
+        msgs = [r.getMessage() for r in caplog.records]
+        assert any("not running" in m for m in msgs)
+        assert not any("Start it with" in m or "-ngl" in m for m in msgs)

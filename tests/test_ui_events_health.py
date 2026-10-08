@@ -167,6 +167,19 @@ class TestHealth:
         assert len(dead) == 1
         assert r.status()["hook_running"] is False
 
+    def test_own_stop_is_not_a_dead_hook(self, started, caplog):
+        r, b, db, cw = started
+        # The enricher ticks while stop() takes the hook down.
+        def stop_hook():
+            b.alive = False
+            r._tick(None, 1001.0)
+        b.stop = stop_hook
+        r._thread = MagicMock(is_alive=MagicMock(side_effect=[True, False]))
+        with caplog.at_level(logging.INFO, logger=LOGGER):
+            r.stop()
+        assert not [m for m in messages(caplog, logging.WARNING) if "input hook stopped" in m]
+        assert "UI event recording stopped" in messages(caplog)
+
     def test_paused_capture_is_counted(self, started):
         r, b, db, cw = started
         cw.is_paused = True
