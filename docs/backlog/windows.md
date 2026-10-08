@@ -54,14 +54,6 @@ Then run the e2e check on both machines: the status header row "Settings not at 
 
 ## Fix now
 
-### Misleading warning on a normal stop
-Status: open
-
-On `/api/shutdown` (2026-10-08 11:51:15) the recorder logs `WARNING: UI events: the input hook stopped. Clicks and keys are no longer recorded. Restart ScreenMind.` right after "Input hooks removed". The hook health check should not warn when the hook was stopped on purpose.
-
-Refs: `capture/ui_events/recorder.py` (hook health warnings), `capture/ui_events/windows.py` `stop()`.
-
-
 ### G37: No overall time limit on UIA reads
 Status: fixed 2026-10-08 (steps 1-3 of [uptime.md](../plans/uptime.md)); steps 4-5 open
 
