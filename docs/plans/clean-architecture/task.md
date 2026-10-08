@@ -1,6 +1,6 @@
 # Clean architecture and per-OS builds
 
-Status: plan only, 2026-10-08. No code is changed. Written from `custom` at `b0d7358` (after the packaging fixes F1-F5, the Windows installer and daily retention) and from backend-monorepo `origin/main` (read-only).
+Status: plan only, 2026-10-08. No code is changed. Written from ScreenMind `origin/custom` at `b0d7358` (after the packaging fixes F1-F5, the Windows installer and daily retention) and from backend-monorepo `origin/main` (read-only; that repo has no `custom` branch).
 
 ## Short answer
 
