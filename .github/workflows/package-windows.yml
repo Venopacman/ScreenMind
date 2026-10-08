@@ -1,0 +1,94 @@
+name: Package (Windows)
+
+# Builds the unsigned Windows installer (NSIS, per-user):
+# ScreenMind-<version>-win-x64-setup.exe. See packaging/windows/ and
+# docs/plans/packaging-spikes.md ("Windows installer").
+#
+# Run by hand from the Actions tab (workflow_dispatch needs this file on the
+# default branch) or by pushing a version tag, e.g. v0.2.4. A tag also
+# attaches the installer to the GitHub Release.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - claude/windows-installer  # TEMPORARY: remove before merging
+
+permissions:
+  contents: write  # attach the installer to the release on tags
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $init = Get-Content screenmind/__init__.py -Raw
+          if ($init -notmatch '__version__\s*=\s*"([^"]+)"') { throw "No __version__" }
+          $tag = "$env:GITHUB_REF_NAME".TrimStart("v")
+          if ($Matches[1] -ne $tag) {
+            Write-Output "::error::Tag '$tag' does not match screenmind.__version__ '$($Matches[1])'."
+            exit 1
+          }
+
+      # windows-2025 has no NSIS (it has Inno Setup). Chocolatey is there.
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          $mk = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path $mk)) {
+            choco install nsis -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "choco install nsis failed" }
+          }
+          & $mk /VERSION
+          "${env:ProgramFiles(x86)}\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Build app and installer
+        shell: pwsh
+        run: ./packaging/windows/build.ps1
+
+      # Signing (milestone M2), not set up yet. Azure Artifact Signing would go
+      # here: build with -SkipInstaller, sign ScreenMind.exe and the DLLs in
+      # packaging/dist/ScreenMind, run build.ps1 -SkipPyInstaller, then sign
+      # the setup exe. Secrets: AZURE_TENANT_ID, AZURE_CLIENT_ID,
+      # AZURE_CLIENT_SECRET (or OIDC), account and certificate profile names.
+      # - name: Sign
+      #   uses: azure/artifact-signing-action@v1
+      #   with:
+      #     azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+      #     azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+      #     azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+      #     endpoint: https://eus.codesigning.azure.net/
+      #     signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+      #     certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+      #     files-folder: packaging/dist
+      #     files-folder-filter: exe
+      #     file-digest: SHA256
+      #     timestamp-rfc3161: http://timestamp.acs.microsoft.com
+      #     timestamp-digest: SHA256
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScreenMind-win-x64-setup
+          path: packaging/dist/ScreenMind-*-win-x64-setup.exe
+          if-no-files-found: error
+          compression-level: 0  # already LZMA-compressed
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packaging/dist/ScreenMind-*-win-x64-setup.exe
