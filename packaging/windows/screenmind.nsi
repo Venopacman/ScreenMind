@@ -258,10 +258,12 @@ Section "ScreenMind" SecMain
 
   Call StopRunningApp
 
-  ; An upgrade must not keep modules from the older build.
+  ; An upgrade must not keep modules from the older build. llama\ is where a
+  ; bundled llama-server would go (F3); the app never installs into it.
   ${If} ${FileExists} "$INSTDIR\${EXENAME}"
     DetailPrint "Removing the older version..."
     RMDir /r "$INSTDIR\_internal"
+    RMDir /r "$INSTDIR\llama"
   ${EndIf}
 
   SetOutPath "$INSTDIR"
@@ -388,6 +390,7 @@ Section "Uninstall"
 
   ; Only our own files: $INSTDIR may be a folder the user picked.
   RMDir /r "$INSTDIR\_internal"
+  RMDir /r "$INSTDIR\llama"
   Delete "$INSTDIR\${EXENAME}"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"
