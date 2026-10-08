@@ -8,25 +8,36 @@ Build files: [`packaging/screenmind.spec`](../../packaging/screenmind.spec) and 
 
 | | macOS (arm64) | Windows (x64) |
 |---|---|---|
-| Date, commit | 2026-10-07, `custom` cd95561 (after the strip) | 2026-10-08, `custom` 4f98416 |
+| Date, commit | 2026-10-08, `custom` 3092a5f (after F1-F4). First run 2026-10-07 on cd95561 (after the strip) | 2026-10-08, `custom` 4f98416 |
 | OS | macOS 26 (Darwin 25.6) | Windows 11 Home 25H2 (build 26200), Ryzen 7 5800H (16 logical), 16 GB |
-| PyInstaller | 6.22.3, Python 3.14.6 | 6.22.3, Python 3.14.8 (uv) |
-| Build time | 2 min 21 s cold, 25 s warm | 2 min 45 s cold, 1 min 36 s warm |
-| Build result | OK. Only harmless warnings (pyobjc lazy names, Windows DLLs on macOS, `scipy.special._cdflib`) | OK after a spec fix: the first build took `msvcp140.dll`, `vcruntime140.dll` and `ucrtbase.dll` from a JDK on `PATH` and crashed on the first OCR frame (see notes). Harmless warnings: `UIAutomationClient_VC140_*.dll` "not found" (bundled anyway), `scipy.special._cdflib`, `tzdata`, `pycparser` tables |
-| App size on disk | 343 MB (`ScreenMind.app`); 363 MB before the strip | 394 MB (`dist\ScreenMind\`, 331 files) |
-| Compressed | DMG 157 MB (zlib), 122 MB (LZMA) | zip 172 MB (`Compress-Archive`) |
-| Largest parts | onnxruntime 70 MB, cv2 40 MB + its ffmpeg/X11 libs, scipy 32 MB, libpython 17 MB | cv2 112 MB (`cv2.pyd` 82 MB + ffmpeg DLL 29 MB), scipy 46 MB + `scipy.libs` 19 MB, onnxruntime 36 MB, rapidocr 30 MB, `numpy.libs` 20 MB. Two OpenBLAS copies (numpy + scipy), 39 MB. Tcl/Tk DLLs (5 MB) came along |
-| Signature | ad-hoc (PyInstaller default), bundle id `com.screenmind.app` | unsigned |
-| Dashboard up after | 2 s | 6-7 s (first start, includes the DB migration) |
+| PyInstaller | 6.22.3 (contrib hooks 2026.8), Python 3.14.6 | 6.22.3, Python 3.14.8 (uv) |
+| Build time | 26 s (uv and PyInstaller caches warm). 2026-10-07: 2 min 21 s cold, 25 s warm | 2 min 45 s cold, 1 min 36 s warm |
+| Build result | OK, no spec change since 2026-10-07. Only harmless warnings: pyobjc lazy names, Windows libraries looked up through ctypes (`user32`, `gdi32`, `shcore`, `dwmapi`, `ntdll`), `scipy.special._cdflib`, `pycparser` tables. `ScreenCaptureKit`, `Quartz`, `AppKit`, `HIServices` and `screenmind.watchdog` are picked up without hidden imports | OK after a spec fix: the first build took `msvcp140.dll`, `vcruntime140.dll` and `ucrtbase.dll` from a JDK on `PATH` and crashed on the first OCR frame (see notes). Harmless warnings: `UIAutomationClient_VC140_*.dll` "not found" (bundled anyway), `scipy.special._cdflib`, `tzdata`, `pycparser` tables |
+| App size on disk | 351 MB (`ScreenMind.app`, 563 files). 342 MB on 2639ae1, 343 MB on 2026-10-07, 363 MB before the strip. The +9 MB since 2639ae1 is not looked into | 394 MB (`dist\ScreenMind\`, 331 files) |
+| Compressed | DMG 121 MB (LZMA, 2639ae1, 41 s). 2026-10-07: 157 MB (zlib), 122 MB (LZMA) | zip 172 MB (`Compress-Archive`) |
+| Largest parts | onnxruntime 71 MB, cv2 41 MB + its ffmpeg/X11 libs, scipy 33 MB, rapidocr 31 MB (its unused default models, F6), libpython 18 MB | cv2 112 MB (`cv2.pyd` 82 MB + ffmpeg DLL 29 MB), scipy 46 MB + `scipy.libs` 19 MB, onnxruntime 36 MB, rapidocr 30 MB, `numpy.libs` 20 MB. Two OpenBLAS copies (numpy + scipy), 39 MB. Tcl/Tk DLLs (5 MB) came along |
+| Signature | ad-hoc (PyInstaller default), bundle id `com.screenmind.app` (placeholder). No signing identity on the user's Mac | unsigned |
+| Dashboard up after | 1.7 s (2 s on 2026-10-07) | 6-7 s (first start, includes the DB migration) |
 | `/`, `/css/styles.css`, `/js/core.js` | 200 | 200 |
 | `/api/status`, `/api/timeline`, `/api/settings`, `/api/models`, `/api/search?q=test`, `/api/stats` | 200 | 200 |
 | onnxruntime loads | yes, before the strip (the embedder loaded). After the strip only OCR uses it, and OCR was not run | yes, OCR ran on a real frame (after the spec fix) |
 | OCR, capture, UI events | not tested (no screen grabs from Claude sessions on macOS) | all work: `mss` grabs, a11y text, the UI events hook (clicks trigger grabs), OCR on a Photos window. Before the spec fix the app crashed on the first OCR frame |
-| Memory after start | 123 MB RSS (317 MB before the strip, with the embedder) | 64 MB private working set (USS), 88 MB working set. After one OCR frame: 175 MB USS, 229 MB working set |
-| Clean stop | `POST /api/shutdown`, stopped in 2 s | `POST /api/shutdown`, stopped in 1.3 s |
+| Memory after start | 124 MB RSS, 81 MB footprint. 2026-10-07: 123 MB RSS (317 MB before the strip, with the embedder) | 64 MB private working set (USS), 88 MB working set. After one OCR frame: 175 MB USS, 229 MB working set |
+| Clean stop | `POST /api/shutdown`, stopped in 0.7 s, exit code 0 (2 s on 2026-10-07) | `POST /api/shutdown`, stopped in 1.3 s |
 | OCR benchmark, `default`, 20 frames (memory at end / max; CPU) | 1770 / 1770 MB footprint; 7.1 CPU-s and 1.46 s wall per frame (3024x1964 frames, 10 cores) | 466 / 466 MB USS; 51.0 CPU-s and 6.83 s wall per frame (2560x1600 frames, 16 logical CPUs) |
 | OCR benchmark, `tuned`, 20 frames | 1314 / 1514 MB footprint; 4.3 CPU-s and 2.14 s wall per frame | 453 / 454 MB USS; 24.2 CPU-s and 12.32 s wall per frame |
 | OCR benchmark, `tuned`, 60 frames | 1072 / 1554 MB footprint; 4.4 CPU-s per frame | not run |
+
+## macOS notes (2026-10-08)
+
+- Built twice: on `custom` 2639ae1 (before F1-F4) and on 3092a5f (after). Both ran from `Contents/MacOS/ScreenMind` under `env -i` with a temp `DATA_DIR`, `API_PORT=7891`, `CAPTURE_ON_START=false`, `UI_EVENTS_ENABLED=false`, `MEETING_TRANSCRIPTION=false`, `LLAMA_SERVER_SHARED=1`, a dead llama port and `PATH=/usr/bin:/bin:/usr/sbin:/sbin`. The main instance kept running. Build outputs were deleted afterwards.
+- F1 works on macOS: a `.env` in the temp data dir with `OCR_LANGUAGES=en,de` showed as `ocr_languages=en,de (.env)` in the start log. On 2639ae1 no `.env` loaded at all (the path pointed inside the bundle).
+- F4 works for the shortcut: the log says "Desktop shortcut skipped" and nothing appeared on the desktop. On 2639ae1 the first start wrote `~/Desktop/ScreenMind.command`, which runs `launcher.py` inside the bundle (deleted). The login-item command is now the app binary alone (`startup.py`). Not tested: installing the LaunchAgent, because that changes the user's real login items.
+- F2 and F3 were not tested on macOS: they need a model download and a `llama-server` start.
+- A fresh DB migrated from v0 to v13 in the bundle.
+- The app read the model list from `~/.screenmind/models` (it ignores `DATA_DIR`, as on Windows) and wrote nothing there.
+- For the resource budget, a read-only sample of the main instance 20 min after its start: 415 MB footprint, peak 1177 MB, 60 CPU-s (about 5% of one core). Its `llama-server`: 842 MB footprint.
+- Still not tested on macOS, and why: a start from Finder, the permission prompts, SCK grabs from the bundle and OCR on a real frame all need the user (grabs hang in Claude-started processes, see [sck-capture.md](../backlog/sck-capture.md)). Start at login, the menu bar item and the first-run flow are not built.
 
 ## macOS notes (2026-10-07)
 

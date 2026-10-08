@@ -1,6 +1,6 @@
 # Ship ScreenMind as an app
 
-Status: research and recommendation, 2026-10-07 (updated the same day for a headless agent and a resource budget). Nothing here is built or signed yet. Unsigned spikes were built on macOS (2026-10-07) and Windows (2026-10-08); see [packaging-spikes.md](packaging-spikes.md).
+Status: 2026-10-08. Fixes F1-F5 are done. Windows has an unsigned NSIS installer, a tray icon and a CI build. macOS has only the spike: rebuilt on `custom` 3092a5f, it builds with no spec change, starts in 1.7 s at 81 MB footprint, and F1 and F4 work there. macOS still has no CI build, no signing, no menu bar, no first-run flow and no tested login item. F6 and the OCR memory fix are open on both OS. F7 (macOS) is partly done. Next macOS steps, each with its reason: [Next steps for macOS](#next-steps-for-macos-2026-10-08). Spike results: [packaging-spikes.md](packaging-spikes.md).
 
 ## Short answer
 
@@ -71,7 +71,8 @@ On the user's Mac (24 GB, 4 performance + 6 efficiency cores), 2026-10-07:
 | ...of that, OCR (RapidOCR on onnxruntime) | 1.1-1.8 GB footprint after 20-60 full-size Retina frames | 7.1 CPU-seconds per frame (1.5 s wall) | offline run on 20 and 60 saved screenshots, separate process |
 | ...OCR with tuning (`enable_mem_pattern=False`, 2 threads). **In the app since 2026-10-07.** | median 1.29 GB, peak 1.48 GB over 40 frames (before: 1.45 / 1.89 GB) | 4.0 CPU-s per frame, 2.0 s wall (before: 6.8 CPU-s, 1.4 s) | `packaging/ocr_mem_bench.py`, same 40 frames, `OCR_LANGUAGES=en,es,de,fr,ru`. Same text, boxes and confidences. |
 | ...Python + OCR imports / OCR models loaded | 35-50 MB / about 100 MB | | same |
-| Frozen app right after start (no OCR yet, nothing captured) | 123 MB RSS | about 0 | spike |
+| Frozen app right after start (no OCR yet, nothing captured) | 123 MB RSS. On 2026-10-08 (`3092a5f`): 124 MB RSS, 81 MB footprint | about 0 | spike |
+| ScreenMind main process after the strip (main instance, dashboard and analysis worker included), 20 min after its start | 415 MB footprint, peak 1177 MB | 60 CPU-s in 20 min, about 5% of one core | `footprint` and `ps` on the running process, 2026-10-08. A single sample, not a workday |
 | `llama-server` footprint, own test instance, after load / after 25 analysis-like calls | 0.79 GB / 1.31 GB with the default prompt cache (+21 MB per call, never freed). 0.79 GB / 0.88 GB with `--cache-ram 0` (flat). RSS: 3.5 GB after load, most of it the memory-mapped weights. | no change per call | port 5898, the app's flags, `-ngl 99`; 2026-10-07 |
 | `llama-server`, Gemma 4 E2B Q4_0 + mmproj, context 6144 | about 4.0 GB RSS | about 12 s per call. About 880 calls per workday (861 full analyses + 300 cache hits on 2026-10-06/07), so about 3 hours of inference a day | coordinator's measurement; call counts from the DB |
 | **Total** | **about 5-5.5 GB** | | |
@@ -123,6 +124,11 @@ Inputs to the labeling call are mostly text (accessibility or OCR text, after re
 
 Cost assumption for E: 880 calls a workday, about 2,000 input and 100 output tokens each. For example, Gemini 2.5 Flash-Lite at 0.10/0.40 USD per million tokens: 1.76 M input = 0.18 USD, plus 0.09 M output = 0.04 USD. Claude Haiku 4.5 at 1/5 USD per million: 1.76 + 0.44 = 2.20 USD. Over 22 workdays: about 5 USD per user a month with Flash-Lite, about 48 USD with Haiku (24 USD with the Batch API). gpt-5-nano bills its reasoning tokens as output, so its cost depends on how much it reasons. ([Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing), [OpenAI pricing](https://developers.openai.com/api/docs/pricing))
 
+Evidence so far (2026-10-08):
+
+- The workflow-extraction prompt run compared three input tiers on 5 sessions, judged by an LLM on a 0-2 scale. T1 (accessibility text and UI events): 1.63. T2 (T1 + OCR): 1.85. T3 (T2 + a Gemma note per frame): 1.79. The extractor quoted a Gemma note as evidence 0 times out of 211 quotes. Extraction itself runs on Claude, on the server. Early and not yet reviewed by the user, but it supports shipping no local model. It also shows that OCR is worth its cost, so the OCR memory fix stays.
+- The PII filter (`screenmind/privacy/data_filter.py`, 38793c2) is regex only: emails, phone numbers and IBANs, on by default, at capture and at export. It adds no package and no RAM. It does not find person names, addresses or message content. If labeling or extraction runs off the device, that text leaves the device.
+
 **Recommendation: D by default.** The agent only collects and exports. Labeling runs where the data goes anyway, with no model download, no 4 GB of RAM and no API key in the client. The server can call a vendor API in batch (E's prices, without the key problem). Offer **B + C as an opt-in "label on this computer" mode** for people who must keep everything local, after C passes the questionnaire bench. This is a product decision; see the open questions.
 
 ### Measure and enforce
@@ -138,16 +144,16 @@ These need fixing before any installer is useful. They are small. Most of them a
 
 | # | Where | Problem in a frozen app | Fix |
 |---|---|---|---|
-| F1 | `config.py` `model_config["env_file"] = ".env"` | `.env` is read from the current directory. A LaunchAgent starts with cwd `/`, so the user's `.env` did not load (seen on 2026-10-07). An app has no cwd worth trusting. | Done (34ae529): in the app, `.env` comes from the data dir (`DATA_DIR`, else `~/.screenmind`) and is optional. Never from cwd or the bundle. `settings.json` as before. |
+| F1 | `config.py` `model_config["env_file"] = ".env"` | `.env` is read from the current directory. A LaunchAgent starts with cwd `/`, so the user's `.env` did not load (seen on 2026-10-07). An app has no cwd worth trusting. | Done (34ae529): in the app, `.env` comes from the data dir (`DATA_DIR`, else `~/.screenmind`) and is optional. Never from cwd or the bundle. `settings.json` as before. Checked on macOS on 2026-10-08: a data-dir `.env` value showed as `(.env)` in the start log. |
 | F2 | `engine/model_manager.py` (`cmd = [sys.executable, "-c", "...hf_hub_download..."]`) | Model downloads run `sys.executable -c`. In a frozen app `sys.executable` is `ScreenMind` itself. It ignores `-c`, starts a second ScreenMind, which exits on "port in use". Downloads fail. | Done (34ae529): in the app, `hf_hub_download` runs in a thread of the same process, with the same progress polling. Cancel stops it: the progress bar raises, and Xet transfers are aborted. From source the child process stays. |
 | F3 | `setup_llama.py` (`PROJECT_ROOT`) and `model_manager.start_server()` | They decide "pip install vs checkout" with `is_relative_to(site-packages)`. A frozen app looks like a checkout, so `llama/` resolves to a folder inside the app bundle. Installing there breaks the signature, and `/Applications` may not be writable. | Done (34ae529): in the app, look in `<exe dir>/llama/`, then `~/.screenmind/llama/`, then PATH. Installs go to `~/.screenmind/llama/`. `start_server()` uses the same lookup. |
-| F4 | `startup.py` `_get_startup_command()`, `main.run()` `--background`, `launcher.py`, `_install_desktop_shortcut()` | They build commands from `sys.executable -m screenmind`, `pythonw.exe` or `launcher.py`. None of these exist in an app. | Done (34ae529) on Windows: the start command is `"<path>\ScreenMind.exe"` alone. That is the value the installer writes under HKCU `Run\ScreenMind`. `--background` and the launcher start the exe. No desktop shortcut, no `launcher.vbs`. macOS: the LaunchAgent plist runs `ScreenMind.app/Contents/MacOS/ScreenMind` (untested). `SMAppService` is still to do. |
+| F4 | `startup.py` `_get_startup_command()`, `main.run()` `--background`, `launcher.py`, `_install_desktop_shortcut()` | They build commands from `sys.executable -m screenmind`, `pythonw.exe` or `launcher.py`. None of these exist in an app. | Done (34ae529) on Windows: the start command is `"<path>\ScreenMind.exe"` alone. That is the value the installer writes under HKCU `Run\ScreenMind`. `--background` and the launcher start the exe. No desktop shortcut, no `launcher.vbs`. macOS: the LaunchAgent plist runs `ScreenMind.app/Contents/MacOS/ScreenMind` (untested). `SMAppService` is still to do. Checked on macOS on 2026-10-08: no desktop shortcut (before 34ae529 the first start wrote `~/Desktop/ScreenMind.command` pointing at `launcher.py` inside the bundle). |
 | F5 | `config._setup_logging()` | A windowed build has no console. Logs go nowhere unless `SCREENMIND_LOG_FILE` is set. | Done earlier (G38): every start logs to `<data dir>/screenmind.log` (rotating), console or not. Checked in the windowed Windows build on 2026-10-08. |
 | F6 | `engine/ocr.py` (`Global.model_root_dir`) | The app ships rapidocr's own default models (31 MB) but never uses them. It downloads other models into `~/.screenmind/models/ocr` on first use. | Ship the 5 models we use inside the app (works offline) and exclude rapidocr's defaults. |
-| F7 | `capture_worker`, `ui_events` permission requests | Screen Recording is never requested explicitly. macOS asks on the first grab, at a random moment. | The first-run window requests each permission on a button press (see [First-run flow](#first-run-flow-native-no-dashboard)). |
+| F7 | `capture_worker`, `ui_events` permission requests | Screen Recording is never requested explicitly. macOS asks on the first grab, at a random moment. | The first-run window requests each permission on a button press (see [First-run flow](#first-run-flow-native-no-dashboard)). Partly done: Input Monitoring and Accessibility are checked and requested when UI events start (`capture/ui_events/macos.py`). Nothing calls `CGRequestScreenCaptureAccess` yet. |
 | F8 | `packaging/screenmind.spec` on Windows | PyInstaller finds the DLLs that extensions link to through `PATH`. Another app's folder on `PATH` (a JDK on the Windows laptop) put an old `msvcp140.dll` 14.16 into the bundle, and onnxruntime crashed on the first OCR frame. | Fixed in the spec (2026-10-08): on Windows the build keeps only `%SystemRoot%` folders on `PATH`. CI should also check the bundled `msvcp140.dll` is 14.40 or newer. |
 
-The spikes ran with F1-F7 still in place. The dashboard worked because the test needed none of these paths. F1-F5 are fixed since 2026-10-08.
+The spikes ran with F1-F7 still in place. The dashboard worked because the test needed none of these paths. F1-F5 are fixed since 2026-10-08. F1 and F4 were checked on macOS the same day; F2 and F3 only on Windows.
 
 ## 1. Freezing options
 
@@ -210,6 +216,8 @@ If local labeling is on (opt-in, see [Resource budget](#resource-budget)), the m
 ### Start at login
 
 Use `SMAppService.mainApp.register()` (macOS 13+) through pyobjc (`pyobjc-framework-ServiceManagement`, a new dependency). It shows up in System Settings > General > Login Items, and macOS shows a "Background item added" notice once. It replaces the hand-written `~/Library/LaunchAgents/com.screenmind.plist`. That also fixes the cwd problem (F1), because the app starts like any app. Calling SMAppService from a PyInstaller app is not tested yet. ([Apple docs](https://developer.apple.com/documentation/servicemanagement/smappservice))
+
+**Open: `mainApp` or `agent`.** The uptime plan ([uptime.md](uptime.md), step 5) wants launchd to restart the agent after a crash (`KeepAlive` with `SuccessfulExit=false`). `SMAppService.mainApp` is a plain login item and has no `KeepAlive`. A restart on crash needs `SMAppService.agent(plistName:)` with a LaunchAgent plist inside the bundle (`Contents/Library/LaunchAgents/`). So the likely choice is `agent`. The clean-architecture plan has the same note on its LoginItem port. Not tested from a PyInstaller app.
 
 ### Menu bar
 
@@ -367,6 +375,38 @@ The unsigned milestone needs no secrets.
 - **macOS:** PyInstaller onedir `.app`, DMG, Developer ID + notarization, native first-run permissions window, `SMAppService`, menu bar item. Apple Silicon only.
 - **Windows:** PyInstaller onedir, NSIS per-user wizard (it explains what is recorded), Azure Artifact Signing, tray item. x64 only.
 - **Start with M0** (the strip has landed). Fix OCR memory first: it is needed whatever we decide about labeling. The PyInstaller spec from the spike (`packaging/screenmind.spec`) is the starting point.
+
+## Next steps for macOS (2026-10-08)
+
+Where macOS stands: the spike builds and runs, F1-F5 work, and nothing else for milestone M0 exists on macOS. Each step says what it is, why, what it costs and whether it needs the user. They are in the order we propose to do them.
+
+1. **A macOS CI build (`package-macos.yml`).** `macos-15` runner: `uv sync --frozen`, PyInstaller with `packaging/screenmind.spec`, an `hdiutil` DMG (LZMA), then the spike's smoke test (temp `DATA_DIR`, the 9 endpoints, `POST /api/shutdown`). Unsigned, on dispatch and on `v*` tags, like `package-windows.yml`.
+   - Why: today a macOS build only exists when someone builds it on the user's Mac. CI gives testers a DMG and catches a broken spec on every tag. On Windows the first CI build found the DLL problem (F8), which a local build hid.
+   - Cost: about 30-60 lines, no secrets, a few minutes of runner time per build. Nothing changes on users' machines.
+   - User decision: none.
+2. **Ship our OCR models in the app (F6).** Put the 5 RapidOCR models we use (25 MB) in the bundle and leave out rapidocr's own `PP-OCRv6_*_small` (31 MB).
+   - Why: the app ships 31 MB it never uses, then downloads 25 MB on the first OCR frame. With the models inside, the first run works offline and has no network step that can fail. The app gets about 6 MB smaller.
+   - Cost: a spec change and a lookup in `engine/ocr.py` (bundle first, then `~/.screenmind/models/ocr`).
+   - User decision: none.
+3. **Ask for Screen Recording at a known moment (the rest of F7).** In the app, call `CGPreflightScreenCaptureAccess()` before the first grab and `CGRequestScreenCaptureAccess()` when it is false, then log the result.
+   - Why: today macOS asks at the first grab, at a random moment, with no context. A tester who misses it gets a silent agent. Input Monitoring and Accessibility already work this way. The full first-run window comes in M1; this is the minimum for testers.
+   - Cost: a few lines in the capture start path, macOS only.
+   - User decision: none.
+4. **OCR in a short-lived worker process.** See lever 2 in [Resource budget](#levers-biggest-first).
+   - Why: once OCR runs, the agent holds 1.07-1.5 GB footprint on the Mac. The hard cap is 500 MB. The onnxruntime tuning is done and was not enough. A worker that exits after a batch gives its memory back to the OS. The tier run says OCR improves extraction (1.85 against 1.63 without it), so dropping OCR is not the answer.
+   - Cost: the biggest item, a few days. About 100 MB and 1-2 s per batch to load the models again (to measure). The clean-architecture plan moves it behind a `TextRecognizer` port later (its step 16); building it first is fine.
+   - User decision: none. It is needed whatever the labeling decision is.
+5. **Hand test of a CI DMG (needs the user, about 10 minutes).** Open the DMG from Finder, then check: the permission prompts name ScreenMind, SCK grabs work, OCR runs on a real frame, and a model download (F2) and `llama-server` lookup (F3) work.
+   - Why: these are the reasons to ship an `.app` at all, and none of them can be tested from a Claude session. Grabs hang in Claude-started processes ([sck-capture.md](../backlog/sck-capture.md)).
+   - User decision: pick the bundle id before this test (below).
+
+Decisions that block or shape these steps:
+
+- **Bundle id.** `com.screenmind.app` is a placeholder. TCC grants are tied to the bundle id (and, once signed, the Team ID). If the id changes after testers grant permissions, every tester grants again. It should be a reverse-DNS name of a domain the publisher owns.
+- **Where labeling runs** (open question 5). If it is the server or a vendor API, the macOS app ships no `llama-server` and no Gemma: about 4 GB of RAM and a 3 GB download less, and F2/F3 matter only for the opt-in mode. The evidence so far points that way (see [Should local LLM analysis ship?](#should-local-llm-analysis-ship)).
+- **Does the agent keep the HTTP server** (open question 7). The export is an HTTP route today. This decides whether the agent-mode build can drop FastAPI, uvicorn and the dashboard.
+- **Who publishes** (open question 1). Not needed for M0. It blocks signing (M2) and the self-signed certificate trick is the stopgap for testers.
+- **Login item: `SMAppService.agent` or `mainApp`.** Technical, see [Start at login](#start-at-login). We propose `agent`, because only it can restart a crashed agent.
 
 ## Open questions for the user
 
