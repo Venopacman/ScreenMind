@@ -12,6 +12,7 @@ Or imported:            from screenmind.setup_llama import ensure_llama_server
 """
 
 import json
+import logging
 import os
 import platform
 import shutil
@@ -26,6 +27,8 @@ from urllib.request import urlopen, Request
 from urllib.error import URLError
 
 # ── Constants ────────────────────────────────────────────────────────────────
+
+logger = logging.getLogger("screenmind.setup_llama")
 
 GITHUB_API_LATEST = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
 
@@ -220,9 +223,9 @@ def _pick_asset(assets: list) -> tuple[dict | None, list[dict]]:
                             break
 
                 cuda_display = f" (CUDA {cuda_ver})" if cuda_ver else ""
-                print(f"  [Setup] NVIDIA GPU detected{cuda_display} → {main_asset['name']}")
+                print(f"  [Setup] NVIDIA GPU detected{cuda_display} -> {main_asset['name']}")
             else:
-                print(f"  [Setup] NVIDIA GPU detected but no matching CUDA build found → falling back to CPU")
+                print(f"  [Setup] NVIDIA GPU detected but no matching CUDA build found -> falling back to CPU")
                 nvidia = False  # Fall through to CPU
 
         if not nvidia:
@@ -231,7 +234,7 @@ def _pick_asset(assets: list) -> tuple[dict | None, list[dict]]:
                 if f"bin-win-cpu-{arch}" in a["name"] and a["name"].endswith(".zip"):
                     main_asset = a
                     break
-            gpu_note = "No NVIDIA GPU detected → " if not has_nvidia_gpu() else ""
+            gpu_note = "No NVIDIA GPU detected -> " if not has_nvidia_gpu() else ""
             print(f"  [Setup] {gpu_note}CPU build{' (will be slower than GPU)' if not has_nvidia_gpu() else ''}")
 
     elif system == "darwin":
@@ -313,7 +316,7 @@ def _fetch_latest_release() -> dict:
 
     if not nightly_tag:
         raise RuntimeError(
-            "nightly-tag.txt is empty — cannot determine nightly build tag. "
+            "nightly-tag.txt is empty, cannot determine nightly build tag. "
             "Manual download: https://github.com/ggml-org/llama.cpp/releases"
         )
 
@@ -343,7 +346,7 @@ def _download_with_progress(url: str, dest: Path, total_size: int = 0) -> None:
                         pct = (downloaded / total_size) * 100
                         bar_len = 30
                         filled = int(bar_len * downloaded / total_size)
-                        bar = "█" * filled + "░" * (bar_len - filled)
+                        bar = "#" * filled + "." * (bar_len - filled)
                         print(
                             f"\r  [{bar}] {pct:5.1f}% ({_format_size(downloaded)}/{_format_size(total_size)})",
                             end="",
@@ -439,13 +442,13 @@ def install_llama_server() -> bool:
 
     # ── Download size warning ────────────────────────────────────────────
     print()
-    print(f"  ╔══════════════════════════════════════════════════════════╗")
-    print(f"  ║  Download: {main_asset['name']}")
+    print("  +----------------------------------------------------------+")
+    print(f"  |  Download: {main_asset['name']}")
     if extra_assets:
         for ea in extra_assets:
-            print(f"  ║         + {ea['name']}")
-    print(f"  ║  Total size: {_format_size(total_size)}")
-    print(f"  ╚══════════════════════════════════════════════════════════╝")
+            print(f"  |         + {ea['name']}")
+    print(f"  |  Total size: {_format_size(total_size)}")
+    print("  +----------------------------------------------------------+")
     print()
 
     if _is_interactive():
@@ -458,7 +461,7 @@ def install_llama_server() -> bool:
             print("  [Setup] Installation cancelled.")
             return False
     else:
-        print("  [Setup] Non-interactive mode — proceeding with download.")
+        print("  [Setup] Non-interactive mode, proceeding with download.")
 
     # ── Download & Extract ───────────────────────────────────────────────
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -503,7 +506,7 @@ def install_llama_server() -> bool:
         installed_bin.chmod(installed_bin.stat().st_mode | 0o755)
 
     print()
-    print(f"  [Setup] ✓ llama-server installed to: {LLAMA_DIR}")
+    print(f"  [Setup] OK: llama-server installed to: {LLAMA_DIR}")
     return True
 
 
@@ -520,7 +523,21 @@ def ensure_llama_server() -> bool:
 
     If no TTY is available (e.g. launched via shortcut, pythonw, or service),
     skips to degraded mode instead of hanging on input().
+
+    With llama_server_shared (a dev instance) another process owns
+    llama-server: no binary lookup, no prompt, no download. Returns True so
+    the caller adopts the shared server if it runs (start_server never
+    starts one in that mode). On Windows a stdin of NUL (`</dev/null`)
+    looks like a TTY, so the prompt check alone is not enough.
+
+    Output is plain ASCII: redirected stdout on Windows is cp1252.
     """
+    from screenmind.config import settings
+    if settings.llama_server_shared:
+        logger.info("llama-server is shared (LLAMA_SERVER_SHARED): not looking for, "
+                    "installing or starting one here")
+        return True
+
     path = find_llama_server()
     if path:
         print(f"[Setup] llama-server found: {path}")
@@ -538,18 +555,18 @@ def ensure_llama_server() -> bool:
 
     # Interactive — show prompt
     print()
-    print("  ╔══════════════════════════════════════════════════════════╗")
-    print("  ║  llama-server not found                                 ║")
-    print("  ║                                                         ║")
-    print("  ║  llama-server (from llama.cpp) is required for:         ║")
-    print("  ║    • Screenshot analysis (Gemma 4 vision)               ║")
-    print("  ║    • Chat with your screen memory                       ║")
-    print("  ║    • Voice memo transcription                           ║")
-    print("  ║    • Meeting transcription                              ║")
-    print("  ║                                                         ║")
-    print("  ║  Without it, ScreenMind will only capture screenshots   ║")
-    print("  ║  but cannot analyze or understand them.                 ║")
-    print("  ╚══════════════════════════════════════════════════════════╝")
+    print("  +----------------------------------------------------------+")
+    print("  |  llama-server not found                                 |")
+    print("  |                                                         |")
+    print("  |  llama-server (from llama.cpp) is required for:         |")
+    print("  |    - Screenshot analysis (Gemma 4 vision)               |")
+    print("  |    - Chat with your screen memory                       |")
+    print("  |    - Voice memo transcription                           |")
+    print("  |    - Meeting transcription                              |")
+    print("  |                                                         |")
+    print("  |  Without it, ScreenMind will only capture screenshots   |")
+    print("  |  but cannot analyze or understand them.                 |")
+    print("  +----------------------------------------------------------+")
     print()
 
     try:
@@ -593,13 +610,13 @@ def _print_degraded_warning():
 
 if __name__ == "__main__":
     print()
-    print("  ScreenMind — llama-server Setup")
+    print("  ScreenMind - llama-server Setup")
     print("  ================================")
     print()
 
     path = find_llama_server()
     if path:
-        print(f"  ✓ llama-server already installed: {path}")
+        print(f"  OK: llama-server already installed: {path}")
         print()
 
         reinstall = input("  Reinstall/update? [y/N]: ").strip().lower()

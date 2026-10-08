@@ -93,6 +93,20 @@ def _is_port_in_use(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def _console_safe_stdout():
+    """Never crash on a character the stdout encoding lacks.
+
+    Redirected to a file or pipe on Windows, stdout uses the ANSI code page
+    (cp1252), which has no box drawing, arrows or emoji, and its default
+    errors="strict" raised UnicodeEncodeError at startup. stderr already
+    uses backslashreplace.
+    """
+    try:
+        sys.stdout.reconfigure(errors="backslashreplace")
+    except (AttributeError, ValueError):
+        pass  # devnull or a replaced stream without reconfigure()
+
+
 def _safe_print(*args, **kwargs):
     """Print to stderr, but silently skip if stderr is None (pythonw.exe)."""
     if sys.stderr is not None:
@@ -136,7 +150,8 @@ async def main():
     if llama_binary_available:
         # Binary exists — check if server is running, start if not
         if not check_llama_server():
-            logger.info("Starting llama-server automatically...")
+            if not settings.llama_server_shared:  # shared: start_server only adopts
+                logger.info("Starting llama-server automatically...")
             llm_server_ok = model_manager.start_server(settings.active_model, timeout=120)
         else:
             llm_server_ok = True
@@ -376,6 +391,7 @@ def _install_desktop_shortcut() -> None:
 
 def run():
     """Sync entry point for CLI: `screenmind` command."""
+    _console_safe_stdout()
     # ── Exit-early flags (checked in order to prevent --background from swallowing them) ──
     if "--version" in sys.argv:
         from screenmind import __version__

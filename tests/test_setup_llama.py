@@ -327,3 +327,76 @@ class TestHelpers:
 
     def test_format_size_bytes(self):
         assert "42 bytes" in _format_size(42)
+
+
+# ── Tests: startup without a console (dev instance on Windows) ───────────────
+
+
+class TestEnsureLlamaServer:
+    """scripts/dev-instance.sh runs with stdout redirected (cp1252 on Windows)
+    and stdin from NUL, which isatty() reports as a TTY."""
+
+    def _no_binary(self, monkeypatch, shared):
+        from screenmind import setup_llama
+        from screenmind.config import settings
+        monkeypatch.setattr(settings, "llama_server_shared", shared)
+        monkeypatch.setattr(setup_llama, "find_llama_server", lambda: None)
+        monkeypatch.setattr(setup_llama, "_is_interactive", lambda: True)
+        return setup_llama
+
+    def test_shared_never_prompts_or_downloads(self, monkeypatch):
+        setup_llama = self._no_binary(monkeypatch, shared=True)
+
+        def boom(*_a, **_k):
+            raise AssertionError("a shared instance must not prompt or download")
+        monkeypatch.setattr("builtins.input", boom)
+        monkeypatch.setattr(setup_llama, "install_llama_server", boom)
+
+        # True: main() then adopts the shared server if it runs
+        assert setup_llama.ensure_llama_server() is True
+
+    def test_prompt_prints_to_a_cp1252_stdout(self, monkeypatch):
+        import sys
+        setup_llama = self._no_binary(monkeypatch, shared=False)
+        monkeypatch.setattr("builtins.input", lambda _prompt="": "n")
+        out = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict")
+        monkeypatch.setattr(sys, "stdout", out)
+
+        assert setup_llama.ensure_llama_server() is False
+        out.flush()
+        assert b"llama-server not found" in out.buffer.getvalue()
+
+    def test_all_printed_text_is_ascii(self):
+        """Every literal passed to print() or input() in setup_llama is ASCII."""
+        import ast
+        import screenmind.setup_llama as mod
+        tree = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
+        bad = []
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id in ("print", "input")):
+                for sub in ast.walk(node):
+                    if (isinstance(sub, ast.Constant) and isinstance(sub.value, str)
+                            and not sub.value.isascii()):
+                        bad.append(f"line {sub.lineno}: {sub.value!r}")
+        assert bad == []
+
+
+class TestConsoleSafeStdout:
+
+    def test_unencodable_text_does_not_crash(self, monkeypatch):
+        import sys
+        from screenmind.main import _console_safe_stdout
+        out = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict")
+        monkeypatch.setattr(sys, "stdout", out)
+
+        _console_safe_stdout()
+        print("\u2554\u2550 \u2713 \U0001F600")
+        out.flush()
+        assert out.buffer.getvalue().startswith(b"\u2554\u2550 \u2713")
+
+    def test_stream_without_reconfigure(self, monkeypatch):
+        import sys
+        from screenmind.main import _console_safe_stdout
+        monkeypatch.setattr(sys, "stdout", io.StringIO())
+        _console_safe_stdout()  # no error
