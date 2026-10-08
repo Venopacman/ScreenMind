@@ -42,7 +42,7 @@ Build files: [`packaging/screenmind.spec`](../../packaging/screenmind.spec) and 
 - After the fix: a Photos window (no a11y text) went through OCR in the frozen app. OCR models came from the shared `%USERPROFILE%\.screenmind\models\ocr` (they were already there, so no download). The models folder ignores `DATA_DIR`.
 - UI events: the low-level hooks install and clicks trigger grabs. `UIAutomationClient_VC140_X64.dll` lands in `_internal\uiautomation\bin\`, where `uiautomation` loads it from, so the build warning about it does not matter.
 - F4 seen for real: the first start wrote `launcher.vbs` into the data dir. It runs `ScreenMind.exe "...\_internal\screenmind\launcher.py"`, which cannot work. It also tried to put `ScreenMind.lnk` on the desktop. Nothing appeared there: this laptop's desktop is `OneDrive\<localized name>`, not `%USERPROFILE%\Desktop`, and the PowerShell step fails without an error.
-- OCR costs much more CPU than on the Mac: 24 CPU-s and 12 s wall per frame tuned, against 4.3 CPU-s on the Mac, with smaller frames (2560x1600). Memory is much lower (450 MB against 1.3-1.8 GB). Not looked into. At a 10 s interval, OCR on every frame would not keep up on this laptop; it only runs when a11y text is chrome-only.
+- OCR costs much more CPU than on the Mac: 24 CPU-s and 12 s wall per frame tuned, against 4.3 CPU-s on the Mac, with smaller frames (2560x1600). Memory is much lower (450 MB against 1.3-1.8 GB). See [Windows OCR CPU](#windows-ocr-cpu-2026-10-08). At a 10 s interval, OCR on every frame would not keep up on this laptop; it only runs when a11y text is chrome-only.
 - Private bytes (commit) were 548 MB at idle and 1150 MB after one OCR frame, against 64 / 175 MB USS. Task Manager's Memory column shows the USS-like number; commit counts against the page file, not RAM.
 - `Get-Content` in PowerShell 5.1 shows the log's `→` as `â†'`. The log file is UTF-8; pass `-Encoding UTF8`.
 - Not tested: an installer, start at login, a start from Explorer or the Start menu, SmartScreen, the microphone and call transcription, llama-server inside the app, model download (F2).
@@ -99,6 +99,21 @@ Not tested yet: running the installer, the wizard pages, start at sign-in, the S
 3. Read the "What ScreenMind records" page and tick "I understand".
 4. Keep the folder, choose whether ScreenMind starts when you sign in, and finish with "Start ScreenMind now".
 5. To remove it: Settings > Apps > Installed apps > ScreenMind > Uninstall. It asks whether to delete your data and the models. Both default to No.
+
+## Windows OCR CPU (2026-10-08)
+
+Why OCR costs more CPU here than on the Mac. Measured with a per-stage version of the benchmark on 12 saved frames from 2026-10-07 (2560x1600, 80 text boxes found per frame, 56 kept). "Quiet" means `llama-server` was idle during the run. Plugged in, Balanced power plan.
+
+- **About half of the 24 CPU-s was contention.** The main instance's `llama-server` (`-ngl 15`, no `-t`) uses 5-12 logical CPUs during each Gemma call, and the calls often run back to back. The same OCR run costs 10.7-12.1 CPU-s per frame when `llama-server` is idle and 18-20 CPU-s when it runs (+70%). OCR threads then share physical cores with llama's threads, so each CPU-second does less work. The first benchmark ran during calls.
+- **Recognition is 88% of the cost.** Quiet, 2 threads, per frame: detection 1.0 CPU-s, classifier 0.15, recognition 9.4. Recognition cost grows with the number of text lines, not with the image size: each line is scaled to 48 px high.
+- **More threads cost CPU and add almost no speed here.** Quiet, per frame: 1 thread 6.7 CPU-s and 6.6 s; 2 threads (the app) 10.7 CPU-s and 5.4 s; 4 threads 20 CPU-s and 5.1 s; all 16 (the old default) 39 CPU-s and 5.3 s, with `llama-server` partly busy.
+- **Windows pays for freed memory.** With the onnxruntime memory arena off, every operator allocates and frees its own buffers. Windows gives big blocks back to the OS at once, so the next operator page-faults them in again: 1.8 million page faults and 1.1-1.6 kernel CPU-s per frame. The Mac's allocator keeps freed pages (see [Resource budget](packaging.md#resource-budget)), so it does not pay this; that is likely also why its footprint is larger. Arena on, given back after every model run (arena shrinkage): 355 thousand page faults, 0.27 kernel CPU-s, +45 MB USS, +80 MB peak working set. Arena on without shrinkage: 890 MB.
+- **Best variant: 1 thread, arena with shrinkage.** 5.4 CPU-s and 5.3 s per frame (quiet, two runs), against 10.7-12.1 CPU-s and 5.4-6.1 s for the app today. The same text on all 12 frames (668 of 668 lines). 2 threads with shrinkage: 8.0 CPU-s and 4.0 s. It is on branch `claude/win-ocr-cpu`, not in `custom`: it changes OCR for the Mac too, so it needs a Mac run first.
+- No gain: the English recognizer instead of `eslav` (same CPU, only 72% of lines identical); the classifier off (-0.15 CPU-s, 99.6% of lines identical); onnxruntime thread spinning off (within noise).
+- After the fix the laptop needs 5.4 CPU-s per frame, against 4.3 on the Mac (2 threads). The Mac numbers have no line count, so per-line cost is not compared yet. `ocr_mem_bench.py` now prints text boxes per frame and CPU-ms per box.
+- The newest screenshot folder grows while the app runs, so two benchmark runs on it read different frames. Pass `--dir` with a finished day to compare runs.
+- `--dump` crashed on Windows with Cyrillic text (it wrote in the ANSI code page). It now writes UTF-8.
+- `llama-server` is the bigger CPU cost on this laptop: 7-12 logical CPUs for about 26 s per call. Capping its threads (`-t`) is a backlog idea.
 
 ## Windows: how to run the same spike
 

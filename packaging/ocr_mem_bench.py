@@ -74,26 +74,32 @@ def main() -> None:
     loaded = memory_mb()
     proc = psutil.Process()
     cpu0 = sum(proc.cpu_times()[:2])
+    kernel0 = proc.cpu_times()[1]
     t0 = time.time()
     mems = []
     dump = []
+    nboxes = 0
     for f in files:
         with Image.open(f) as img:
             img.load()
             text, boxes = ocr.extract_text_with_boxes(img)
+        nboxes += len(boxes)
         mems.append(memory_mb())
         dump.append({"file": f.name, "text": text, "boxes": boxes})
     wall = time.time() - t0
     cpu = sum(proc.cpu_times()[:2]) - cpu0
+    kernel = proc.cpu_times()[1] - kernel0
     sys.stdout.write(
         f"{args.mode}: {len(files)} frames from {shots}\n"
         f"  memory MB: start {start:.0f}, models loaded {loaded:.0f}, after 1 frame {mems[0]:.0f}, "
         f"at end {mems[-1]:.0f}, max {max(mems):.0f}\n"
-        f"  per frame: {wall / len(files):.2f} s wall, {cpu / len(files):.1f} CPU-s; "
-        f"logical CPUs {psutil.cpu_count()}\n"
+        f"  per frame: {wall / len(files):.2f} s wall, {cpu / len(files):.1f} CPU-s "
+        f"(kernel {kernel / len(files):.1f}); logical CPUs {psutil.cpu_count()}\n"
+        f"  text boxes per frame: {nboxes / len(files):.0f}; "
+        f"CPU-ms per box: {1000 * cpu / max(1, nboxes):.0f}\n"
     )
     if args.dump:
-        args.dump.write_text(json.dumps(dump, ensure_ascii=False, indent=1))
+        args.dump.write_text(json.dumps(dump, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 if __name__ == "__main__":
