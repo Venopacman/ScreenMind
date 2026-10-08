@@ -54,7 +54,7 @@ def test_v11_drops_removed_feature_data(tmp_path):
     db = Database(db_path=path)
     conn = db._get_conn()
 
-    assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 11
+    assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] >= 11
     assert not {"embedding", "bookmarked"} & _columns(conn, "activities")
     assert not {"dev_contexts", "daily_summaries"} & _tables(conn)
     assert conn.execute(
@@ -73,7 +73,7 @@ def test_v11_drops_removed_feature_data(tmp_path):
 def test_fresh_db_has_no_removed_columns(tmp_path):
     db = Database(db_path=tmp_path / "fresh.db")
     conn = db._get_conn()
-    assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 11
+    assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] >= 11
     assert not {"embedding", "bookmarked"} & _columns(conn, "activities")
     assert not {"dev_contexts", "daily_summaries"} & _tables(conn)
 
@@ -86,4 +86,4 @@ def test_v11_runs_twice_without_error(tmp_path):
     conn.commit()
     conn.close()
     db = Database(db_path=path)
-    assert db._get_conn().execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 11
+    assert db._get_conn().execute("SELECT MAX(version) FROM schema_version").fetchone()[0] >= 11

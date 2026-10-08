@@ -216,6 +216,11 @@ class Database:
                 "ALTER TABLE activities DROP COLUMN embedding",
                 "ALTER TABLE activities DROP COLUMN bookmarked",
             ],
+            # v12: rows written as 'ok' with an "Analysis failed" summary before
+            # analysis_worker stored them as 'failed'. Mark them failed so feeds
+            # skip them and the idle backfill can retry them.
+            "UPDATE activities SET status = 'failed' "
+            "WHERE status = 'ok' AND summary LIKE 'Analysis failed%'",
         ]
 
         for i, migration in enumerate(migrations, start=1):
