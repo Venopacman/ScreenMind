@@ -50,12 +50,25 @@ Then run the e2e check on both machines: the status header row "Settings not at 
 ## Fix now
 
 
-### G37: One UIA client shared across threads
-Status: open
+### G37: No overall time limit on UIA reads
+Status: fixed 2026-10-08 (steps 1-3 of [uptime.md](../plans/uptime.md)); steps 4-5 open
 
-`uiautomation`'s `_AutomationClient.instance()` is process-wide. Whichever thread calls UIA first (event loop, an executor thread or the UI-event enricher) creates it in its own COM apartment (`ComInit`, STA by default), and `set_uia_timeouts()` swaps in a `CUIAutomation8` on that thread. Other threads then use the raw pointer without marshaling. If the creating thread ends or stops pumping, calls can stall or fail. Suspected in the 2026-10-07 freeze (capture stopped after activity 175; shutdown hung). Since `d0ed3c2` (recorder lock) and `0d385bb` (5 s link timeout) a hang stops only UI events. Goal: a design that keeps capture, UI events and analysis up, and recovers by itself (a dedicated UIA thread, or one client per thread, plus a health check that restarts a stuck part).
+The first suspect, one `uiautomation` client shared across threads and COM apartments, was ruled out with repros (`scripts/uia_threads.py`): the client is `ThreadingModel=Both` and works from any thread, also after its creator exits or while it never pumps. The real gap was that UIA's 1 s timeout bounds one call, but a read is hundreds of calls. A slow app could hold a read for minutes:
 
-Refs: `platform_support/windows.py` `_uia()`, `set_uia_timeouts()`, `capture/ui_events/windows.py`, `capture/ui_events/recorder.py`.
+- on the event loop (capture, analysis and the shutdown request all waited);
+- or in the enricher while it held the recorder lock (the 2026-10-07 freeze: capture stopped after activity 175 and shutdown hung).
+
+`set_uia_timeouts()` could also fail silently. A stuck executor thread kept the process alive after shutdown, and `GetClipboardData` has no timeout.
+
+What changed:
+
+- **UIA worker threads.** Capture, recorder and clipboard each have one, and every read has a deadline (3 s for a11y text, 1.5 s for lookups). Walks stop at the deadline and keep what they read. A stuck thread is replaced, at most 3 times an hour.
+- **Watchdog.** It logs all thread stacks when the capture loop, the enricher or analysis stalls, and restarts a stuck enricher.
+- **Shutdown deadline.** A stop that takes over 45 s is forced with exit code 3.
+
+Open: moving capture off the event loop if the logs still show stalls (step 4), and a process supervisor with packaging (step 5).
+
+Refs: `platform_support/windows.py` `UiaWorker`, `run_uia()`; `screenmind/watchdog.py`; `capture/ui_events/windows.py`; `capture/ui_events/recorder.py` `restart()`; [uptime.md](../plans/uptime.md).
 
 ## Parked
 

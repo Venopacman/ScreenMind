@@ -3,13 +3,16 @@ Windows Platform Adapter
 Uses Win32 APIs (ctypes) for window detection and UI Automation for a11y.
 """
 
+import concurrent.futures
+import importlib.util
 import logging
 import os
+import queue
 import re
 import sys
 import threading
 import time
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from screenmind.platform_support.base import PlatformAdapter
 
@@ -216,8 +219,212 @@ def set_uia_timeouts(auto) -> bool:
         ia2.TransactionTimeout = _UIA_TIMEOUT_MS
         return True
     except Exception as e:
-        logger.debug(f"Could not set UIA timeouts: {e!r}")
+        logger.warning(f"Could not set the 1 s UIA timeouts ({e!r}). A hung app can now "
+                       "block a UIA call for 20 s; the UIA job deadlines still apply.")
         return False
+
+
+# ── UIA worker threads ───────────────────────────────────────────────
+#
+# All UIA work runs on two worker threads, one for capture (a11y text, page
+# URL, titles) and one for the UI-event recorder (clicked and focused
+# elements, page URL), so neither waits behind the other. Callers send a
+# whole job and wait at most its timeout. UIA's own 1 s timeout bounds one
+# call, not a read of hundreds of calls; a slow app could hold a read for
+# minutes, and with it capture, the event loop and shutdown (G37).
+
+# How long a caller waits for a job.
+UIA_A11Y_TIMEOUT_S = 3.0
+UIA_LOOKUP_TIMEOUT_S = 1.5
+# A job still running this long after it started is stuck: its thread is
+# left behind and a new one takes over.
+UIA_STUCK_S = 30.0
+# A thread stuck in COM can't be killed, so each replacement leaks one.
+# Past this many per hour, UIA is turned off for that consumer.
+UIA_MAX_REPLACEMENTS = 3
+_UIA_REPLACE_WINDOW_S = 3600.0
+
+
+def uia_out_of_time() -> bool:
+    """True once the current UIA job has used its time. Walks check this
+    between nodes and return what they have read so far."""
+    deadline = getattr(_uia_tls, "deadline", None)
+    if deadline is None or time.monotonic() < deadline:
+        return False
+    _uia_tls.cut = True
+    return True
+
+
+def _init_uia_thread() -> None:
+    """COM and the UIA timeouts for a new worker thread."""
+    global _uia_timeouts_set
+    try:
+        import uiautomation as auto
+    except ImportError:
+        return
+    _uia_tls.init = ComInit(auto)
+    _uia_timeouts_set = True  # tried here; uia() need not try again
+    set_uia_timeouts(auto)  # again for each new thread, in case it failed before
+
+
+class _UiaJob:
+    def __init__(self, name: str, fn: Callable, timeout: float):
+        self.name = name
+        self.fn = fn
+        self.deadline = time.monotonic() + timeout
+        # Walks stop early enough for their last UIA call (up to 1 s) to end
+        # before the caller gives up.
+        self.walk_deadline = self.deadline - min(_UIA_TIMEOUT_MS / 1000, timeout / 2)
+        self.started: Optional[float] = None
+        self.future: concurrent.futures.Future = concurrent.futures.Future()
+
+
+class _UiaThread:
+    """One daemon thread with its own job queue."""
+
+    def __init__(self, worker: "UiaWorker"):
+        self.worker = worker
+        self.jobs: queue.SimpleQueue = queue.SimpleQueue()
+        self.current: Optional[_UiaJob] = None
+        self.retired = False
+        self.thread = threading.Thread(target=self._run, name=f"uia-{worker.consumer}", daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        try:
+            self.worker._init()
+        except Exception as e:
+            logger.warning(f"UIA ({self.worker.consumer}): thread setup failed: {e!r}")
+        while not self.retired:
+            job = self.jobs.get()
+            if job is None:
+                return
+            if not job.future.set_running_or_notify_cancel():
+                continue  # the caller gave up while it waited in the queue
+            job.started = time.monotonic()
+            self.current = job
+            _uia_tls.deadline, _uia_tls.cut = job.walk_deadline, False
+            try:
+                job.future.set_result(job.fn())
+            except BaseException as e:
+                job.future.set_exception(e)
+            finally:
+                self.current = None
+                _uia_tls.deadline = None
+            if _uia_tls.cut:
+                self.worker.partial += 1
+                logger.debug(f"UIA {job.name}: stopped at its deadline, kept what was read")
+
+    def retire(self):
+        """Leave this thread behind: it exits after its current job, and
+        queued jobs are cancelled (their callers get the default)."""
+        self.retired = True
+        while True:
+            try:
+                job = self.jobs.get_nowait()
+            except queue.Empty:
+                break
+            if job is not None:
+                job.future.cancel()
+        self.jobs.put(None)
+
+
+class UiaWorker:
+    """Runs UIA jobs on one thread, with a deadline per job.
+
+    While a job runs past its deadline, new jobs fail at once instead of
+    queueing behind it. After stuck_s the thread is replaced, at most
+    max_replacements times per hour; after that this consumer runs without
+    UIA (OCR covers the text) until ScreenMind restarts.
+    """
+
+    def __init__(self, consumer: str, init: Callable[[], None] = _init_uia_thread,
+                 stuck_s: float = UIA_STUCK_S, max_replacements: int = UIA_MAX_REPLACEMENTS):
+        self.consumer = consumer
+        self._init = init
+        self._stuck_s = stuck_s
+        self._max_replacements = max_replacements
+        self._lock = threading.Lock()
+        self._thread: Optional[_UiaThread] = None
+        self._replaced_at: list = []
+        self.disabled = False
+        self.replacements = 0
+        self.partial = 0  # jobs cut at their deadline
+        self.timeouts = 0  # callers that gave up waiting
+
+    def run(self, name: str, fn: Callable, timeout: float, default=None):
+        """fn() on the UIA thread, or `default` if it fails, takes longer than
+        `timeout` seconds, or UIA is stuck or off."""
+        t = self._thread
+        if t is not None and threading.current_thread() is t.thread:
+            return fn()  # a job calling another job's code
+        job = _UiaJob(name, fn, timeout)
+        with self._lock:
+            if self.disabled or not self._free_locked():
+                return default
+            if self._thread is None:
+                self._thread = _UiaThread(self)
+            self._thread.jobs.put(job)
+        try:
+            return job.future.result(timeout=max(0.0, job.deadline - time.monotonic()))
+        except concurrent.futures.TimeoutError:
+            job.future.cancel()
+            self.timeouts += 1
+            logger.debug(f"UIA {name} took over {timeout:.1f}s; going on without it")
+            return default
+        except Exception as e:
+            logger.debug(f"UIA {name} failed: {e!r}")
+            return default
+
+    def busy_for(self) -> float:
+        """Seconds the current job has been running (0 when idle)."""
+        t = self._thread
+        job = t.current if t else None
+        started = job.started if job else None
+        return time.monotonic() - started if started else 0.0
+
+    def _free_locked(self) -> bool:
+        """Whether a new job may go in: the thread is idle or its job is
+        still within its deadline. Replaces a stuck thread."""
+        job = self._thread.current if self._thread else None
+        if job is None or job.started is None:
+            return True
+        now = time.monotonic()
+        if now <= job.deadline:
+            return True  # busy but on time: queue behind it
+        if now - job.started < self._stuck_s:
+            return False  # overdue: fail fast
+        self._replaced_at = [t for t in self._replaced_at if now - t < _UIA_REPLACE_WINDOW_S]
+        self._thread.retire()
+        self._thread = None
+        if len(self._replaced_at) >= self._max_replacements:
+            self.disabled = True
+            logger.error(f"UIA ({self.consumer}): '{job.name}' stuck for {now - job.started:.0f}s, "
+                         f"after {len(self._replaced_at)} stuck UIA threads within an hour. UIA is "
+                         "off for it until ScreenMind restarts; OCR covers the text.")
+            return False
+        self._replaced_at.append(now)
+        self.replacements += 1
+        logger.warning(f"UIA ({self.consumer}): '{job.name}' stuck for {now - job.started:.0f}s; "
+                       "leaving that thread behind and starting a new one")
+        return True
+
+
+_uia_workers: dict = {}
+_uia_workers_lock = threading.Lock()
+
+
+def uia_worker(consumer: str) -> UiaWorker:
+    """The worker for "capture" or "recorder"."""
+    with _uia_workers_lock:
+        if consumer not in _uia_workers:
+            _uia_workers[consumer] = UiaWorker(consumer)
+        return _uia_workers[consumer]
+
+
+def run_uia(consumer: str, name: str, fn: Callable, timeout: float, default=None):
+    """Run a UIA job on that consumer's worker thread. See UiaWorker.run."""
+    return uia_worker(consumer).run(name, fn, timeout, default)
 
 
 # Browsers whose foreground window's page Document carries the page URL.
@@ -289,6 +496,8 @@ def _window_documents(hwnd: int) -> list:
     walker = ia.ControlViewWalker
     out = []
     for i in range(found.Length if found else 0):
+        if uia_out_of_time():
+            break
         doc = found.GetElement(i)
         try:
             value = doc.GetCurrentPropertyValue(_UIA_ValueValuePropertyId)
@@ -298,7 +507,7 @@ def _window_documents(hwnd: int) -> list:
             nested = False
             parent = walker.GetParentElement(doc)
             for _ in range(40):  # up to the window
-                if not parent or ia.CompareElements(parent, root):
+                if not parent or ia.CompareElements(parent, root) or uia_out_of_time():
                     break
                 if parent.CurrentControlType == _UIA_DocumentControlTypeId:
                     nested = True
@@ -479,7 +688,8 @@ class WindowsAdapter(PlatformAdapter):
 
     def __init__(self):
         self._a11y_initialized = False
-        self._uia = None
+        self._uia = None  # tests put a fake uiautomation module here
+        self._uia_installed = False
         self._a11y_available = True
 
     @property
@@ -522,16 +732,16 @@ class WindowsAdapter(PlatformAdapter):
         return title
 
     def _document_title(self, hwnd, title: str) -> Optional[str]:
-        """Name of the window's top on-screen Document, if it says more than the title."""
-        try:
+        """Name of the window's top on-screen Document, if it says more than
+        the title. Runs on the capture UIA thread, at most UIA_LOOKUP_TIMEOUT_S."""
+        def _job():
             docs = [d for d in _window_documents(hwnd) if not d["nested"] and d["onscreen"]]
-        except Exception:
+            for d in docs:
+                name = (d["name"] or "").strip()
+                if name and name.lower() != (title or "").strip().lower():
+                    return name
             return None
-        for d in docs:
-            name = (d["name"] or "").strip()
-            if name and name.lower() != (title or "").strip().lower():
-                return name
-        return None
+        return run_uia("capture", "document title", _job, UIA_LOOKUP_TIMEOUT_S)
 
     def get_active_app_name(self) -> Optional[str]:
         """Get process name via Win32 APIs."""
@@ -626,10 +836,15 @@ class WindowsAdapter(PlatformAdapter):
             })
         return result
 
-    def get_browser_url(self) -> Optional[str]:
+    def get_browser_url(self, consumer: str = "capture") -> Optional[str]:
         """URL of the page in the foreground browser window, read from the page's
         UIA Document. Unlike the address bar it has the scheme and does not
-        depend on the browser's UI language. None for non-browsers."""
+        depend on the browser's UI language. None for non-browsers.
+
+        Runs on that consumer's UIA thread, at most UIA_LOOKUP_TIMEOUT_S."""
+        return run_uia(consumer, "browser URL", self._browser_url, UIA_LOOKUP_TIMEOUT_S)
+
+    def _browser_url(self) -> Optional[str]:
         try:
             _, user32 = _dlls()
             hwnd = user32.GetForegroundWindow()
@@ -652,28 +867,24 @@ class WindowsAdapter(PlatformAdapter):
     # ── Accessibility ────────────────────────────────────────────────
 
     def _ensure_a11y_init(self):
-        """Lazy-init the UI Automation client."""
+        """Check once whether uiautomation is installed. It is imported on the
+        UIA thread, not here: importing comtypes sets up COM on the importing
+        thread, and this one is the event loop."""
         if self._a11y_initialized:
             return
         self._a11y_initialized = True
-
-        try:
-            import uiautomation as auto
-            self._uia = auto
-            logger.debug("Windows UI Automation initialized")
-        except ImportError:
-            try:
-                self._uia = None
-                logger.warning("uiautomation not available, trying ctypes fallback")
-            except Exception:
-                self._a11y_available = False
-                logger.warning("Accessibility API not available on this system")
+        self._uia_installed = importlib.util.find_spec("uiautomation") is not None
+        if not self._uia_installed:
+            logger.warning("uiautomation not available, trying ctypes fallback")
 
     def is_a11y_available(self) -> bool:
         return self._a11y_available
 
     def extract_a11y_text(self, hwnd: Optional[int] = None) -> Tuple[Optional[str], str]:
-        """Extract text using Windows UI Automation or ctypes fallback."""
+        """Extract text using Windows UI Automation or ctypes fallback.
+
+        UIA runs on the capture UIA thread, at most UIA_A11Y_TIMEOUT_S. A
+        slow app gives the text read up to then; a stuck one gives none."""
         if not self._a11y_available:
             return None, "none"
 
@@ -682,8 +893,9 @@ class WindowsAdapter(PlatformAdapter):
         try:
             start = time.time()
 
-            if self._uia:
-                text = self._extract_uiautomation(hwnd)
+            if self._uia is not None or self._uia_installed:
+                text = run_uia("capture", "a11y text", lambda: self._extract_uiautomation(hwnd),
+                               UIA_A11Y_TIMEOUT_S)
             else:
                 text = self._extract_ctypes(hwnd)
 
@@ -730,6 +942,8 @@ class WindowsAdapter(PlatformAdapter):
                 self._walk_tree(window, texts, depth=0, max_depth=8, seen=seen, budget=budget)
                 pages = [d for d in page_documents(docs) if d["web"]]
             for page in pages:
+                if uia_out_of_time():
+                    break
                 self._walk_web_document(page["element"], texts, seen, budget)
 
             return '\n'.join(texts) if texts else None
@@ -769,7 +983,7 @@ class WindowsAdapter(PlatformAdapter):
         """
         seen = set() if seen is None else seen
         budget = [_A11Y_MAX_TOTAL_CHARS] if budget is None else budget
-        if depth > max_depth or len(texts) > 500 or budget[0] <= 0:
+        if depth > max_depth or len(texts) > 500 or budget[0] <= 0 or uia_out_of_time():
             return
 
         try:

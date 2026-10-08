@@ -11,8 +11,10 @@ the hook without telling us. So the callbacks only build a RawEvent, put it
 on the queue and return CallNextHookEx. A timer on the hook thread also
 re-installs a hook that has gone silent while the user was active.
 
-Element lookups, the clipboard and window polling run on the recorder's
-enricher thread, never in a callback.
+Element lookups, the clipboard and window polling are called by the
+recorder's enricher thread, never in a callback. UIA lookups and clipboard
+reads run on worker threads with a deadline each, so a hung app costs the
+enricher at most 1.5 s (G37).
 """
 
 import ctypes
@@ -302,9 +304,8 @@ class WindowsUiEventBackend(UiEventBackend):
         self._kbd_state = (ctypes.c_ubyte * 256)()
         self._char_buf = ctypes.create_unicode_buffer(8)
         self._auto = None
-        self._uia_tls = threading.local()
-        self._uia_timeouts_set = False
         self._clip_formats = {}
+        self._clip_worker = None
 
     def _dlls(self):
         if self._u is None:
@@ -471,25 +472,23 @@ class WindowsUiEventBackend(UiEventBackend):
         rc = u.ToUnicodeEx(vk, scan, state, buf, len(buf), TOUNICODE_NO_STATE_CHANGE, hkl)
         return rc, buf.value if rc else ""
 
-    # ── UI Automation (enricher thread) ──────────────────────────────
+    # ── UI Automation (the recorder's UIA thread) ────────────────────
+    #
+    # Lookups run as jobs on the recorder's UIA worker thread, which owns
+    # COM, with a deadline each (platform_support.windows.UiaWorker). A
+    # slow or hung app then costs the enricher at most UIA_LOOKUP_TIMEOUT_S.
 
     def _uia(self):
-        """The uiautomation module, with COM set up for the calling thread."""
+        """The uiautomation module. Call it on the UIA thread only."""
         if self._auto is None:
-            import uiautomation as auto
-            self._auto = auto
-        if getattr(self._uia_tls, "init", None) is None:
-            # Released when the thread ends (thread-local cleanup runs there).
-            from screenmind.platform_support.windows import ComInit
-            self._uia_tls.init = ComInit(self._auto)
-        if not self._uia_timeouts_set:
-            self._uia_timeouts_set = True
-            self._set_uia_timeouts()
+            from screenmind.platform_support.windows import uia
+            self._auto = uia()
         return self._auto
 
-    def _set_uia_timeouts(self):
-        from screenmind.platform_support.windows import set_uia_timeouts
-        set_uia_timeouts(self._auto)
+    @staticmethod
+    def _run_uia(name: str, fn):
+        from screenmind.platform_support.windows import UIA_LOOKUP_TIMEOUT_S, run_uia
+        return run_uia("recorder", name, fn, UIA_LOOKUP_TIMEOUT_S)
 
     def _value_pattern(self, control):
         try:
@@ -556,6 +555,9 @@ class WindowsUiEventBackend(UiEventBackend):
         return None
 
     def element_at(self, x: float, y: float) -> Optional[ElementInfo]:
+        return self._run_uia("element at point", lambda: self._element_at(x, y))
+
+    def _element_at(self, x: float, y: float) -> Optional[ElementInfo]:
         try:
             auto = self._uia()
             control = auto.ControlFromPoint(int(x), int(y))
@@ -581,11 +583,21 @@ class WindowsUiEventBackend(UiEventBackend):
         return info
 
     def focused_element(self) -> Optional[ElementInfo]:
+        return self._run_uia("focused element", self._focused_element)
+
+    def _focused_element(self) -> Optional[ElementInfo]:
         try:
             control = self._uia().GetFocusedControl()
         except Exception:
             return None
         return self._element_info(control) if control is not None else None
+
+    def browser_url(self) -> Optional[str]:
+        try:
+            from screenmind.platform_support import adapter
+            return adapter().get_browser_url(consumer="recorder")
+        except Exception:
+            return None
 
     # ── Windows and processes ────────────────────────────────────────
 
@@ -629,6 +641,16 @@ class WindowsUiEventBackend(UiEventBackend):
             self._k.GlobalUnlock(h)
 
     def read_clipboard(self) -> Optional[str]:
+        """On a worker thread with a deadline: GetClipboardData asks the
+        clipboard owner to render delayed formats and waits for it with no
+        timeout, so a hung owner would block the enricher for good."""
+        if self._clip_worker is None:
+            from screenmind.platform_support.windows import UiaWorker
+            self._clip_worker = UiaWorker("clipboard", init=lambda: None)
+        from screenmind.platform_support.windows import UIA_LOOKUP_TIMEOUT_S
+        return self._clip_worker.run("clipboard read", self._read_clipboard, UIA_LOOKUP_TIMEOUT_S)
+
+    def _read_clipboard(self) -> Optional[str]:
         try:
             u, k = self._dlls()
             opened = False

@@ -23,6 +23,7 @@ from screenmind.workers.capture_worker import CaptureWorker
 from screenmind.workers.analysis_worker import AnalysisWorker
 from screenmind.workers.audio_worker import AudioWorker
 from screenmind.api.server import create_app
+from screenmind.watchdog import Watchdog, start_shutdown_deadline
 
 logger = logging.getLogger("screenmind.main")
 
@@ -207,9 +208,27 @@ async def main():
     # ── Graceful Shutdown ────────────────────────────────────────────
     shutdown_event = asyncio.Event()
 
+    def _checkpoint_db():
+        # Own connection: the main thread may be stuck holding its own
+        import sqlite3
+        conn = sqlite3.connect(str(settings.db_path), timeout=2)
+        try:
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        finally:
+            conn.close()
+
+    def start_deadline():
+        # A thread stuck in an OS call must not keep the process alive
+        start_shutdown_deadline(before_exit=_checkpoint_db)
+
     def handle_signal(*_):
+        start_deadline()
         _safe_print("\n[Main] Shutdown signal received...")
         shutdown_event.set()
+
+    def request_shutdown():
+        start_deadline()  # here too: a stuck event loop would never run handle_signal
+        _loop.call_soon_threadsafe(handle_signal)
 
     signal.signal(signal.SIGINT, handle_signal)
     if sys.platform != "win32":
@@ -218,7 +237,7 @@ async def main():
     # event to ourselves fails on Windows when there is no console (launcher,
     # pythonw): WinError 233, and the app keeps running.
     _loop = asyncio.get_running_loop()
-    _api_deps.request_shutdown = lambda: _loop.call_soon_threadsafe(handle_signal)
+    _api_deps.request_shutdown = request_shutdown
 
     # ── Safety check: never expose the API to the network ─────────────
     # The API has no auth. Binding to all interfaces would expose all
@@ -252,6 +271,11 @@ async def main():
     capture_task = asyncio.create_task(capture_worker.run())
     analysis_task = asyncio.create_task(analysis_worker.run())
 
+    # Logs where a stuck part waits; restarts a stuck UI-event enricher
+    watchdog = Watchdog(capture_worker=capture_worker, analysis_worker=analysis_worker,
+                        ui_recorder=ui_recorder, analysis_queue=processing_queue)
+    watchdog.start()
+
     logger.info(f"Dashboard: http://{settings.api_host}:{settings.api_port}")
     logger.info(f"API docs:  http://{settings.api_host}:{settings.api_port}/docs")
     _safe_print()
@@ -263,6 +287,7 @@ async def main():
 
     # ── Cleanup ──────────────────────────────────────────────────────
     logger.info("Shutting down...")
+    watchdog.stop()
     capture_worker.stop()
     analysis_worker.stop()
     audio_worker.stop()

@@ -102,6 +102,8 @@ class CaptureWorker:
         logger.info("Click 'Start Capturing' in the dashboard to begin.")
 
         while self._running:
+            # Read by the watchdog: a pass every <= 5 s, paused or not
+            self.last_beat = time.monotonic()
             # Event-driven capture (app switch, click, typing pause)
             reason = self._take_due_trigger()
             if reason and not self._paused:

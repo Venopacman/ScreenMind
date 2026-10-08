@@ -121,6 +121,8 @@ class UiEventRecorder:
         self._period_input = 0
         self._period_stored: Counter = Counter()
         self._period_skipped: Counter = Counter()
+        # Enricher loop passes; the watchdog reads it to see a stuck enricher.
+        self.ticks = 0
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
@@ -193,6 +195,18 @@ class UiEventRecorder:
         else:
             logger.warning("UI events: stopped without writing the last events")
 
+    def restart(self) -> bool:
+        """Stop and start again, for the watchdog when the enricher is stuck.
+        A stuck enricher may hold the lock for good, so the new one gets a
+        new lock; the old thread's events still pending are dropped."""
+        old = self._thread
+        self.stop()
+        if old is not None and old.is_alive():
+            self._lock = threading.RLock()
+            self._pending = []
+            self._buffer = TextBuffer()
+        return self.start()
+
     def status(self) -> dict:
         perms = self._backend.check_permissions().as_dict() if self.supported else None
         stats = self._backend.tap_stats() if self.supported else {}
@@ -248,6 +262,7 @@ class UiEventRecorder:
                 logger.error(f"UI event processing failed: {e}")
 
     def _tick(self, raw: Optional[RawEvent], now: float):
+        self.ticks += 1
         if now - self._last_front_poll >= _FRONT_POLL_S:
             self._poll_front(now)
         if raw is not None:

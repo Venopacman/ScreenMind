@@ -210,8 +210,6 @@ def backend(monkeypatch):
     b = win.WindowsUiEventBackend()
     fake_auto = types.SimpleNamespace(PatternId=types.SimpleNamespace(ValuePattern=10002))
     b._auto = fake_auto
-    b._uia_tls.init = object()  # pretend COM is set up
-    b._uia_timeouts_set = True
     return b
 
 

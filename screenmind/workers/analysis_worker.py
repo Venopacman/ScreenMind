@@ -211,6 +211,7 @@ class AnalysisWorker:
             pass
 
         while self._running:
+            self.last_beat = time.monotonic()  # read by the watchdog
             try:
                 try:
                     capture: CaptureResult = await asyncio.wait_for(
