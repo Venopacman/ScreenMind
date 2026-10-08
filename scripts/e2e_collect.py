@@ -176,6 +176,21 @@ def _dotenv():
     return {}
 
 
+# Settings every run forces, the same on each machine. The status header lists
+# the instance's other non-default settings (from .env), see _settings_text().
+TEST_ENV = {
+    "CAPTURE_ON_START": "true",
+    "CAPTURE_INTERVAL": "10",
+    "UI_EVENTS_ENABLED": "true",
+    "UI_EVENTS_TYPES": "click,app_switch,window_focus,text,clipboard",
+    "EVENT_TRIGGERED_CAPTURE": "true",
+    "SENSITIVE_FILTER_ENABLED": "true",
+    "RETENTION_DAYS": "7",
+    # Nothing extra runs
+    "MEETING_TRANSCRIPTION": "false",
+}
+
+
 class Instance:
     def __init__(self, data_dir: Path, port: int):
         self.data_dir = data_dir
@@ -196,16 +211,7 @@ class Instance:
             "API_HOST": "127.0.0.1",
             "API_PORT": str(self.port),
             "SETUP_COMPLETE": "true",
-            # What the test needs
-            "CAPTURE_ON_START": "true",
-            "CAPTURE_INTERVAL": "10",
-            "UI_EVENTS_ENABLED": "true",
-            "UI_EVENTS_TYPES": "click,app_switch,window_focus,text,clipboard",
-            "EVENT_TRIGGERED_CAPTURE": "true",
-            "SENSITIVE_FILTER_ENABLED": "true",
-            "RETENTION_DAYS": "7",
-            # Nothing extra runs
-            "MEETING_TRANSCRIPTION": "false",
+            **TEST_ENV,
             "SCREENMIND_LOG_LEVEL": "INFO",
             "PYTHONUNBUFFERED": "1",
             "PYTHONUTF8": "1",
@@ -1092,6 +1098,21 @@ def os_version():
     return f"{platform.system()} {platform.release()}"
 
 
+def _settings_text(log_text):
+    """Non-default settings of the run, from the instance's startup log line.
+
+    Leaves out what every run forces (TEST_ENV, data dir, port), so what is
+    left differs between machines: their .env. Empty if the line is missing.
+    """
+    m = re.search(r"Settings that differ from the defaults: (.*)", log_text)
+    if not m:
+        return ""
+    forced = {k.lower() for k in TEST_ENV} | {"data_dir", "api_port"}
+    items = [s for s in m.group(1).strip().split("; ")
+             if s != "none" and s.split("=", 1)[0] not in forced]
+    return "; ".join(items) or "all at code defaults"
+
+
 def print_table(rows):
     w = max(len(r["label"]) for r in rows)
     log("")
@@ -1120,6 +1141,7 @@ def write_status(path: Path, meta: dict, rows: list, notes: list):
     ]
     for key, label in (("state", "State"), ("date", "Date"), ("machine", "Machine"), ("os", "OS"),
                        ("git", "Git"), ("python", "Python"), ("host_app", "Started from"),
+                       ("settings", "Settings not at default"),
                        ("permissions", "Permissions"), ("displays", "Displays"),
                        ("input_mode", "Input"), ("ui_events", "UI event recorder"),
                        ("duration", "Run time"), ("command", "Command")):
@@ -1395,6 +1417,7 @@ def _run(args, started, data_dir):
             "os": os_version(),
             "git": f"{branch} {sha}{dirty}",
             "python": platform.python_version(),
+            "settings": rep.mask(_settings_text(inst.log_text())),
             "host_app": driver.host_app(),
             "permissions": perm_txt,
             "displays": str(displays),

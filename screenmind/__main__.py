@@ -6,6 +6,8 @@ import sys
 # Under pythonw.exe (Windows GUI mode), sys.stdin/stdout/stderr are None.
 # Many libraries (uvicorn, logging, etc.) call .isatty() or .write() on them
 # and crash with AttributeError. Redirect to devnull before any imports.
+# The log file does not depend on this: main.run() always writes one.
+_no_console = sys.stderr is None
 if sys.stdout is None:
     sys.stdout = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
 if sys.stderr is None:
@@ -14,9 +16,10 @@ if sys.stdin is None:
     sys.stdin = open(os.devnull, "r", encoding="utf-8")  # noqa: SIM115
 
 # ── Crash wrapper ─────────────────────────────────────────────────────────
-# Under pythonw.exe, unhandled exceptions vanish silently.
-# Catch everything and write to a crash log for diagnostics.
-if sys.executable.lower().endswith("pythonw.exe"):
+# Without a console (pythonw.exe, a detached python.exe), unhandled exceptions
+# vanish silently. main.run() logs those after startup to screenmind.log; this
+# also catches import errors, which come before the log file exists.
+if _no_console:
     import traceback
     _data = os.environ.get(
         "SCREENMIND_DATA_DIR",

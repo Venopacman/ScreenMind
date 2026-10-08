@@ -16,7 +16,7 @@
 #   scripts/dev-instance.sh [run|info|reset]
 #
 #   run    start the instance in the foreground (default)
-#   info   print the port, dashboard URL and data dir
+#   info   print the port, dashboard URL, data dir and log file
 #   reset  delete this worktree's data dir (fresh DB next run)
 
 set -euo pipefail
@@ -41,6 +41,7 @@ case "${1:-run}" in
         echo "worktree:  $CODE_DIR"
         echo "data dir:  $DATA"
         echo "dashboard: http://127.0.0.1:$PORT"
+        echo "log:       $DATA/screenmind.log"
         ;;
     reset)
         rm -rf "$DATA"
@@ -71,6 +72,8 @@ case "${1:-run}" in
         echo "ScreenMind dev instance: $NAME"
         echo "  dashboard: http://127.0.0.1:$PORT"
         echo "  data dir:  $DATA"
+        # Written on every start, also when the output here goes nowhere
+        echo "  log:       $DATA/screenmind.log"
         # Python from the worktree's .venv if it exists (a branch with changed
         # deps runs `uv sync` there), else the main checkout's .venv.
         # bin/ on macOS/Linux, Scripts/ on Windows Git Bash.

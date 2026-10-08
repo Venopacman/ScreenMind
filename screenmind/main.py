@@ -17,7 +17,7 @@ from pathlib import Path
 
 import uvicorn
 
-from screenmind.config import settings
+from screenmind.config import settings, setup_file_log
 from screenmind.storage.database import Database
 from screenmind.workers.capture_worker import CaptureWorker
 from screenmind.workers.analysis_worker import AnalysisWorker
@@ -118,6 +118,7 @@ async def main():
     print_first_run_help()
 
     logger.info(f"Data directory: {settings.data_path}")
+    logger.info("Settings that differ from the defaults: %s", settings.describe_non_defaults())
     logger.info(f"Capture interval: {settings.capture_interval}s")
     logger.info(f"Model: {settings.active_model}")
     if settings.blocked_apps_list:
@@ -392,10 +393,8 @@ def run():
 
     # ── Background mode: re-launch headless and exit ──
     if "--background" in sys.argv:
-        log_path = settings.data_path / "screenmind.log"
-        settings.data_path.mkdir(parents=True, exist_ok=True)
-        env = os.environ.copy()
-        env["SCREENMIND_LOG_FILE"] = str(log_path)
+        # The child writes the log file itself (setup_file_log below)
+        log_path = os.environ.get("SCREENMIND_LOG_FILE") or settings.data_path / "screenmind.log"
 
         if sys.platform == "win32":
             # Try pythonw (no console window)
@@ -404,7 +403,6 @@ def run():
                 subprocess.Popen(
                     [pythonw, "-m", "screenmind"],
                     stdin=subprocess.DEVNULL,
-                    env=env,
                 )
             else:
                 # Fallback: CREATE_NO_WINDOW with regular python
@@ -412,7 +410,6 @@ def run():
                     [sys.executable, "-m", "screenmind"],
                     stdin=subprocess.DEVNULL,
                     creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
-                    env=env,
                 )
         else:
             # macOS/Linux: detach from terminal
@@ -422,14 +419,22 @@ def run():
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
-                env=env,
             )
 
         print(f"ScreenMind started in background. Logs: {log_path}")  # noqa: T201
         print(f"Dashboard: http://{settings.api_host}:{settings.api_port}")  # noqa: T201
         return
 
-    asyncio.run(main())
+    # Every app start logs to a rotating file, console or not (G38)
+    log_path = setup_file_log(settings.data_path)
+    from screenmind import __version__
+    logger.info("ScreenMind %s starting: pid %d, Python %s, %s. Log file: %s",
+                __version__, os.getpid(), sys.version.split()[0], sys.platform, log_path)
+    try:
+        asyncio.run(main())
+    except Exception:
+        logger.exception("ScreenMind stopped on an error")
+        raise
 
 
 if __name__ == "__main__":

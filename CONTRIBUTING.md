@@ -78,7 +78,7 @@ logger.debug("Verbose detail for troubleshooting")
 
 ### Why?
 
-Logging goes to `stderr` by default. `SCREENMIND_LOG_LEVEL` sets the level and `SCREENMIND_LOG_FILE` adds a rotating log file. A bare `print()` skips both.
+Logging goes to `stderr` and, once the app starts (`main.run()`), to a rotating `screenmind.log` in the data dir. `SCREENMIND_LOG_LEVEL` sets the level and `SCREENMIND_LOG_FILE` moves the file. A bare `print()` skips both.
 
 ## Where Help is Needed
 

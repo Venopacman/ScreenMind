@@ -64,3 +64,13 @@ def test_summary_puts_machines_side_by_side(e2e, tmp_path):
     assert "| OCR text | FAIL | - |" in text
     # Browser rows sort with the other browser checks, after OCR
     assert text.index("Browser URL (safari)") > text.index("OCR text")
+
+
+def test_settings_row_lists_only_what_differs_between_machines(e2e):
+    log = ("2026-10-08 10:00:00 [screenmind.main] INFO: Settings that differ from the defaults: "
+           "data_dir=C:\\tmp\\x (env); api_port=7901 (env); capture_interval=10 (env); "
+           "ocr_languages=en,ru (.env); capture_on_start=True (.env); blocked_apps=bank (.env)\n")
+    assert e2e._settings_text(log) == "ocr_languages=en,ru (.env); blocked_apps=bank (.env)"
+    only_forced = "Settings that differ from the defaults: data_dir=/t (env); capture_interval=10 (env)\n"
+    assert e2e._settings_text(only_forced) == "all at code defaults"
+    assert e2e._settings_text("no such line") == ""

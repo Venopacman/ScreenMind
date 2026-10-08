@@ -10,57 +10,70 @@ import logging
 import os
 import sys
 import threading
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 from pydantic_settings import BaseSettings
-from pydantic import Field, ValidationError
+from pydantic import Field, PrivateAttr, ValidationError
 
 
 
 # ── Logging Setup ────────────────────────────────────────────────────────────
 
+_LOG_FORMAT = logging.Formatter(
+    "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+# About 250 KB a day at INFO, so 1 MB x (1 + 3 backups) keeps about two weeks
+LOG_MAX_BYTES = 1024 * 1024
+LOG_BACKUPS = 3
+
+
 def _setup_logging():
     """Configure screenmind logger hierarchy. Safe to call multiple times.
 
+    Logs to stderr when there is one. The log file is added by setup_file_log()
+    at app start, not here: this runs on every import (tests, scripts).
+
     Environment variables:
         SCREENMIND_LOG_LEVEL: DEBUG, INFO (default), WARNING, ERROR
-        SCREENMIND_LOG_FILE:  Optional path to a log file (rotating, 10MB x 3 backups)
     """
     root = logging.getLogger("screenmind")
     if root.handlers:
         return
     level = os.environ.get("SCREENMIND_LOG_LEVEL", "INFO")
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
-    fmt = logging.Formatter(
-        "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
 
-    # Always log to stderr (unless running under pythonw where stderr is None)
+    # pythonw has no stderr (None) until __main__.py points it at devnull
     if sys.stderr is not None:
         stderr_handler = logging.StreamHandler(sys.stderr)
-        stderr_handler.setFormatter(fmt)
+        stderr_handler.setFormatter(_LOG_FORMAT)
         root.addHandler(stderr_handler)
 
-    # Optionally log to a rotating file
-    log_file = os.environ.get("SCREENMIND_LOG_FILE")
-    # Auto-enable file logging when stderr is unavailable (pythonw.exe)
-    if not log_file and sys.stderr is None:
-        _data = os.environ.get("SCREENMIND_DATA_DIR", os.path.join(os.path.expanduser("~"), ".screenmind"))
-        os.makedirs(_data, exist_ok=True)
-        log_file = os.path.join(_data, "screenmind.log")
-    if log_file:
-        try:
-            from logging.handlers import RotatingFileHandler
-            file_handler = RotatingFileHandler(
-                log_file, maxBytes=10 * 1024 * 1024, backupCount=3, encoding="utf-8",
-            )
-            file_handler.setFormatter(fmt)
-            root.addHandler(file_handler)
-        except (OSError, PermissionError) as e:
-            # Invalid path or no write permission — continue with stderr only
-            root.warning(f"Could not open log file '{log_file}': {e}")
+
+def setup_file_log(data_path: Path) -> Optional[Path]:
+    """Also log to a rotating file. Returns its path, or None if it can't be opened.
+
+    The file is SCREENMIND_LOG_FILE if set, else <data dir>/screenmind.log.
+    main.run() calls it on every app start, so starts without a console
+    (pythonw, the launcher, start at login) leave a log too. Safe to call twice.
+    """
+    path = Path(os.environ.get("SCREENMIND_LOG_FILE") or Path(data_path) / "screenmind.log")
+    root = logging.getLogger("screenmind")
+    for h in root.handlers:
+        if isinstance(h, RotatingFileHandler) and Path(h.baseFilename) == path.resolve():
+            return path
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(path, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS,
+                                      encoding="utf-8")
+    except OSError as e:
+        root.warning("Could not open log file %s: %s", path, e)
+        return None
+    handler.setFormatter(_LOG_FORMAT)
+    root.addHandler(handler)
+    return path
 
 _setup_logging()
 
@@ -82,6 +95,13 @@ _ALLOWED_OVERRIDES = {
     "capture_paused",
     "ui_events_enabled", "ui_events_types", "event_triggered_capture",
 }
+
+# Runtime state, not configuration: left out of the non-default settings list
+_STATE_KEYS = {"setup_complete", "capture_paused"}
+
+# The checkout's .env, not the current directory's: a start at login runs in
+# another directory (/ for the macOS LaunchAgent) and missed it
+_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 
 # Lock to prevent concurrent read-modify-write races on settings.json
 _settings_lock = threading.Lock()
@@ -256,8 +276,13 @@ class Settings(BaseSettings):
     # ── Internal State ────────────────────────────────────────────────────
     setup_complete: bool = Field(default=False, description="Whether first-run setup is complete")
 
+    # Values before settings.json (defaults, .env, env vars), and the keys
+    # settings.json set. See save_runtime_overrides() and non_defaults().
+    _base: dict = PrivateAttr(default_factory=dict)
+    _from_json: set = PrivateAttr(default_factory=set)
+
     model_config = {
-        "env_file": ".env",
+        "env_file": _ENV_FILE,
         "env_file_encoding": "utf-8",
         "case_sensitive": False,
         # A .env can still hold keys of removed features (BOOKMARK_HOTKEY,
@@ -326,6 +351,40 @@ class Settings(BaseSettings):
         mode_map = {"minimal": 0, "balanced": 15, "maximum": 99}
         return mode_map.get(self.performance_mode, 15)
 
+    def model_post_init(self, __context):
+        self._base = {k: getattr(self, k) for k in _ALLOWED_OVERRIDES if hasattr(self, k)}
+
+    def non_defaults(self) -> list:
+        """(name, value, source) for each setting that differs from its code default.
+
+        source is "settings.json", "env" (an environment variable) or ".env".
+        Runtime state (setup_complete, capture_paused) is left out.
+        """
+        env_keys = {k.lower() for k in os.environ}
+        out = []
+        for name, field in type(self).model_fields.items():
+            value = getattr(self, name)
+            if name in _STATE_KEYS or value == field.get_default(call_default_factory=True):
+                continue
+            if name in self._from_json:
+                source = "settings.json"
+            elif name in env_keys:
+                source = "env"
+            else:
+                source = ".env"
+            out.append((name, value, source))
+        return out
+
+    def describe_non_defaults(self) -> str:
+        """One line for the startup log: 'key=value (source); ...' or 'none'."""
+        parts = []
+        for name, value, source in self.non_defaults():
+            text = str(value)
+            if len(text) > 60:
+                text = text[:57] + "..."
+            parts.append(f"{name}={text} ({source})")
+        return "; ".join(parts) or "none"
+
     def ensure_dirs(self):
         """Create all required directories if they don't exist."""
         self.data_path.mkdir(parents=True, exist_ok=True)
@@ -346,12 +405,20 @@ class Settings(BaseSettings):
                             applied.append(k)
                         except (ValueError, ValidationError):
                             logger.warning("Invalid override ignored: %s=%r", k, v)
-                logger.info(f"Loaded runtime overrides: {applied}")
+                self._from_json.update(applied)
+                # main() logs the settings that differ from the defaults
+                logger.debug("Loaded runtime overrides: %s", applied)
             except Exception as e:
                 logger.error(f"Failed to load settings.json: {e}")
 
     def save_runtime_overrides(self, updates: dict):
-        """Save dashboard settings to settings.json."""
+        """Save dashboard settings to settings.json.
+
+        A value equal to the one without settings.json (code default, .env or
+        env var) is removed from the file instead of stored, so it follows
+        later default changes. The dashboard posts its whole form on every
+        save; storing all of it froze each default of that day per machine.
+        """
         with _settings_lock:
             path = self.settings_json_path
             existing = {}
@@ -361,13 +428,21 @@ class Settings(BaseSettings):
                 except Exception as e:
                     logger.debug("Could not read existing settings.json: %s", e)
             for k, v in updates.items():
-                if k in _ALLOWED_OVERRIDES:
-                    existing[k] = v
-                    if hasattr(self, k):
-                        try:
-                            setattr(self, k, v)
-                        except (ValueError, ValidationError) as e:
-                            logger.debug("Override not applied in memory: %s=%r, %s", k, v, e)
+                if k not in _ALLOWED_OVERRIDES:
+                    continue
+                existing[k] = v
+                if not hasattr(self, k):
+                    continue
+                try:
+                    setattr(self, k, v)
+                except (ValueError, ValidationError) as e:
+                    logger.debug("Override not applied in memory: %s=%r, %s", k, v, e)
+                    continue
+                if k in self._base and getattr(self, k) == self._base[k]:
+                    del existing[k]
+                    self._from_json.discard(k)
+                else:
+                    self._from_json.add(k)
             path.write_text(json.dumps(existing, indent=2))
 
 

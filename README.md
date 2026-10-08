@@ -293,7 +293,7 @@ Full Swagger docs are at `http://127.0.0.1:7777/docs`.
 
 ## Configuration
 
-Set values in `.env`, as environment variables, or on the **Settings** page (saved to `settings.json`).
+The defaults below are the settings for every machine. Change one only when a machine needs it: in `.env` (in the checkout root), as an environment variable, or on the **Settings** page (saved to `settings.json` in the data dir; `settings.json` beats `.env`). The Settings page stores only values that differ from the default, so the rest follow later default changes. At startup ScreenMind logs every setting that differs from its default, and where it comes from.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -310,8 +310,8 @@ Set values in `.env`, as environment variables, or on the **Settings** page (sav
 | `UI_EVENTS_ENABLED` | `true` | Record clicks and app switches, plus typed text and clipboard if listed in `UI_EVENTS_TYPES` (macOS, Windows) |
 | `UI_EVENTS_TYPES` | `click,app_switch` | Which UI event types to record (`text`, `clipboard`, `window_focus` also available) |
 | `EVENT_TRIGGERED_CAPTURE` | `true` | Capture right after app switches, clicks and typing pauses |
-| `SCREENMIND_LOG_LEVEL` | `INFO` | Log verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| `SCREENMIND_LOG_FILE` | *(none)* | Path to a log file (rotating, 10MB × 3 backups) |
+| `SCREENMIND_LOG_LEVEL` | `INFO` | Log verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` (environment variable only, not `.env`) |
+| `SCREENMIND_LOG_FILE` | `<data dir>/screenmind.log` | Log file, written on every start (rotating, 1 MB × 3 backups; environment variable only) |
 
 See `.env.example` for the full list.
 

@@ -43,7 +43,11 @@ def is_server_running() -> bool:
 
 
 def start_screenmind() -> None:
-    """Launch ScreenMind in the background."""
+    """Launch ScreenMind in the background.
+
+    Its output goes to DEVNULL. ScreenMind writes its own rotating log,
+    screenmind.log in the data dir (main.run()).
+    """
     if sys.platform == "win32":
         pythonw = sys.executable.replace("python.exe", "pythonw.exe")
         if not Path(pythonw).exists():
