@@ -305,7 +305,7 @@ The defaults below are the settings for every machine. Change one only when a ma
 | `MEETING_TRANSCRIPTION` | `false` | Transcribe calls with Gemma |
 | `RETENTION_DAYS` | `7` | Delete data older than N days (0 = forever) |
 | `ENCRYPTION_ENABLED` | `false` | Encrypt screenshots at rest |
-| `SENSITIVE_FILTER_ENABLED` | `true` | Redact credit cards, SSNs, API keys, passwords |
+| `SENSITIVE_FILTER_ENABLED` | `true` | Redact credit cards, SSNs, API keys, passwords, emails (domain kept), phone numbers, IBANs |
 | `CAPTURE_PAUSED` | `true` | Capture state, kept across restarts |
 | `UI_EVENTS_ENABLED` | `true` | Record the UI event types listed in `UI_EVENTS_TYPES` (macOS, Windows) |
 | `UI_EVENTS_TYPES` | `click,app_switch,text,clipboard` | Which UI event types to record (`window_focus` also available) |

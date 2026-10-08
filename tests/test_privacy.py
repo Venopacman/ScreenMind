@@ -81,7 +81,7 @@ def test_multiple_redactions():
 
 def test_parse_enabled_types():
     assert parse_enabled_types("credit_card,ssn") == ["credit_card", "ssn"]
-    assert parse_enabled_types("") == ["credit_card", "ssn", "api_key", "jwt", "password"]
+    assert parse_enabled_types("") == ["credit_card", "ssn", "api_key", "jwt", "password", "email", "phone", "iban"]
     assert parse_enabled_types("invalid,credit_card") == ["credit_card"]
 
 
@@ -171,17 +171,16 @@ def test_redact_gitlab_token():
     assert "[REDACTED:key]" in result["clean_text"]
 
 
-def test_email_not_redacted_by_default():
-    """Email is defined but not in the default enabled list."""
-    text = "contact me at user@example.com"
+def test_email_redacted_by_default_keeps_domain():
+    text = "contact me at Jane.Doe+work@Mail.Example.com"
     result = filter_sensitive_text(text)  # uses defaults
-    assert "user@example.com" in result["clean_text"]
+    assert result["clean_text"] == "contact me at [REDACTED:email@mail.example.com]"
+    assert result["types_found"] == ["email"]
 
 
-def test_email_redacted_when_enabled():
+def test_email_kept_when_type_off():
     text = "contact me at user@example.com"
-    result = filter_sensitive_text(text, ["email"])
-    assert "[REDACTED:email]" in result["clean_text"]
+    assert filter_sensitive_text(text, ["password"])["clean_text"] == text
 
 
 
@@ -291,3 +290,113 @@ def test_filter_ocr_boxes_handles_empty():
     from screenmind.privacy.data_filter import filter_ocr_boxes
     assert filter_ocr_boxes(None) is None
     assert filter_ocr_boxes([{"text": ""}, {"box": []}]) == [{"text": ""}, {"box": []}]
+
+
+# ── Emails, phones, IBANs ────────────────────────────────────────────
+# All values here are made up (IBANs are the standard documentation examples).
+
+def test_email_filter_is_idempotent():
+    once = filter_sensitive_text("mail a.b@example.org now")["clean_text"]
+    assert once == "mail [REDACTED:email@example.org] now"
+    assert filter_sensitive_text(once)["clean_text"] == once
+
+
+def test_mention_read_as_email_hides_the_name():
+    """OCR of a Slack mention ("Hi @jane.doe") can look like an email whose
+    domain is a person's name. That domain is not kept."""
+    assert filter_sensitive_text("Hi@jane.doekova- thanks")["clean_text"] == (
+        "[REDACTED:email]- thanks")
+
+
+def test_country_code_domain_is_kept():
+    assert filter_sensitive_text("ivan@example.ru")["clean_text"] == "[REDACTED:email@example.ru]"
+
+
+def test_retina_file_name_is_not_an_email():
+    text = "logo@2x.png icon@3x.webp"
+    assert filter_sensitive_text(text)["clean_text"] == text
+
+
+@pytest.mark.parametrize("text", [
+    "call +1 (415) 555-0132 today",
+    "call +7 999 123-45-67 today",
+    "call +79991234567 today",
+    "call +49 30 1234567 today",
+    "call +44 20 7946 0958 today",
+    "call (415) 555-0132 today",
+    "call 415-555-0132 today",
+    "call 415.555.0132 today",
+    "call 8 (999) 123-45-67 today",
+    "call 8-999-123-45-67 today",
+])
+def test_phone_redacted(text):
+    result = filter_sensitive_text(text)
+    assert result["clean_text"] == "call [REDACTED:phone] today"
+    assert result["types_found"] == ["phone"]
+
+
+def test_phone_at_end_of_sentence():
+    assert filter_sensitive_text("My number is +7 999 123-45-67.")["clean_text"] == (
+        "My number is [REDACTED:phone].")
+
+
+@pytest.mark.parametrize("text", [
+    "2026-10-08 12:44:36",
+    "build 1.2.3.4567 on 10.0.0.12",
+    "order 89991234567 shipped",          # bare digit run: an ID, not a phone
+    "total 1 234 567,89 EUR",
+    "UTC+03:00",
+    "+30% since 2025-10-08",
+    "v415-555-0132x",
+    "https://example.com/415-555-0132",
+    "id 12345678-1234-1234-1234-123456789abc",
+    "price +12.50",
+])
+def test_phone_not_redacted(text):
+    assert filter_sensitive_text(text)["clean_text"] == text
+
+
+@pytest.mark.parametrize("iban", [
+    "DE89 3704 0044 0532 0130 00",
+    "DE89370400440532013000",
+    "GB82 WEST 1234 5698 7654 32",
+    "NL91 ABNA 0417 1643 00",
+    "FR14 2004 1010 0505 0001 3M02 606",
+])
+def test_iban_redacted(iban):
+    result = filter_sensitive_text(f"pay to {iban} please")
+    assert result["clean_text"] == "pay to [REDACTED:iban] please"
+    assert result["types_found"] == ["iban"]
+
+
+def test_iban_followed_by_a_word():
+    assert filter_sensitive_text("DE89 3704 0044 0532 0130 00 TEST")["clean_text"] == (
+        "[REDACTED:iban] TEST")
+
+
+@pytest.mark.parametrize("text", [
+    "DE89 3704 0044 0532 0130 01",   # wrong checksum
+    "AB12 CDEF GHIJ",                # too short
+    "RFC2616 SECTION 1234 ABCD",
+])
+def test_iban_not_redacted(text):
+    assert filter_sensitive_text(text)["clean_text"] == text
+
+
+def test_iban_digits_not_taken_as_card():
+    """IBAN runs before the card check, so its digits are not half redacted."""
+    text = "DE89 3704 0044 0532 0130 00"
+    assert filter_sensitive_text(text, ["credit_card", "iban"])["clean_text"] == "[REDACTED:iban]"
+
+
+def test_types_run_in_fixed_order():
+    text = "user@example.com DE89 3704 0044 0532 0130 00"
+    a = filter_sensitive_text(text, ["email", "iban", "credit_card"])
+    b = filter_sensitive_text(text, ["credit_card", "iban", "email"])
+    assert a == b
+
+
+def test_config_default_matches_filter_default():
+    from screenmind.config import Settings
+    from screenmind.privacy.data_filter import DEFAULT_TYPES
+    assert Settings.model_fields["sensitive_filter_types"].default == ",".join(DEFAULT_TYPES)

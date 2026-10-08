@@ -89,9 +89,10 @@ async function renderSettings(el) {
   + '<div class="settings-card"><div class="settings-card-header"><div><div class="settings-title">Sensitive Data Filter</div><div class="settings-desc">Auto-redact PII from captured text before storage</div></div>'
   + _sw('sensitive-filter-enabled', cfg.sensitive_filter_enabled) + '</div>'
   + '<div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">'
-  + ['credit_card','ssn','api_key','password','email'].map(function(t) {
-      var checked = (cfg.sensitive_filter_types || '').indexOf(t) >= 0 ? 'checked' : '';
-      var labels = {credit_card:'Credit Cards', ssn:'SSN/ID Numbers', api_key:'API Keys', password:'Passwords', email:'Email Addresses'};
+  // Same order as the default in config.py, so saving the defaults stores nothing.
+  + ['credit_card','ssn','api_key','jwt','password','email','phone','iban'].map(function(t) {
+      var checked = (cfg.sensitive_filter_types || '').split(',').indexOf(t) >= 0 ? 'checked' : '';
+      var labels = {credit_card:'Credit Cards', ssn:'SSN/ID Numbers', api_key:'API Keys', jwt:'JWT Tokens', password:'Passwords', email:'Email Addresses (domain kept)', phone:'Phone Numbers', iban:'IBANs'};
       return '<label style="display:flex;align-items:center;gap:8px;font-size:0.82rem;color:var(--text-secondary);cursor:pointer"><input type="checkbox" class="filter-type-cb" value="' + t + '" ' + checked + ' style="accent-color:var(--accent)"> ' + labels[t] + '</label>';
     }).join('') + '</div></div>'
 

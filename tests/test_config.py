@@ -89,7 +89,7 @@ def test_saving_the_default_value_removes_the_key(tmp_path):
     import json
     s = Settings(data_dir=str(tmp_path))
     s.save_runtime_overrides({"capture_interval": 25, "performance_mode": "balanced",
-                              "sensitive_filter_types": "credit_card,ssn,api_key,jwt,password"})
+                              "sensitive_filter_types": "credit_card,ssn,api_key,jwt,password,email,phone,iban"})
     assert json.loads(s.settings_json_path.read_text()) == {"capture_interval": 25}
     assert s.capture_interval == 25
 

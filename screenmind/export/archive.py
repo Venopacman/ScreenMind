@@ -22,7 +22,7 @@ from typing import IO, Any, Dict, Iterable, List, Optional
 from screenmind import __version__
 from screenmind.config import settings
 from screenmind.export.sessions import Session, SessionSplitter, build_sessions
-from screenmind.privacy.data_filter import filter_sensitive_text, parse_enabled_types
+from screenmind.privacy.data_filter import DEFAULT_TYPES, filter_sensitive_text, parse_enabled_types
 from screenmind.privacy.encryption import decrypt_image_bytes, is_encrypted
 from screenmind.privacy.url_filter import sanitize_url
 
@@ -40,7 +40,7 @@ MEETING_TRANSCRIPT_MAX_CHARS = 20_000
 UNLINKED_ACTIONS_MAX_LINES = 50
 
 # Always applied on export, on top of what the user turned on in settings.
-_DEFAULT_FILTER_TYPES = ["credit_card", "ssn", "api_key", "jwt", "password"]
+_DEFAULT_FILTER_TYPES = list(DEFAULT_TYPES)
 
 _ACTIVITY_COLUMNS = """
     a.id, a.timestamp, a.screenshot_path, a.window_title, a.detected_app,

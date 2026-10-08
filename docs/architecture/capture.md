@@ -441,7 +441,7 @@ The app requests Accessibility and Input Monitoring only from the UI events sett
 | Password fields | a11y walkers, UI event backends | Never read; typing stores `[password field]` |
 | Clipboard secret markers | UI event backends | Password-manager clipboard data is not read |
 | `sanitize_url()` | `privacy/url_filter.py`, before every stored URL | Keeps scheme, host, path. Drops query and fragment except `tab`, `view`, `page`, `sort`, `lang`, `hl`. Sign-in hosts and auth/token paths keep only scheme and host. Token-like path parts become `<token>`. Non-http(s) URLs (including `file://`) become `None` |
-| Sensitive-data filter | `privacy/data_filter.py` (`SENSITIVE_FILTER_ENABLED`, default on), `capture_worker.filter_sensitive()` | Redacts credit cards, SSNs, API keys, JWTs and passwords before Gemma and storage: in a11y/OCR text, OCR boxes, window titles and all UI event text. Passwords also match "pwd - value" and a value on the next line; the label stays ("pwd - [REDACTED:password]"). The image is not redacted |
+| Sensitive-data filter | `privacy/data_filter.py` (`SENSITIVE_FILTER_ENABLED`, default on), `capture_worker.filter_sensitive()` | Redacts credit cards, SSNs, API keys, JWTs, passwords, emails, phone numbers and IBANs before Gemma and storage: in a11y/OCR text, OCR boxes, window titles and all UI event text. Passwords also match "pwd - value" and a value on the next line; the label stays ("pwd - [REDACTED:password]"). Emails keep a real-looking domain ("[REDACTED:email@example.com]"). Phones need a "+" code, brackets or separators; IBANs must pass the mod-97 check. Names and message content are not detected. The image is not redacted |
 | Encryption | `privacy/encryption.py` | Screenshots only, off by default |
 
 ## 8. Gaps

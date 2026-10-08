@@ -1,8 +1,9 @@
 """
 Sensitive Data Filter
-Detects and redacts credit cards, SSNs, API keys, passwords from screen text
-and recorded UI events (typed text, clipboard, element values)
-before it's stored in the database or passed to AI models.
+Detects and redacts credit cards, SSNs, API keys, passwords, emails, phone
+numbers and IBANs from screen text and recorded UI events (typed text,
+clipboard, element values) before it's stored in the database or passed
+to AI models.
 """
 
 import logging
@@ -93,6 +94,96 @@ def _redact_passwords(text: str, replacement: str) -> tuple:
     return text, count
 
 
+# ── Emails, phones, IBANs ────────────────────────────────────────────
+
+# The lookbehind keeps "[REDACTED:email@example.com]" from being matched
+# again when stored text is filtered a second time (export).
+_EMAIL = re.compile(
+    r"(?<!\[REDACTED:)\b[A-Za-z0-9._%+\-]+@(?P<domain>[A-Za-z0-9.\-]+\.[A-Za-z]{2,})\b"
+)
+# "icon@2x.png" is a file name, not an address.
+_FILE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "pdf"}
+# OCR reads Slack mentions as "Hi@first.lastname", so the "domain" can be a
+# person's name. Keep the domain only for country codes (2 letters) and
+# these common endings.
+_KEEP_DOMAIN_TLDS = {
+    "com", "org", "net", "edu", "gov", "mil", "int", "io", "ai", "dev", "app",
+    "info", "biz", "tech", "cloud", "xyz", "online", "site", "email", "team",
+}
+
+
+def _redact_emails(text: str, replacement: str) -> tuple:
+    """Replace emails but keep the domain ("[REDACTED:email@example.com]"),
+    so internal and external contacts can still be told apart.
+    Returns (text, count)."""
+    count = 0
+
+    def _sub(m):
+        nonlocal count
+        domain = m.group("domain").lower()
+        tld = domain.rsplit(".", 1)[-1]
+        if tld in _FILE_EXTENSIONS:
+            return m.group()
+        count += 1
+        if len(tld) == 2 or tld in _KEEP_DOMAIN_TLDS:
+            return replacement[:-1] + "@" + domain + "]"
+        return replacement
+
+    return _EMAIL.sub(_sub, text), count
+
+
+# Only written forms that look like a phone number: with a "+" country
+# code, brackets or separators. Bare digit runs are left alone, because
+# screen text is full of IDs, amounts and timestamps.
+_PHONE = re.compile(
+    r"(?<![\w+\-/.:])(?:"
+    r"\+\d{1,3}(?:[ .\-]?\(?\d{1,4}\)?){2,5}"          # +7 999 123-45-67, +1 (415) 555-0132
+    r"|\(\d{3}\)[ .\-]?\d{3}[ .\-]\d{4}"                 # (415) 555-0132
+    r"|\d{3}[.\-]\d{3}[.\-]\d{4}"                         # 415-555-0132
+    r"|8 ?\(\d{3}\) ?\d{3}[ \-]?\d{2}[ \-]?\d{2}"         # 8 (999) 123-45-67
+    r"|8[ \-]\d{3}[ \-]\d{3}[ \-]\d{2}[ \-]\d{2}"         # 8-999-123-45-67
+    r")(?![\w\-/]|\.\w)"
+)
+
+
+def _phone_digits_ok(number: str) -> bool:
+    digits = sum(c.isdigit() for c in number)
+    return 8 <= digits <= 15
+
+
+# Country code, check digits, then 4-char groups, spaced or not. The match
+# may run into the next word ("... 00 TEST"), so _redact_ibans() tries
+# shorter prefixes until the checksum fits.
+_IBAN = re.compile(r"\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b")
+
+
+def _iban_ok(value: str) -> bool:
+    """ISO 13616 check: move the first 4 chars to the end, letters to
+    numbers (A=10), and the result mod 97 must be 1."""
+    v = value.replace(" ", "")
+    if not 15 <= len(v) <= 34:
+        return False
+    return int("".join(str(int(c, 36)) for c in v[4:] + v[:4])) % 97 == 1
+
+
+def _redact_ibans(text: str, replacement: str) -> tuple:
+    """Replace IBANs that pass the checksum. Returns (text, count)."""
+    count = 0
+
+    def _sub(m):
+        nonlocal count
+        value = m.group()
+        parts = value.split(" ")
+        for k in range(len(parts), 0, -1):
+            candidate = " ".join(parts[:k])
+            if _iban_ok(candidate):
+                count += 1
+                return replacement + value[len(candidate):]
+        return value
+
+    return _IBAN.sub(_sub, text), count
+
+
 def dangling_secret_label(text: Optional[str]) -> Optional[str]:
     """The trailing label if text ends with one and no value ("pwd -"), else None."""
     if not text:
@@ -101,7 +192,15 @@ def dangling_secret_label(text: Optional[str]) -> Optional[str]:
     return m.group() if m else None
 
 
+# Applied in this order. IBAN goes before the card check, because a run of
+# IBAN digits can look like a card number.
 PATTERNS = {
+    "iban": {
+        "label": "IBAN",
+        "regex": _IBAN,
+        "replacement": "[REDACTED:iban]",
+        "redactor": _redact_ibans,
+    },
     "credit_card": {
         "label": "Credit Card",
         "regex": re.compile(
@@ -156,12 +255,20 @@ PATTERNS = {
     },
     "email": {
         "label": "Email Address",
-        "regex": re.compile(
-            r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Z|a-z]{2,}\b"
-        ),
+        "regex": _EMAIL,
         "replacement": "[REDACTED:email]",
+        # Keeps the domain: "[REDACTED:email@example.com]".
+        "redactor": _redact_emails,
+    },
+    "phone": {
+        "label": "Phone Number",
+        "regex": _PHONE,
+        "replacement": "[REDACTED:phone]",
+        "validator": _phone_digits_ok,
     },
 }
+
+DEFAULT_TYPES = ["credit_card", "ssn", "api_key", "jwt", "password", "email", "phone", "iban"]
 
 
 def filter_sensitive_text(
@@ -173,8 +280,8 @@ def filter_sensitive_text(
 
     Args:
         text: Raw OCR / organized text
-        enabled_types: List of pattern keys to apply.
-            Defaults to ["credit_card", "ssn", "api_key", "jwt", "password"]
+        enabled_types: List of pattern keys to apply, in any order. They run
+            in PATTERNS order. Defaults to DEFAULT_TYPES.
 
     Returns:
         {
@@ -196,16 +303,16 @@ def filter_sensitive_text(
         }
 
     if enabled_types is None:
-        enabled_types = ["credit_card", "ssn", "api_key", "jwt", "password"]
+        enabled_types = DEFAULT_TYPES
+    enabled = set(enabled_types)
 
     clean = text
     total_redacted = 0
     types_found = []
     details = []
 
-    for ptype in enabled_types:
-        pattern_info = PATTERNS.get(ptype)
-        if not pattern_info:
+    for ptype, pattern_info in PATTERNS.items():
+        if ptype not in enabled:
             continue
 
         regex = pattern_info["regex"]
@@ -283,5 +390,5 @@ def filter_ocr_boxes(boxes: Optional[list], enabled_types: Optional[list] = None
 def parse_enabled_types(types_str: str) -> list:
     """Parse comma-separated filter types string into a list."""
     if not types_str:
-        return ["credit_card", "ssn", "api_key", "jwt", "password"]
+        return list(DEFAULT_TYPES)
     return [t.strip() for t in types_str.split(",") if t.strip() in PATTERNS]

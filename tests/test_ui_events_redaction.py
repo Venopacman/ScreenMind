@@ -104,3 +104,51 @@ def test_filter_off_stores_text_as_typed(rec, monkeypatch):
     type_text(r, f"pwd - {VALUE}", 101.0)
     r.flush_for_capture()
     assert stored(db)[0].text == f"pwd - {VALUE}"
+
+
+# ── Contact details never reach the DB ───────────────────────────────
+
+EMAIL = "jane.doe@example.com"
+PHONE = "+1 (415) 555-0132"
+IBAN = "DE89 3704 0044 0532 0130 00"
+
+
+def test_contact_details_never_reach_the_db(ui_settings, monkeypatch, db):
+    """With the default filter types, emails, phones and IBANs typed, copied
+    or shown in a title are stored redacted. Checked on a real SQLite file."""
+    import sqlite3
+    from unittest.mock import MagicMock
+
+    from screenmind.capture.ui_events.recorder import UiEventRecorder
+    from screenmind.config import Settings
+    from test_ui_events import FakeBackend
+
+    monkeypatch.setattr(settings, "sensitive_filter_types",
+                        Settings.model_fields["sensitive_filter_types"].default)
+    b = FakeBackend()
+    b.front = FrontWindow(pid=1, app_name="Slack", title=f"DM {EMAIL}")
+    cw = MagicMock()
+    cw.is_paused = False
+    r = UiEventRecorder(database=db, capture_worker=cw, backend=b)
+    r._clip_count = 0
+    r._tick(None, 100.0)
+
+    type_text(r, f"mail {EMAIL} or call {PHONE}", 101.0)
+    r._tick(ctrl(KEY_ENTER, 104.0), 104.0)
+    b.clip_count = 1
+    b.clip_text = f"IBAN {IBAN}\nphone {PHONE}"
+    r._tick(None, 105.0)
+    r.flush_for_capture()
+
+    conn = sqlite3.connect(db._db_path)
+    rows = conn.execute("SELECT type, window_title, text FROM ui_events").fetchall()
+    dump = repr(conn.execute("SELECT * FROM ui_events").fetchall())
+    conn.close()
+
+    types = {row[0] for row in rows}
+    assert {"text", "clipboard"} <= types
+    for secret in (EMAIL, PHONE, IBAN, "jane.doe", "555-0132", "0532 0130"):
+        assert secret not in dump
+    texts = {row[0]: row[2] for row in rows if row[2]}
+    assert texts["text"] == "mail [REDACTED:email@example.com] or call [REDACTED:phone]"
+    assert texts["clipboard"] == "IBAN [REDACTED:iban]\nphone [REDACTED:phone]"
