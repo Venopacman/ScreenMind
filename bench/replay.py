@@ -14,9 +14,9 @@ Fixtures hold real screen content, so they live outside the repo, in
     scenarios.yaml          expectations, see bench/scenarios.example.yaml
     runs/<timestamp>.json   results of each run
 
-Usage (from the main checkout, so its .env and settings.json apply):
-    .venv/bin/python bench/replay.py freeze 324 --name chrome_ticket
-    .venv/bin/python bench/replay.py run [--only NAME ...] [--repeat N]
+Usage (from the repo or worktree root; see bench/README.md):
+    uv run python bench/replay.py freeze 324 --name chrome_ticket
+    uv run python bench/replay.py run [--only NAME ...] [--repeat N]
 """
 
 import argparse
@@ -92,9 +92,33 @@ def freeze(activity_id: int, name: str, source_db: Path, force: bool):
 
 # ── run ─────────────────────────────────────────────────────────────────
 
+def _main_env_file():
+    """The .env next to the main checkout. A worktree has none, but the main
+    instance runs with it (OCR languages and so on), so replay should too."""
+    if (REPO / ".env").exists():
+        return REPO / ".env"
+    try:
+        common = subprocess.run(["git", "-C", str(REPO), "rev-parse", "--git-common-dir"],
+                                capture_output=True, text=True).stdout.strip()
+        env = (REPO / common).resolve().parent / ".env"
+        return env if env.exists() else None
+    except Exception:
+        return None
+
+
 def _isolate_settings(tmp: Path):
-    """Use the live settings.json (model, analysis mode) but a throwaway data dir."""
+    """Run like the main instance (its .env and settings.json), but with a
+    throwaway data dir."""
     from screenmind.config import settings
+    env = _main_env_file()
+    if env:
+        for line in env.read_text().splitlines():
+            key, sep, value = line.partition("=")
+            if sep and not key.strip().startswith("#"):
+                try:
+                    setattr(settings, key.strip().lower(), value.strip().strip('"\''))
+                except Exception:
+                    pass
     live = SOURCE_DATA / "settings.json"
     if live.exists():
         for key, value in json.loads(live.read_text()).items():
@@ -103,7 +127,6 @@ def _isolate_settings(tmp: Path):
             except Exception:
                 pass
     settings.data_dir = str(tmp)
-    settings.auto_bookmark = False
     return settings
 
 
@@ -232,7 +255,6 @@ async def _run(scenarios: dict, only: list, repeat: int):
 
     db = Database(tmp / "screenmind.db")
     worker = AnalysisWorker(asyncio.Queue(), db)
-    worker._embedder_available = False  # not under test, and slow to load
 
     results = []
     for name, spec in scenarios.items():
