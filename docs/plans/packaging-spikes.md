@@ -48,6 +48,57 @@ Build files: [`packaging/screenmind.spec`](../../packaging/screenmind.spec) and 
 - Not tested: an installer, start at login, a start from Explorer or the Start menu, SmartScreen, the microphone and call transcription, llama-server inside the app, model download (F2).
 - After fixes F1-F5 (34ae529), built and run on port 7791 with a temp data dir and a temp `USERPROFILE`. The data dir's `.env` loaded, and a `.env` in the cwd did not. The log was written without `SCREENMIND_LOG_FILE`. No `launcher.vbs`, nothing new on the desktop. `POST /api/startup/install` wrote `Run\ScreenMind = "...\ScreenMind.exe"`, and uninstall removed it. A Gemma download ran in the app's own process (no second `ScreenMind.exe`), showed progress (100 MB in 8 s), and cancel stopped it and deleted the partial files. Shutdown took 1 s.
 
+## Windows installer
+
+Added 2026-10-08. Unsigned, per-user, for internal testers (milestone M0). The user chose NSIS over Inno Setup for the license: NSIS is free (zlib license), Inno Setup is paid for commercial use.
+
+Files, all in [`packaging/windows/`](../../packaging/windows/):
+
+- `screenmind.nsi`: the NSIS 3 script (Modern UI 2, nsDialogs).
+- `build.ps1`: `uv sync --frozen` > PyInstaller 6.22.3 with `packaging/screenmind.spec` > checks the bundled `msvcp140.dll` is 14.40 or newer (F8) > `makensis`. Output: `packaging/dist/ScreenMind-<version>-win-x64-setup.exe`. The version comes from `screenmind/__init__.py`.
+- `stop-screenmind.ps1`: stops a running copy before install and uninstall (below).
+- CI: [`.github/workflows/package-windows.yml`](../../.github/workflows/package-windows.yml). `windows-2025` has Inno Setup but no NSIS, so the job installs NSIS with Chocolatey. It runs on a `v*` tag (and attaches the installer to the GitHub Release) or by hand from the Actions tab. The manual run needs the workflow on the default branch (`main`).
+
+What the installer does:
+
+- Installs to `%LOCALAPPDATA%\Programs\ScreenMind` with no admin rights. x64 Windows only.
+- Pages: welcome, "What ScreenMind records" (Next stays off until "I understand" is ticked), folder, "Start ScreenMind when I sign in" (on by default; an upgrade keeps the earlier choice), progress, finish with "Start ScreenMind now".
+- Start at sign-in: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `ScreenMind` = `"<folder>\ScreenMind.exe"` (quoted, no arguments). `startup.py` must write the same value in the frozen app (F4). The installer and uninstaller remove the value only when it points to their own `ScreenMind.exe`. A value for a dev checkout stays. Installing with the box ticked does replace a dev checkout's value, because both use the name `ScreenMind`.
+- A Start menu shortcut. No desktop icon. An uninstall entry in Settings > Apps (HKCU).
+- An upgrade deletes the old `_internal` folder first, so no modules from the older build stay.
+- Silent install: `/S`. Add `/NOSTARTUP` to leave start at sign-in off.
+
+Stopping a running ScreenMind: the windowed app has no console and no window, so Ctrl+C and `WM_CLOSE` cannot reach it, and Restart Manager could only kill it. A POST to `/api/shutdown` would need the port, and on a dev machine port 7777 is the user's main instance. So `packaging/entry.py` (frozen app only) creates the event `Local\ScreenMind-Quit-<pid>` and waits on it in a thread. When the event is set, it runs the same clean stop as `/api/shutdown`. `stop-screenmind.ps1` finds `ScreenMind.exe` processes by full path (only the one in the install folder), sets their events, waits up to 50 s (the app forces its own exit after 45 s), then kills what is left. Tested on the laptop with a scratch instance of the PyInstaller build: a clean stop ("Goodbye!", exit code 0) in 2.6 s. A run for another folder left it alone.
+
+Uninstall: stops the app, removes the shortcut, the Run value (if it is ours), the program files and the uninstall entry. Then it asks two questions, both default No:
+
+1. "Also delete your ScreenMind data (screenshots, database, settings: N GB)?"
+2. "Also delete the downloaded models (N GB)?" (`models` and `llama` in `.screenmind`). Only asked if they exist.
+
+It measures the folder first. With months of screenshots this may take some seconds. A silent uninstall (`/S`) keeps all data. It only knows `%USERPROFILE%\.screenmind`; a `data_dir` changed in the settings is not deleted.
+
+Results:
+
+| | Windows installer |
+|---|---|
+| Date, commit | 2026-10-08, `claude/windows-installer` 09306b3 (on `custom` 2639ae1) |
+| Built by | GitHub Actions, `windows-2025` (image 20260927), [run 37765918146](https://github.com/Venopacman/ScreenMind/actions/runs/37765918146), green |
+| NSIS | 3.13 from Chocolatey (13 s to install). No makensis warnings |
+| Build time | 4 min 29 s: sync + PyInstaller 1 min 17 s, makensis (solid LZMA) 3 min 12 s. Whole job 5 min |
+| App folder | 393 MB, 291 files, `msvcp140.dll` 14.51.36247 |
+| Installer | 115 MB (120,713,837 bytes). Valid PE, manifest `asInvoker` (no UAC prompt), version info 0.2.4, not signed |
+| Local build (this laptop, no installer) | 2 min 53 s, 394 MB, 291 files, `msvcp140.dll` 14.51.36247 |
+
+Not tested yet: running the installer, the wizard pages, start at sign-in, the Start menu shortcut, upgrade over an older install, uninstall and its data questions, SmartScreen, Smart App Control.
+
+### Tester note
+
+1. Download `ScreenMind-<version>-win-x64-setup.exe`.
+2. Windows shows "Windows protected your PC" because the installer is not signed. Click **More info**, then **Run anyway**. If Smart App Control is on (Windows 11), it may block the installer with no way around it; tell us.
+3. Read the "What ScreenMind records" page and tick "I understand".
+4. Keep the folder, choose whether ScreenMind starts when you sign in, and finish with "Start ScreenMind now".
+5. To remove it: Settings > Apps > Installed apps > ScreenMind > Uninstall. It asks whether to delete your data and the models. Both default to No.
+
 ## Windows: how to run the same spike
 
 For the Windows laptop session. It only builds and starts the app. It installs nothing system-wide.

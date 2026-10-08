@@ -13,12 +13,12 @@ Recommendation:
 
 - **Both OS: freeze with PyInstaller (onedir).** It supports Python 3.14 and has hooks for onnxruntime, sounddevice and keyring. The macOS spike built a working `ScreenMind.app` (343 MB, 122 MB as a DMG) that started in 2 s. The bundler adds no RAM: the frozen app runs the same single Python process.
 - **macOS: a signed, notarized `.app` in a DMG.** Native minimum UI through pyobjc: a menu bar item (status, pause, quit) and a short first-run window that explains each permission before macOS asks. Start at login uses `SMAppService`, not a LaunchAgent plist.
-- **Windows: an Inno Setup wizard, per-user install.** The wizard explains what is recorded and has a "Start at login" checkbox. A tray item gives status, pause and quit. Uninstall asks whether to delete `%USERPROFILE%\.screenmind`.
+- **Windows: an NSIS wizard, per-user install.** The user chose NSIS over Inno Setup for the license (2026-10-08). The wizard explains what is recorded and has a "Start at login" checkbox. A tray item gives status, pause and quit. Uninstall asks whether to delete `%USERPROFILE%\.screenmind`.
 - **Do not ship local Gemma in the default agent.** Collect on the device, label on the server (or through a cheap vendor API in batch). That removes about 4 GB of RAM and a 3 GB download. Keep local labeling as an opt-in mode that loads the model only when needed. See [Should local LLM analysis ship?](#should-local-llm-analysis-ship).
 - **Fix OCR memory before shipping.** OCR alone holds 1.1-1.8 GB and uses 4-7 CPU-seconds per frame (measured below). The onnxruntime tuning is done (peak -400 MB, CPU -40%). It is not enough for the budget, so the OCR worker process is still needed.
 - **Target budget:** median 250 MB, peak 500 MB of memory for the agent, and on average under 3% of one CPU core over a workday. Measured by the e2e check on each machine.
 - **Architectures:** Apple Silicon only, macOS 14+. Windows x64 only. Intel Macs are out: onnxruntime has no Intel macOS wheels for Python 3.14. Windows ARM64 is out for now: our lock has no `opencv-python` wheel for it. ARM64 laptops can run the x64 build under emulation (not tested).
-- **First milestone (about one to two weeks):** the code fixes below, the OCR memory fix, and an unsigned `.app` + DMG and Inno Setup wizard for internal testers, built in GitHub Actions.
+- **First milestone (about one to two weeks):** the code fixes below, the OCR memory fix, and an unsigned `.app` + DMG and NSIS wizard for internal testers, built in GitHub Actions.
 - **Public release:** Apple Developer Program (99 USD/year) for signing and notarization. Azure Artifact Signing (about 10 USD/month) or an OV certificate for Windows. Auto-update comes last.
 
 ## What we ship
@@ -48,7 +48,7 @@ The user's decision: no UI ships. The dashboard stays for development.
 | Settings | dashboard and `settings.json` | `settings.json`, plus a few menu items (pause, start at login) |
 | Labeling model | local Gemma | none by default; see [Should local LLM analysis ship?](#should-local-llm-analysis-ship) |
 | UI on macOS | none | menu bar item + first-run permissions window ([details](#first-run-flow-native-no-dashboard)) |
-| UI on Windows | none | installer wizard + tray item ([details](#install-details-inno-setup)) |
+| UI on Windows | none | installer wizard + tray item ([details](#install-details-nsis)) |
 
 The minimum per OS:
 
@@ -231,13 +231,15 @@ Mostly yes. Facts:
 
 | Option | Effort | Risk | Notes |
 |---|---|---|---|
-| **Inno Setup 7.1** (recommended) | Low | License: paid for commercial use (see below) | Classic wizard. Per-user install with `PrivilegesRequired=lowest`. `[Registry]` for HKCU Run, `[UninstallDelete]` and a Pascal `[Code]` step for "delete my data?". x64 and Arm64. ([jrsoftware.org](https://jrsoftware.org/isdl.php)) |
-| NSIS | Low-medium | Older scripting language | Free (zlib license), no fee for companies. A fine fallback if the Inno license is a problem. |
+| **NSIS 3** (chosen 2026-10-08) | Low-medium | Older scripting language | Free (zlib license), no fee for companies. Modern UI 2 wizard, nsDialogs for custom pages. Per-user install with `RequestExecutionLevel user`. Built: `packaging/windows/screenmind.nsi` (see [packaging-spikes.md](packaging-spikes.md#windows-installer)). |
+| Inno Setup 7.1 | Low | License: paid for commercial use (see below) | Classic wizard. Per-user install with `PrivilegesRequired=lowest`. `[Registry]` for HKCU Run, `[UninstallDelete]` and a Pascal `[Code]` step for "delete my data?". x64 and Arm64. ([jrsoftware.org](https://jrsoftware.org/isdl.php)) Not chosen: the user picked NSIS for the license (2026-10-08). |
 | WiX v7 (MSI) | Medium-high | MSI authoring is verbose. Since v6, organizations with more than 10,000 USD revenue must pay the Open Source Maintenance Fee. ([FireGiant](https://docs.firegiant.com/wix/osmf/)) | Only worth it for IT-managed (GPO/Intune) rollouts. |
 | MSIX | Medium | AppData and HKCU writes are virtualized and deleted on uninstall. Start at login needs a manifest `startupTask`. Low-level hooks and UI Automation from a full-trust MSIX are not confirmed. ([Microsoft Learn](https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes)) | Not for v1. |
 | Velopack | Medium | Not a wizard: a one-click installer | Installer **and** auto-updater, supports Python + PyInstaller onedir on Windows and macOS. Good candidate for the auto-update milestone. ([docs](https://docs.velopack.io/getting-started/python)) |
 
-### Install details (Inno Setup)
+### Install details (NSIS)
+
+The first version is built (2026-10-08): [packaging-spikes.md, Windows installer](packaging-spikes.md#windows-installer).
 
 - Per-user, no admin: install to `%LOCALAPPDATA%\Programs\ScreenMind`. Data stays in `%USERPROFILE%\.screenmind` as today.
 - Wizard pages: welcome, "What ScreenMind records" (plain words, an "I understand" checkbox), folder, "Start ScreenMind when I sign in" checkbox, "Start ScreenMind now" on finish. This wizard is the whole first-run flow on Windows. No window after install.
@@ -321,19 +323,19 @@ The app is 343 MB unpacked, 122-157 MB as a DMG. Ways to shrink it, none tested:
 |---|---|---|
 | **"New version" check** (first) | both | On start and daily, read the latest GitHub Release. Show it in the menu bar / tray item ("Update available") with a download link. Half a day of work, no risk. |
 | Sparkle 2 (2.10.0) | macOS | The standard. EdDSA-signed appcast, delta updates. Needs `Sparkle.framework` in the app, loaded via pyobjc (untested), or the `sparkle-cli` helper. ([docs](https://sparkle-project.org/documentation/)) |
-| Velopack | both | Installer + updater, has a Python package, works with PyInstaller onedir. Needs the .NET SDK on the build machine. On Windows it would replace the Inno wizard. ([docs](https://docs.velopack.io/getting-started/python)) |
-| WinSparkle 0.9.4 | Windows | C DLL, called from Python via ctypes (untested). Pairs with an Inno installer. |
+| Velopack | both | Installer + updater, has a Python package, works with PyInstaller onedir. Needs the .NET SDK on the build machine. On Windows it would replace the NSIS wizard. ([docs](https://docs.velopack.io/getting-started/python)) |
+| WinSparkle 0.9.4 | Windows | C DLL, called from Python via ctypes (untested). Pairs with the NSIS installer. |
 | MSIX App Installer | Windows | Only with MSIX. Not for v1. |
 | Squirrel.Windows | Windows | Unmaintained since 2024. Skip. |
 
-Plan: the version check in milestone 1. Then pick Sparkle + WinSparkle (keeps the Inno wizard) or Velopack (one tool for both, no wizard) after the first public release.
+Plan: the version check in milestone 1. Then pick Sparkle + WinSparkle (keeps the NSIS wizard) or Velopack (one tool for both, no wizard) after the first public release.
 
 ## 7. CI (GitHub Actions)
 
 One workflow on a version tag, a matrix of two jobs:
 
 - `macos-15` (arm64): `uv sync --frozen` > PyInstaller spec > download pinned `llama-server` and check SHA-256 > sign (import the `.p12` into a temporary keychain) > DMG > `notarytool submit --wait` > `stapler staple` > upload to the GitHub Release.
-- `windows-2025` (x64): `uv sync --frozen` > PyInstaller > pinned `llama-server` > sign the exe and DLLs > `iscc` (install Inno Setup if the image lacks it) > sign the installer > upload.
+- `windows-2025` (x64): `uv sync --frozen` > PyInstaller > pinned `llama-server` > sign the exe and DLLs > `makensis` (NSIS from Chocolatey: the image has none) > sign the installer > upload. The unsigned part is built: `.github/workflows/package-windows.yml`.
 
 No Intel macOS job (no Intel build). `macos-13` was retired in 2025-12 anyway. A `windows-11-arm` runner exists for later.
 
@@ -354,7 +356,7 @@ The unsigned milestone needs no secrets.
 
 | Milestone | What | Effort (rough) | Main risk |
 |---|---|---|---|
-| **M0: internal testers** | Fix F1-F6. Agent-mode build without the dashboard. OCR memory fixes (worker process, onnxruntime settings) and background priority. Memory and CPU rows in the e2e check. Labeling decision (server, vendor or local) implemented in its simplest form. Unsigned `.app` + DMG. Unsigned Inno Setup wizard (per-user, Run key, uninstall data question). CI builds both on a tag. Short tester guide ("Open Anyway", SmartScreen "Run anyway"). | ~2 weeks | OCR worker may not reach 250 MB. Unsigned macOS builds lose permission grants on every update (try the self-signed certificate trick). |
+| **M0: internal testers** | Fix F1-F6. Agent-mode build without the dashboard. OCR memory fixes (worker process, onnxruntime settings) and background priority. Memory and CPU rows in the e2e check. Labeling decision (server, vendor or local) implemented in its simplest form. Unsigned `.app` + DMG. Unsigned NSIS wizard (per-user, Run key, uninstall data question; built 2026-10-08). CI builds both on a tag. Short tester guide ("Open Anyway", SmartScreen "Run anyway"). | ~2 weeks | OCR worker may not reach 250 MB. Unsigned macOS builds lose permission grants on every update (try the self-signed certificate trick). |
 | **M1: app feel** | Native first-run permissions window (macOS). Menu bar / tray item. `SMAppService` login item. "Update available" menu line. Idle/AC scheduling of analysis. CI resource benchmark. Check by hand that a Finder-launched app gets "ScreenMind" prompts and SCK grabs work (G1, G22). | ~1-1.5 weeks | Main thread change for the menu bar. SMAppService via pyobjc untested. |
 | **M2: signed public release** | Apple Developer enrollment, Developer ID signing, entitlements, notarization in CI. Azure Artifact Signing (or OV cert) for Windows. | 3-5 days of work, plus waiting: Apple org enrollment and Azure identity checks take days to weeks | Notarization fails on some nested binary. SmartScreen warnings for the first weeks anyway. |
 | **M3: auto-update** | Sparkle + WinSparkle, or Velopack | ~1 week | Integration with a frozen Python app is untested for all three. |
@@ -363,13 +365,13 @@ The unsigned milestone needs no secrets.
 
 - **Product:** a headless agent that collects and exports. No dashboard, no local LLM by default. Labeling on the server. Target: median 250 MB, peak 500 MB, under 3% of a core.
 - **macOS:** PyInstaller onedir `.app`, DMG, Developer ID + notarization, native first-run permissions window, `SMAppService`, menu bar item. Apple Silicon only.
-- **Windows:** PyInstaller onedir, Inno Setup per-user wizard (it explains what is recorded), Azure Artifact Signing, tray item. x64 only.
+- **Windows:** PyInstaller onedir, NSIS per-user wizard (it explains what is recorded), Azure Artifact Signing, tray item. x64 only.
 - **Start with M0** (the strip has landed). Fix OCR memory first: it is needed whatever we decide about labeling. The PyInstaller spec from the spike (`packaging/screenmind.spec`) is the starting point.
 
 ## Open questions for the user
 
 1. Who publishes? A company account (TripleTen) or a personal one? That decides Apple org enrollment and Azure Artifact Signing eligibility.
-2. Is Inno Setup's commercial license OK, or do we prefer NSIS (free)?
+2. ~~Is Inno Setup's commercial license OK, or do we prefer NSIS (free)?~~ Answered 2026-10-08: NSIS, for the license.
 3. Is a monthly "keep allowing screen recording?" prompt acceptable? There is no way around it for this kind of app.
 4. Is Apple Silicon + Windows x64 enough for the first testers?
 5. Where does labeling run: on the workflows server (recommended), through a vendor API, or on the device? Is sending redacted text off the device OK?
@@ -408,6 +410,7 @@ macOS:
 
 Windows:
 - Inno Setup: https://jrsoftware.org/isdl.php, https://jrsoftware.org/isorder.php
+- NSIS: https://nsis.sourceforge.io/Docs/, license https://nsis.sourceforge.io/License
 - WiX maintenance fee: https://docs.firegiant.com/wix/osmf/
 - MSIX behind the scenes: https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes
 - SmartScreen reputation and signing options: https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation, https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options

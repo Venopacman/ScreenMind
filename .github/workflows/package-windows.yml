@@ -13,8 +13,6 @@ on:
   push:
     tags:
       - "v*"
-    branches:
-      - claude/windows-installer  # TEMPORARY: remove before merging
 
 permissions:
   contents: write  # attach the installer to the release on tags
