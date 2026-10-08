@@ -81,7 +81,7 @@ def test_multiple_redactions():
 
 def test_parse_enabled_types():
     assert parse_enabled_types("credit_card,ssn") == ["credit_card", "ssn"]
-    assert parse_enabled_types("") == ["credit_card", "ssn", "api_key", "jwt", "password", "email", "phone", "iban"]
+    assert parse_enabled_types("") == ["credit_card", "ssn", "api_key", "jwt", "password", "email", "phone", "iban", "person"]
     assert parse_enabled_types("invalid,credit_card") == ["credit_card"]
 
 

@@ -26,6 +26,15 @@ def _isolate_data_dir(tmp_path_factory):
     mp.undo()
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _no_person_model():
+    """Never download or load the person-name model in tests. Tests of the
+    name filter pass in their own detector."""
+    from screenmind.privacy import person_ner
+    person_ner.set_detector(None, enabled=False)
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _screen_unlocked(monkeypatch):
     """Capture tests must not depend on whether this machine's screen is

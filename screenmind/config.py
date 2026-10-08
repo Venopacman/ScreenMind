@@ -239,8 +239,8 @@ class Settings(BaseSettings):
     )
 
     # ── Privacy & Security ────────────────────────────────────────────────
-    sensitive_filter_enabled: bool = Field(default=True, description="Filter sensitive data (cards, SSNs, API keys, passwords, emails, phones, IBANs) from captured text")
-    sensitive_filter_types: str = Field(default="credit_card,ssn,api_key,jwt,password,email,phone,iban", description="Comma-separated filter types (privacy.data_filter.PATTERNS)")
+    sensitive_filter_enabled: bool = Field(default=True, description="Filter sensitive data (cards, SSNs, API keys, passwords, emails, phones, IBANs, person names) from captured text")
+    sensitive_filter_types: str = Field(default="credit_card,ssn,api_key,jwt,password,email,phone,iban,person", description="Comma-separated filter types (privacy.data_filter.PATTERNS)")
     encryption_enabled: bool = Field(default=False, description="Encrypt screenshots at rest (AES via OS keyring)")
 
     # ── Data Retention ───────────────────────────────────────────────────

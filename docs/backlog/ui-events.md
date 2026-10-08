@@ -28,7 +28,7 @@ The questionnaire session's hourly scan covers most of this.
 Refs: `MacOSAdapter._best_title()`, `capture_worker._get_browser_url()`, `UiEventRecorder._poll_front()`.
 
 ### PII detection before storing typed text and clipboard
-Status: done 2026-10-08 for emails, phones and IBANs (`38793c2`). Names and message content: decided not to detect, see below.
+Status: done 2026-10-08 for emails, phones and IBANs (`38793c2`). Person names: done the same day with a small local NER model, see `privacy.md`. Message content: not detected, see below.
 
 `text` and `clipboard` became default UI event types in `5c419f8` (G31 in `windows.md`). This item was written before that.
 
@@ -40,9 +40,9 @@ Done in `38793c2`: `email` (now on by default), `phone` and `iban` (new) are def
 
 Decisions (user, 2026-10-08):
 - Redact at capture, not only at export. Then nothing raw reaches the export or any session that reads the DB directly (for example EDA sending text to OpenAI).
-- No NER for names. `spacy` + `en_core_web_sm` measured +135 MB RAM, 2 ms per event, 22 s cold load, 45 packages, English only. That is over half of the 250 MB median budget.
+- No spaCy for names: `spacy` + `en_core_web_sm` measured +135 MB RAM, 2 ms per event, 22 s cold load, 45 packages, English only. Later the same day the user chose a small ONNX NER model instead (up to 0.5 GB RAM was OK). It runs on onnxruntime, which we already ship, and costs about +120 MB. See `privacy.md`.
 - Keep typed text and clipboard in chat and mail apps for now. A per-app rule for typed text alone hides little: OCR reads the same message from the screen once it is sent. Hiding chat content belongs with the "Work/personal flag per frame" item in `questionnaire-data-source.md`, which covers OCR too.
-- Not detected, so stored in clear: person names, postal addresses, free-form message content. Rows stored before `38793c2` are not rewritten; retention removes them, and the export scrubs them with the new types.
+- Not detected, so stored in clear: postal addresses, free-form message content. (Person names: see `privacy.md`.) Rows stored before `38793c2` are not rewritten; retention removes them, and the export scrubs them with the new types.
 
 Refs: `privacy/data_filter.py` (`PATTERNS`, `DEFAULT_TYPES`), `UiEventRecorder._add()`, `config.sensitive_filter_types`, `export/archive.py`.
 

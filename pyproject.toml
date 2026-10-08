@@ -44,6 +44,8 @@ dependencies = [
     # OCR on ONNX Runtime (CPU, no PyTorch)
     "rapidocr>=3.9,<4.0",
     "onnxruntime>=1.18,<2.0",
+    # Person-name detection (privacy/person_ner.py) on the same ONNX Runtime
+    "tokenizers>=0.22,<1.0",
 
     # Encryption (optional but included by default)
     "cryptography>=41.0,<50.0",

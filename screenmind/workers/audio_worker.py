@@ -20,6 +20,12 @@ from screenmind.workers.call_detection import CallMatch, match_call, owner_on_mi
 logger = logging.getLogger("screenmind.workers.audio_worker")
 
 
+def _clean(text: Optional[str]) -> Optional[str]:
+    """The sensitive-data filter, as for window titles and screen text."""
+    from screenmind.workers.capture_worker import filter_sensitive
+    return filter_sensitive(text)
+
+
 # Call detection runs on its own thread at this interval. It must not share
 # the capture loop: a slow screen grab there (30 s+) starves the check.
 CHECK_INTERVAL_S = 5
@@ -148,7 +154,7 @@ class AudioWorker:
         self._last_seen = now
         title = url = duration = None
         if match and match.title and not self._meeting_title:
-            title = self._meeting_title = match.title
+            title = self._meeting_title = _clean(match.title)
         if match and match.is_browser and not self._meeting_url \
                 and now - self._last_url_try >= URL_RETRY_EVERY_S:
             url = self._meeting_url = self._read_url(match, now)
@@ -179,7 +185,7 @@ class AudioWorker:
         self._in_meeting = True
         self._meeting_app = match.app
         self._meeting_owner = match.owner
-        self._meeting_title = match.title
+        self._meeting_title = _clean(match.title)
         self._meeting_url = self._read_url(match, now) if match.is_browser else None
         self._session_start = datetime.fromtimestamp(start)
         self._last_seen = now
@@ -192,11 +198,11 @@ class AudioWorker:
             app_name=match.app,
             transcript=None,
             summary=None,
-            window_title=match.title,
+            window_title=self._meeting_title,
             url=self._meeting_url,
         )
         logger.info(f"Call started ({match.app}"
-                    f"{', ' + match.title if match.title else ''})")
+                    f"{', ' + self._meeting_title if self._meeting_title else ''})")
 
     def _resume_recent(self, match: CallMatch, start: float) -> bool:
         """Continue the last meetings row if it is this call and it ended
@@ -210,17 +216,19 @@ class AudioWorker:
             ended = datetime.fromisoformat(row["end_time"]).timestamp()
             if not (0 <= start - ended <= settings.call_end_grace_s):
                 return False
-            if not same_call(match.app, self._meeting_url, match.title, match.is_browser, row):
+            # Stored titles are filtered, so compare the filtered title.
+            title = _clean(match.title)
+            if not same_call(match.app, self._meeting_url, title, match.is_browser, row):
                 return False
             self._db.reopen_meeting(row["id"])
             self._db.update_meeting_call_info(
-                row["id"], window_title=match.title, url=self._meeting_url)
+                row["id"], window_title=title, url=self._meeting_url)
         except Exception as e:
             logger.warning(f"Could not resume the last call: {e}")
             return False
         self._meeting_id = row["id"]
         self._session_start = datetime.fromisoformat(row["start_time"])
-        self._meeting_title = row.get("window_title") or match.title
+        self._meeting_title = row.get("window_title") or title
         self._meeting_url = row.get("url") or self._meeting_url
         logger.info(f"Call resumed ({match.app}, row {row['id']}, "
                     f"gap {start - ended:.0f}s)")

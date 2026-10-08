@@ -70,7 +70,13 @@ def git_sha() -> Optional[str]:
 
 def filter_types() -> List[str]:
     configured = parse_enabled_types(settings.sensitive_filter_types)
-    return _DEFAULT_FILTER_TYPES + [t for t in configured if t not in _DEFAULT_FILTER_TYPES]
+    types = _DEFAULT_FILTER_TYPES + [t for t in configured if t not in _DEFAULT_FILTER_TYPES]
+    # Names need the local model. Until it is downloaded, names are not
+    # removed, and the manifest must not say they were.
+    from screenmind.privacy.person_ner import get_detector
+    if "person" in types and get_detector() is None:
+        types.remove("person")
+    return types
 
 
 def _local(ts: str) -> datetime:

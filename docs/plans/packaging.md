@@ -73,6 +73,7 @@ On the user's Mac (24 GB, 4 performance + 6 efficiency cores), 2026-10-07:
 | ...Python + OCR imports / OCR models loaded | 35-50 MB / about 100 MB | | same |
 | Frozen app right after start (no OCR yet, nothing captured) | 123 MB RSS. On 2026-10-08 (`3092a5f`): 124 MB RSS, 81 MB footprint | about 0 | spike |
 | ScreenMind main process after the strip (main instance, dashboard and analysis worker included), 20 min after its start | 415 MB footprint, peak 1177 MB | 60 CPU-s in 20 min, about 5% of one core | `footprint` and `ps` on the running process, 2026-10-08. A single sample, not a workday |
+| Person-name filter (`privacy/person_ner.py`, multilingual DistilBERT int8 on onnxruntime), 2026-10-08 | about +120 MB footprint with the model loaded. The weights are external data that onnxruntime maps from disk; as one `.onnx` file the same model costs +400 MB. | about 45 ms CPU per frame (median 45 ms, p90 120 ms, max 1.2 s per call by design), 1 thread | 400 frames of the EDA snapshot through `filter_sensitive_text` + `filter_ocr_boxes` |
 | (No longer shipped.) `llama-server` footprint, own test instance, after load / after 25 analysis-like calls | 0.79 GB / 1.31 GB with the default prompt cache (+21 MB per call, never freed). 0.79 GB / 0.88 GB with `--cache-ram 0` (flat). RSS: 3.5 GB after load, most of it the memory-mapped weights. | no change per call | port 5898, the app's flags, `-ngl 99`; 2026-10-07 |
 | (No longer shipped.) `llama-server`, Gemma 4 E2B Q4_0 + mmproj, context 6144 | about 4.0 GB RSS | about 12 s per call. About 880 calls per workday (861 full analyses + 300 cache hits on 2026-10-06/07), so about 3 hours of inference a day | coordinator's measurement; call counts from the DB |
 | **Total** | **about 5-5.5 GB** | | |
@@ -304,6 +305,10 @@ Obsolete: removed with Gemma (2026-10-08). Kept as a record. It was only needed 
 ### Gemma models
 
 Obsolete: removed (2026-10-08). Kept as a record. It was only for the opt-in local labeling mode (see [Resource budget](#resource-budget)). Then download on demand, with progress in the menu bar item and resume (`hf_hub_download` resumes). Gemma 4 E2B Q4_0 is 2.8 GB + 0.56 GB mmproj; a smaller text-only model would be under 1 GB. Needs fix F2 first. Show free disk space before starting. Never ship models inside the installer: most updates would re-download them.
+
+### Person-name model
+
+135 MB from Hugging Face on first use (`privacy/person_ner.install()`), converted once to external-data weights in a child Python. A frozen app has no plain Python, so it converts in-process and keeps about 400 MB until restart. Fix before shipping: ship the converted model (135 MB) or run the conversion in the hidden worker mode of the executable.
 
 ### OCR models
 

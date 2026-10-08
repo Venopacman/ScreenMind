@@ -168,6 +168,6 @@ One line per tracked call: `id`, `start`, `end`, `session_ids`, `app`, `window_t
 
 - Only activities with `status = 'ok'` are exported. UI events linked to other rows are left out. Unlinked UI events are kept.
 - URLs go through `sanitize_url()` again, because rows from before `55a9198` / `0fcf92a` may hold raw tokens.
-- All text fields go through the sensitive-data filter again: window titles, summaries, screen text, UI event text, meeting transcripts, commit messages. The filter types are the defaults (`credit_card`, `ssn`, `api_key`, `jwt`, `password`) plus any extra types turned on in settings. This runs even when the filter is off in settings.
+- All text fields go through the sensitive-data filter again: window titles, summaries, screen text, UI event text, meeting transcripts, commit messages. The filter types are the defaults (`DEFAULT_TYPES` in `privacy/data_filter.py`: `credit_card`, `ssn`, `api_key`, `jwt`, `password`, `email`, `phone`, `iban`, `person`) plus any extra types turned on in settings. This runs even when the filter is off in settings. `person` needs the local name model (`privacy/person_ner.py`). If the model is not downloaded yet, names are not removed, and `privacy.text_filter_types` leaves `person` out. That field lists the types that actually ran.
 - Screenshots are not redacted. They show the screen as it was. Encrypted screenshots are decrypted into the archive.
 - The archive is built in the system temp folder and deleted after it is sent.

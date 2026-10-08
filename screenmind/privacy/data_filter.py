@@ -1,7 +1,8 @@
 """
 Sensitive Data Filter
 Detects and redacts credit cards, SSNs, API keys, passwords, emails, phone
-numbers and IBANs from screen text and recorded UI events (typed text,
+numbers, IBANs and person names (local NER model, privacy/person_ner.py) from
+screen text and recorded UI events (typed text,
 clipboard, element values) before it's stored in the database or passed
 to AI models.
 """
@@ -184,6 +185,13 @@ def _redact_ibans(text: str, replacement: str) -> tuple:
     return _IBAN.sub(_sub, text), count
 
 
+def _redact_persons(text: str, replacement: str) -> tuple:
+    """Person names, found by a local NER model. A no-op until the model is
+    downloaded. Returns (text, count)."""
+    from screenmind.privacy.person_ner import redact_persons
+    return redact_persons(text, replacement)
+
+
 def dangling_secret_label(text: Optional[str]) -> Optional[str]:
     """The trailing label if text ends with one and no value ("pwd -"), else None."""
     if not text:
@@ -266,9 +274,16 @@ PATTERNS = {
         "replacement": "[REDACTED:phone]",
         "validator": _phone_digits_ok,
     },
+    # Last, so it sees "[REDACTED:email...]" instead of "first.last@...".
+    "person": {
+        "label": "Person Name",
+        "regex": None,
+        "replacement": "[REDACTED:person]",
+        "redactor": _redact_persons,
+    },
 }
 
-DEFAULT_TYPES = ["credit_card", "ssn", "api_key", "jwt", "password", "email", "phone", "iban"]
+DEFAULT_TYPES = ["credit_card", "ssn", "api_key", "jwt", "password", "email", "phone", "iban", "person"]
 
 
 def filter_sensitive_text(
