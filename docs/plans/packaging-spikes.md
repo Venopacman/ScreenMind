@@ -81,13 +81,13 @@ Results:
 
 | | Windows installer |
 |---|---|
-| Date, commit | 2026-10-08, `claude/windows-installer` 09306b3 (on `custom` 2639ae1) |
-| Built by | GitHub Actions, `windows-2025` (image 20260927), [run 37765918146](https://github.com/Venopacman/ScreenMind/actions/runs/37765918146), green |
+| Date, commit | 2026-10-08, `custom` 88869aa (after F1-F4) + the installer commits |
+| Built by | GitHub Actions, `windows-2025` (image 20260927), [run 37766784439](https://github.com/Venopacman/ScreenMind/actions/runs/37766784439), green. An earlier run on 2639ae1 (before F1-F4), [37765918146](https://github.com/Venopacman/ScreenMind/actions/runs/37765918146), was green too: 393 MB app, 115 MB installer |
 | NSIS | 3.13 from Chocolatey (13 s to install). No makensis warnings |
-| Build time | 4 min 29 s: sync + PyInstaller 1 min 17 s, makensis (solid LZMA) 3 min 12 s. Whole job 5 min |
-| App folder | 393 MB, 291 files, `msvcp140.dll` 14.51.36247 |
-| Installer | 115 MB (120,713,837 bytes). Valid PE, manifest `asInvoker` (no UAC prompt), version info 0.2.4, not signed |
-| Local build (this laptop, no installer) | 2 min 53 s, 394 MB, 291 files, `msvcp140.dll` 14.51.36247 |
+| Build time | 4 min 41 s: sync + PyInstaller 1 min 22 s, makensis (solid LZMA) 3 min 19 s. Whole job about 5 min |
+| App folder | 403 MB, 292 files, `msvcp140.dll` 14.51.36247 |
+| Installer | 120 MB (125,413,610 bytes). Valid PE, manifest `asInvoker` (no UAC prompt), version info 0.2.4, not signed |
+| Local build (this laptop, on 2639ae1, no NSIS here) | 2 min 53 s, 394 MB, 291 files, `msvcp140.dll` 14.51.36247 |
 
 Not tested yet: running the installer, the wizard pages, start at sign-in, the Start menu shortcut, upgrade over an older install, uninstall and its data questions, SmartScreen, Smart App Control.
 
