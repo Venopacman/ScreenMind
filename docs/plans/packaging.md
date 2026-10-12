@@ -348,7 +348,7 @@ The app is 343 MB unpacked, 122-157 MB as a DMG. Ways to shrink it, none tested:
 
 | Option | OS | Notes |
 |---|---|---|
-| **"New version" check** (first) | both | On start and daily, read the latest GitHub Release. Show it in the menu bar / tray item ("Update available") with a download link. Half a day of work, no risk. |
+| **"New version" check** (first) | both | On start and daily, read the latest release manifest (see [updates.md](updates.md); no GitHub Releases). Show it in the menu bar / tray item ("Update available") with a download link. Half a day of work, no risk. |
 | Sparkle 2 (2.10.0) | macOS | The standard. EdDSA-signed appcast, delta updates. Needs `Sparkle.framework` in the app, loaded via pyobjc (untested), or the `sparkle-cli` helper. ([docs](https://sparkle-project.org/documentation/)) |
 | Velopack | both | Installer + updater, has a Python package, works with PyInstaller onedir. Needs the .NET SDK on the build machine. On Windows it would replace the NSIS wizard. ([docs](https://docs.velopack.io/getting-started/python)) |
 | WinSparkle 0.9.4 | Windows | C DLL, called from Python via ctypes (untested). Pairs with the NSIS installer. |
@@ -372,7 +372,7 @@ Plan: the version check in milestone 1. Then pick Sparkle + WinSparkle (keeps th
 
 One workflow on a version tag, a matrix of two jobs:
 
-- `macos-15` (arm64): `uv sync --frozen` > PyInstaller spec > sign (import the `.p12` into a temporary keychain) > DMG > `notarytool submit --wait` > `stapler staple` > upload to the GitHub Release. The unsigned part is built (2026-10-12): `.github/workflows/package-macos.yml` runs `packaging/macos/build.sh` and `packaging/macos/smoke_test.sh` on pushes to `custom` that change the app or its packaging, by hand, and on `v*` tags. The DMG is a workflow artifact (kept 30 days).
+- `macos-15` (arm64): `uv sync --frozen` > PyInstaller spec > sign (import the `.p12` into a temporary keychain) > DMG > `notarytool submit --wait` > `stapler staple` > upload to our own release hosting (not GitHub Releases). The unsigned part is built (2026-10-12): `.github/workflows/package-macos.yml` runs `packaging/macos/build.sh` and `packaging/macos/smoke_test.sh` on pushes to `custom` that change the app or its packaging, and by hand. It has no tag trigger and makes no release. The DMG is a workflow artifact (kept 30 days).
 - `windows-2025` (x64): `uv sync --frozen` > PyInstaller > sign the exe and DLLs > `makensis` (NSIS from Chocolatey: the image has none) > sign the installer > upload. The unsigned part is built: `.github/workflows/package-windows.yml`.
 
 No Intel macOS job (no Intel build). `macos-13` was retired in 2025-12 anyway. A `windows-11-arm` runner exists for later.
@@ -423,7 +423,7 @@ Proposal: Google Drive for phase 1, and S3 when the updater comes. Below, "the c
 ### Version and tag
 
 - One version for both OS: `__version__` in `screenmind/__init__.py` (`pyproject.toml` reads it). Use plain numbers (`0.3.0`): macOS puts it in `CFBundleShortVersionString`, which must be `x.y.z`.
-- Tag the release commit `tester-<version>`. **Do not use a `v*` tag.** A pushed `v*` tag starts `publish.yml` (PyPI) and the two packaging workflows, which make a GitHub Release. The user decided on no GitHub Releases. A `tester-*` tag starts nothing.
+- Tag the release commit `tester-<version>`. There are no GitHub Releases (user decision, 2026-10-12). No workflow reacts to a tag: the packaging workflows have no tag trigger and no release step, and the inherited PyPI `publish.yml` is removed.
 
 ### macOS, on the user's Mac
 

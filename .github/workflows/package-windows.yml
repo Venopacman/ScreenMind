@@ -5,17 +5,15 @@ name: Package (Windows)
 # docs/plans/packaging-spikes.md ("Windows installer").
 #
 # Run by hand from the Actions tab (workflow_dispatch needs this file on the
-# default branch) or by pushing a version tag, e.g. v0.2.4. A tag also
-# attaches the installer to the GitHub Release.
+# default branch). The installer is a workflow artifact only. No tag trigger
+# and no GitHub Release: the user decided on none (2026-10-12). Stopgap until
+# the move to GitLab.
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
 
 permissions:
-  contents: write  # attach the installer to the release on tags
+  contents: read
 
 jobs:
   windows:
@@ -28,18 +26,6 @@ jobs:
         with:
           python-version: "3.14"
           enable-cache: true
-
-      - name: Verify tag matches package version
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        run: |
-          $init = Get-Content screenmind/__init__.py -Raw
-          if ($init -notmatch '__version__\s*=\s*"([^"]+)"') { throw "No __version__" }
-          $tag = "$env:GITHUB_REF_NAME".TrimStart("v")
-          if ($Matches[1] -ne $tag) {
-            Write-Output "::error::Tag '$tag' does not match screenmind.__version__ '$($Matches[1])'."
-            exit 1
-          }
 
       # windows-2025 has no NSIS (it has Inno Setup). Chocolatey is there.
       - name: Install NSIS
@@ -84,9 +70,3 @@ jobs:
           path: packaging/dist/ScreenMind-*-win-x64-setup.exe
           if-no-files-found: error
           compression-level: 0  # already LZMA-compressed
-
-      - name: Attach to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: packaging/dist/ScreenMind-*-win-x64-setup.exe

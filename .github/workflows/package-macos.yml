@@ -5,9 +5,9 @@ name: Package (macOS)
 # docs/plans/packaging-spikes.md ("macOS build").
 #
 # Runs on a push to custom that changes packaging or app code, by hand from
-# the Actions tab (workflow_dispatch needs this file on the default branch),
-# and on a version tag, e.g. v0.2.4. A tag also attaches the DMG to the
-# GitHub Release. The DMG is a workflow artifact for internal testers.
+# the Actions tab (workflow_dispatch needs this file on the default branch).
+# The DMG is a workflow artifact only. No tag trigger and no GitHub Release:
+# the user decided on none (2026-10-12). Stopgap until the move to GitLab.
 
 on:
   workflow_dispatch:
@@ -21,11 +21,9 @@ on:
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/package-macos.yml"
-    tags:
-      - "v*"
 
 permissions:
-  contents: write  # attach the DMG to the release on tags
+  contents: read
 
 concurrency:
   group: package-macos-${{ github.ref }}
@@ -42,15 +40,6 @@ jobs:
         with:
           python-version: "3.14"
           enable-cache: true
-
-      - name: Verify tag matches package version
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' screenmind/__init__.py)"
-          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
-            echo "::error::Tag '${GITHUB_REF_NAME#v}' does not match screenmind.__version__ '$version'."
-            exit 1
-          fi
 
       # The OCR models the app ships (F6). RapidOCR checks their SHA-256.
       - name: Cache OCR models
@@ -108,9 +97,3 @@ jobs:
           if-no-files-found: error
           compression-level: 0  # already LZMA-compressed
           retention-days: 30
-
-      - name: Attach to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: packaging/dist/ScreenMind-*-macos-arm64.dmg
