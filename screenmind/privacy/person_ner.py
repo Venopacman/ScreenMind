@@ -450,8 +450,9 @@ def redact_persons(text: str, replacement: str) -> Tuple[str, int]:
 if __name__ == "__main__":
     # For the app build: python -m screenmind.privacy.person_ner <dir>
     # Downloads the pinned files (sha256 checked) and converts them into <dir>.
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     target = Path(sys.argv[1]) if len(sys.argv) > 1 else models_dir()
     if is_installed(target):
-        print(f"already installed: {target}")
+        logger.info(f"already installed: {target}")
     else:
-        print(f"installed: {install(target)}")
+        logger.info(f"installed: {install(target)}")
