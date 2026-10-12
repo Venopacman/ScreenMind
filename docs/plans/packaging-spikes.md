@@ -42,6 +42,8 @@ Unsigned, for internal testers (milestone M0). Files in [`packaging/macos/`](../
 
 Local result on the user's Mac (macOS 27.0.1): build with the DMG 1 min 33 s, app 330 MB, DMG 116 MB, smoke test passed (OCR 0.55 s, 78 MB footprint after start, clean stop). With the person-name model and the tester signature (0033021): 1 min 56 s, app 466 MB, DMG 196 MB, smoke test passed (OCR 0.6 s, the name found, 78 MB footprint after start: the model loads on first use).
 
+In CI (`macos-15`, ad-hoc: no tester secrets yet): [run 38238913842](https://github.com/Venopacman/ScreenMind/actions/runs/38238913842) on 78ca74b, about 6 min, app 457 MB, DMG 193 MB, smoke test passed (OCR 2.7 s, the name found, 74 MB footprint after start). The run before it failed in `hdiutil create` with no message; `build.sh` now shows hdiutil's output and tries 3 times. The retry was not needed in this run.
+
 Found by the smoke test: **onnxruntime telemetry (F9 in [packaging.md](packaging.md)).** With a temp `HOME`, the first OCR run created `Library/Application Support/Microsoft/DeveloperTools/.onnxruntime/` with a `deviceid` and an event database. onnxruntime 1.30 has Microsoft's telemetry client, with the upload address `mobile.events.data.microsoft.com`, on macOS too. The user's Mac has had that folder since 2026-10-06; its event table was empty on 2026-10-12, so whether anything was sent is not known. `config.py` now sets `ORT_DISABLE_TELEMETRY=1`, and the smoke test fails if anything appears under `HOME`. The old folder can be deleted by hand.
 
 Shared spec, so Windows builds change too: the spec now fetches and bundles the 5 OCR models and leaves out rapidocr's defaults (F6). The Windows session should rebuild and check OCR once.
