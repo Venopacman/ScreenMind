@@ -15,7 +15,7 @@ FAKE_JWT = "eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6ImFAYi5jIn0.c2lnbmF0dXJlLXRlc3Q"
     ("https://app.example.com/board?tab=done&session=abc123#row-4", "https://app.example.com/board?tab=done"),
     ("https://www.google.com/search?q=private+thing", "https://www.google.com/search"),
     # user:password removed
-    ("https://user:secret@example.com/x", "https://example.com/x"),
+    ("https://user:secret@example.com/x", "https://example.com/x"),  # gitleaks:allow
     # Sign-in hosts: host only
     ("https://accounts.google.com/o/oauth2/v2/auth?client_id=1&state=s&nonce=n", "https://accounts.google.com/"),
     (f"https://auth.eu-services.academy.nebius.com/realms/x/login-actions/action-token?key={FAKE_JWT}",

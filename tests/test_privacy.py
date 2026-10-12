@@ -154,7 +154,7 @@ def test_redact_aws_access_key():
 
 
 def test_redact_slack_token():
-    text = "SLACK=xoxb-123456789012-abcdefghij"
+    text = "SLACK=xoxb-123456789012-abcdefghij"  # gitleaks:allow
     result = filter_sensitive_text(text, ["api_key"])
     assert "[REDACTED:key]" in result["clean_text"]
 
