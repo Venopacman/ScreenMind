@@ -59,6 +59,9 @@ Status: open, for the Windows laptop session.
 
 - The NSIS installer's `llama\` handling (`packaging/windows/screenmind.nsi`: replace and remove `<install dir>\llama`, from `73cdb1d`) can go: the app ships and installs no `llama-server` any more. Keep removing an old `llama\` folder on update for one release, so testers' installs get cleaned up.
 - The shared spec changed for F6: it fetches the 5 OCR models into `packaging/build/ocr_models` and bundles them as `ocr_models/`, and leaves out rapidocr's default models. Rebuild once and check OCR on a real frame. The app should log `models: ...\_internal\ocr_models`. The build now needs network access the first time (RapidOCR downloads the models and checks their SHA-256).
+- Bundle id (user decision, 2026-10-12): `com.nebius.evolve.work.capture`. Use the same id wherever Windows needs one: an AppUserModelID for the tray and notifications, and the installer if it names the app.
+- The spec also bundles the person-name model now (138 MB, `models/ner/...`). Check that its 4 files sit together in `_internal\models\ner\...` and that names get redacted in the app.
+- Signing is deferred (user decision, 2026-10-12): the installer stays unsigned. The tester note already covers SmartScreen ("More info" > "Run anyway").
 - F9: `config.py` sets `ORT_DISABLE_TELEMETRY=1`. On Windows, onnxruntime's telemetry goes through ETW; check that the variable turns it off there too.
 
 Refs: [packaging.md](../plans/packaging.md) F6, F9; [packaging-spikes.md](../plans/packaging-spikes.md) "macOS build".

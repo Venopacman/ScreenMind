@@ -1,6 +1,6 @@
 # Ship ScreenMind as an app
 
-Status: 2026-10-12. Fixes F1, F4-F7 and F9 are done. F2 and F3 are obsolete: the Gemma removal (branch `claude/practical-dijkstra-f83cbe`) took out the model download and `llama-server`. No model or binary runs for analysis on the device, and no API key lives in the client. Windows has an unsigned NSIS installer, a tray icon and a CI build. macOS has an unsigned `.app` + DMG built in CI (`package-macos.yml`, 330 MB app, 116 MB DMG) with a smoke test that runs OCR inside the app. Bundle id: `evolve.work.capture`. Not built yet: signing, the menu bar, the first-run window, a tested login item, and the OCR worker process. Not tested yet: a start from Finder and screen grabs from the app; that is the user's hand test ([checklist](packaging-spikes.md#macos-hand-test)). Next macOS steps, each with its reason: [Next steps for macOS](#next-steps-for-macos-2026-10-08).
+Status: 2026-10-12. Fixes F1, F4-F7 and F9 are done. F2 and F3 are obsolete: the Gemma removal took out the model download and `llama-server`. No model or binary runs for analysis on the device, and no API key lives in the client. Windows has an unsigned NSIS installer, a tray icon and a CI build. macOS has a `.app` + DMG built in CI (`package-macos.yml`) with a smoke test that runs both bundled models inside the app. With the person-name model the app is 466 MB and the DMG 196 MB. Bundle id: `com.nebius.evolve.work.capture`. Real code signing and notarization (M2) are deferred by the user (2026-10-12); tester builds are signed with one self-signed certificate so permission grants survive new builds ([Tester builds](#tester-builds-one-self-signed-certificate)). Not built yet: the menu bar, the first-run window, a tested login item and the OCR worker process. Not tested yet: a start from Finder, screen grabs from the app and grants across builds; that is the user's hand test ([checklist](packaging-spikes.md#macos-hand-test)). Next macOS steps: [Next steps for macOS](#next-steps-for-macos-2026-10-08).
 
 ## Short answer
 
@@ -11,7 +11,7 @@ Two requirements from the user (2026-10-07) shape the plan:
 
 Recommendation:
 
-- **Both OS: freeze with PyInstaller (onedir).** It supports Python 3.14 and has hooks for onnxruntime and keyring. The macOS build is a working `ScreenMind.app` (330 MB, 116 MB as a DMG on 2026-10-12) that starts in about 1 s. The bundler adds no RAM: the frozen app runs the same single Python process.
+- **Both OS: freeze with PyInstaller (onedir).** It supports Python 3.14 and has hooks for onnxruntime and keyring. The macOS build is a working `ScreenMind.app` (466 MB with the person-name model, 196 MB as a DMG on 2026-10-12; 330 MB and 116 MB without it) that starts in about 1 s. The bundler adds no RAM: the frozen app runs the same single Python process.
 - **macOS: a signed, notarized `.app` in a DMG.** Native minimum UI through pyobjc: a menu bar item (status, pause, quit) and a short first-run window that explains each permission before macOS asks. Start at login uses `SMAppService`, not a LaunchAgent plist.
 - **Windows: an NSIS wizard, per-user install.** The user chose NSIS over Inno Setup for the license (2026-10-08). The wizard explains what is recorded and has a "Start at login" checkbox. A tray item gives status, pause and quit. Uninstall asks whether to delete `%USERPROFILE%\.screenmind`.
 - **Ship no local model.** Done: the Gemma removal (branch `claude/practical-dijkstra-f83cbe`, 2026-10-08) removed Gemma and `llama-server`. The agent collects and labels each frame by rules (app and site). Semantic analysis comes later, off the device, as an LLM over session text. That removes about 4 GB of RAM and a 3 GB download. There is no opt-in local mode. See [Should local LLM analysis ship?](#should-local-llm-analysis-ship).
@@ -19,7 +19,7 @@ Recommendation:
 - **Target budget:** median 250 MB, peak 500 MB of memory for the agent, and on average under 3% of one CPU core over a workday. Measured by the e2e check on each machine.
 - **Architectures:** Apple Silicon only, macOS 14+. Windows x64 only. Intel Macs are out: onnxruntime has no Intel macOS wheels for Python 3.14. Windows ARM64 is out for now: our lock has no `opencv-python` wheel for it. ARM64 laptops can run the x64 build under emulation (not tested).
 - **First milestone (about one to two weeks):** the code fixes below, the OCR memory fix, and an unsigned `.app` + DMG and NSIS wizard for internal testers, built in GitHub Actions.
-- **Public release:** Apple Developer Program (99 USD/year) for signing and notarization. Azure Artifact Signing (about 10 USD/month) or an OV certificate for Windows. Auto-update comes last.
+- **Public release:** deferred by the user on 2026-10-12 (no real code signing for now; tester builds stay unsigned on Windows and self-signed on macOS). When it comes: Apple Developer Program (99 USD/year) for signing and notarization. Azure Artifact Signing (about 10 USD/month) or an OV certificate for Windows. Auto-update comes last.
 
 ## What we ship
 
@@ -231,7 +231,7 @@ An `NSStatusItem` with a status line (Capturing / Paused / Needs permission), Pa
 Mostly yes. Facts:
 
 - TCC stores the app's *designated requirement*. For a Developer ID app, that is the bundle id plus the Team ID. A new version signed the same way keeps all grants ([TN3127](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)).
-- An ad-hoc signed or unsigned build has a requirement tied to that exact build. **Every rebuild loses the grants.** Testers of unsigned builds must re-grant after each update. A workaround for testers: sign every build with the same self-signed certificate. The requirement then names that certificate, and grants should survive rebuilds. This follows from TN3127 but is not tested.
+- An ad-hoc signed or unsigned build has a requirement tied to that exact build. **Every rebuild loses the grants.** Testers of unsigned builds must re-grant after each update. A workaround for testers: sign every build with the same self-signed certificate. The requirement then names that certificate, and grants should survive rebuilds. This follows from TN3127. Built on 2026-10-12, see [Tester builds](#tester-builds-one-self-signed-certificate); the requirement part is checked, the grants themselves are not yet.
 - With a real `.app` launched from Finder or as a login item, the responsible process is ScreenMind. Prompts say "ScreenMind" (fixes G22 in [capture.md](../architecture/capture.md)). Child processes we start (`screencapture`) count as ScreenMind too.
 - G1 (grabs hang in Claude-started processes) is about processes whose responsible app has no grant. A real app with a grant should not hang. Check this by hand in milestone 1. It cannot be checked from a Claude session.
 - What a signed app does not fix: macOS 15+ asks again **every month** whether ScreenMind may keep recording the screen ("Allow for one month"). The entitlement that avoids this (`persistent-content-capture`) is only for VNC-type apps, by application. We live with the monthly prompt. ([9to5Mac](https://9to5mac.com/2024/08/14/macos-sequoia-screen-recording-prompt-monthly/), [Apple](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.persistent-content-capture))
@@ -268,7 +268,20 @@ The first version is built (2026-10-08): [packaging-spikes.md, Windows installer
 - Entitlements to start with: none for audio (`com.apple.security.device.audio-input` went with call transcription). Add `com.apple.security.cs.allow-unsigned-executable-memory` only if ctypes/cffi callbacks crash. We sign every `.so` with our Team ID, so `disable-library-validation` should not be needed. Test on a notarized build. ([Apple](https://developer.apple.com/documentation/security/hardened-runtime))
 - No App Sandbox. It is only required for the Mac App Store, and it would block capture and event taps.
 - **Notarize** with `notarytool` using an App Store Connect API key (good for CI), then `stapler staple` the DMG.
+- **Deferred (user decision, 2026-10-12): no Developer ID signing and no notarization for now.** Everything above in this list waits for M2.
 - Unsigned builds on macOS 15+: right-click > Open no longer works. The user opens the app once, then System Settings > Privacy & Security > "Open Anyway" ([Apple](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac)). Or `xattr -dr com.apple.quarantine /Applications/ScreenMind.app`. Fine for internal testers.
+
+### Tester builds: one self-signed certificate
+
+Added 2026-10-12, because real signing is deferred.
+
+- **Why.** TCC stores each grant with the app's designated requirement. An ad-hoc signature's requirement is the code hash of that one build, so each new build loses Screen Recording, Accessibility and Input Monitoring, and testers grant all three again. With one certificate for every build, the requirement is `identifier "com.nebius.evolve.work.capture" and certificate leaf = H"<cert hash>"`. It names the certificate, not the build, so a new build should keep the grants.
+- **How.** `packaging/macos/make_tester_cert.sh <dir>` makes the certificate once: RSA 2048, code-signing usage, 10 years, written as a `.p12` with a random password. Nothing goes into a keychain. `packaging/macos/sign_app.sh` signs a built app with it from a temporary keychain that is deleted afterwards. `build.sh` calls it when `MACOS_TESTER_P12` and `MACOS_TESTER_P12_PASSWORD` are set. In CI they come from the secrets `MACOS_TESTER_P12_BASE64` and `MACOS_TESTER_P12_PASSWORD`; without them the build stays ad-hoc and says so.
+- **No hardened runtime.** Library validation needs a Team ID, and a self-signed certificate has none.
+- **What it does not change.** Gatekeeper still blocks the first start ("Open Anyway", or `xattr -dr com.apple.quarantine /Applications/ScreenMind.app`). Testers see no publisher name.
+- **Checked from a Claude session (2026-10-12).** Two builds with different code hashes, signed with the same test certificate, had the same designated requirement, and build B satisfied build A's requirement (`codesign -v -R=...`). That is the check TCC makes. Signing needed no GUI prompt, and no keychain was left behind.
+- **Not checked, needs the user.** Whether macOS really keeps a grant when build B replaces build A. Grants need a start from Finder and a click in System Settings. This is step 11 of the [hand test](packaging-spikes.md#macos-hand-test).
+- **Needs the user once.** Make the certificate and store it as two repository secrets (commands in `make_tester_cert.sh`). Keep the `.p12` and its password safe: a new certificate means every tester grants again.
 
 ### Windows
 
@@ -309,7 +322,7 @@ Obsolete: removed (2026-10-08). Kept as a record. It was only for the opt-in loc
 
 ### Person-name model
 
-Shipped inside the app (decided 2026-10-12): no download, and no conversion on the user's machine. The build runs `python -m screenmind.privacy.person_ner <dir>`. It downloads the pinned files from Hugging Face, checks their sha256, and saves the weights as external data (onnxruntime maps them from disk, about +120 MB footprint at load instead of +400 MB). The spec adds `<dir>` to `datas` at `models/ner/distilbert-multilingual-ner-hrl` (`person_ner.BUNDLE_SUBDIR`). At run time the app looks in `sys._MEIPASS/models/ner/...` first, then in `~/.screenmind/models/ner/`. A frozen app never downloads; without the files it logs a warning and leaves names in. Tested 2026-10-12 with a frozen onedir probe (PyInstaller, `HOME` set to an empty folder): the model loaded from `_internal/models/ner/...`, and names were redacted.
+Shipped inside the app (decided 2026-10-12): no download, and no conversion on the user's machine. In the macOS build (2026-10-12): the spec installs it into `packaging/build/ner-model` (cached in CI) and bundles the 4 files at `Contents/Resources/models/ner/...`, side by side. The app grows from 330 to 466 MB and the DMG from 116 to 196 MB (+80 MB: the int8 weights compress poorly). The smoke test loads it inside the app and finds "Aleksandr Mangin" in a fixed line. The build runs `python -m screenmind.privacy.person_ner <dir>`. It downloads the pinned files from Hugging Face, checks their sha256, and saves the weights as external data (onnxruntime maps them from disk, about +120 MB footprint at load instead of +400 MB). The spec adds `<dir>` to `datas` at `models/ner/distilbert-multilingual-ner-hrl` (`person_ner.BUNDLE_SUBDIR`). At run time the app looks in `sys._MEIPASS/models/ner/...` first, then in `~/.screenmind/models/ner/`. A frozen app never downloads; without the files it logs a warning and leaves names in. Tested 2026-10-12 with a frozen onedir probe (PyInstaller, `HOME` set to an empty folder): the model loaded from `_internal/models/ner/...`, and names were redacted.
 
 ### OCR models
 
@@ -372,7 +385,7 @@ The unsigned milestone needs no secrets.
 |---|---|---|---|
 | **M0: internal testers** | Fix F1-F6. Agent-mode build without the dashboard. OCR memory fixes (worker process, onnxruntime settings) and background priority. Memory and CPU rows in the e2e check. Labeling decision: done, no local model (2026-10-08). Unsigned `.app` + DMG. Unsigned NSIS wizard (per-user, Run key, uninstall data question; built 2026-10-08). CI builds both on a tag. Short tester guide ("Open Anyway", SmartScreen "Run anyway"). | ~2 weeks | OCR worker may not reach 250 MB. Unsigned macOS builds lose permission grants on every update (try the self-signed certificate trick). |
 | **M1: app feel** | Native first-run permissions window (macOS). Menu bar / tray item (Windows tray done, 2026-10-08). `SMAppService` login item. "Update available" menu line. Idle/AC scheduling of analysis. CI resource benchmark. Check by hand that a Finder-launched app gets "ScreenMind" prompts and SCK grabs work (G1, G22). | ~1-1.5 weeks | Main thread change for the menu bar. SMAppService via pyobjc untested. |
-| **M2: signed public release** | Apple Developer enrollment, Developer ID signing, entitlements, notarization in CI. Azure Artifact Signing (or OV cert) for Windows. | 3-5 days of work, plus waiting: Apple org enrollment and Azure identity checks take days to weeks | Notarization fails on some nested binary. SmartScreen warnings for the first weeks anyway. |
+| **M2: signed public release** (deferred by the user, 2026-10-12) | Apple Developer enrollment, Developer ID signing, entitlements, notarization in CI. Azure Artifact Signing (or OV cert) for Windows. | 3-5 days of work, plus waiting: Apple org enrollment and Azure identity checks take days to weeks | Notarization fails on some nested binary. SmartScreen warnings for the first weeks anyway. |
 | **M3: auto-update** | Sparkle + WinSparkle, or Velopack | ~1 week | Integration with a frozen Python app is untested for all three. |
 
 ### Recommendation
@@ -399,22 +412,26 @@ While doing these, the smoke test found F9 (onnxruntime telemetry), now off.
    - Why: once OCR runs, the agent holds 1.07-1.5 GB footprint on the Mac. The hard cap is 500 MB. The onnxruntime tuning is done and was not enough. A worker that exits after a batch gives its memory back to the OS. The tier run says OCR improves extraction (1.85 against 1.63 without it), so dropping OCR is not the answer.
    - Cost: the biggest item, a few days. About 100 MB and 1-2 s per batch to load the models again (to measure). The clean-architecture plan moves it behind a `TextRecognizer` port later (its step 16); building it first is fine.
    - User decision: none. It is needed whatever the labeling decision is.
-5. **Hand test of a CI DMG (needs the user, about 15 minutes).** The checklist: [packaging-spikes.md, macOS hand test](packaging-spikes.md#macos-hand-test).
+5. **Hand test of a CI DMG (needs the user, about 20 minutes).** The checklist: [packaging-spikes.md, macOS hand test](packaging-spikes.md#macos-hand-test).
    - Why: a start from Finder, the permission prompts naming ScreenMind, SCK grabs and OCR on a real frame are the reasons to ship an `.app` at all. None of them can be tested from a Claude session: grabs hang in Claude-started processes ([sck-capture.md](../backlog/sck-capture.md)).
    - The OCR worker process (step 4) waits until after this first tester build (user decision, 2026-10-12).
-6. **Bundle the person-name model** once the PII branch merges after the Gemma removal (user decision, 2026-10-12: ship it, no download on first use). About +138 MB on disk and +120 MB RAM; the size and budget numbers here get updated then. Check that `model.onnx.data` sits next to `model.onnx` inside `Contents/Resources` after `BUNDLE`.
+6. **Bundle the person-name model. Done (2026-10-12).** See [Person-name model](#person-name-model). The 4 files sit side by side in `Contents/Resources/models/ner/...` after `BUNDLE`, and the smoke test runs the model inside the app.
+   - Cost: the DMG grows by 80 MB (116 to 196 MB).
+7. **Sign tester builds with one self-signed certificate.** Scripts done (2026-10-12); see [Tester builds](#tester-builds-one-self-signed-certificate).
+   - Why: real signing is deferred. Without this, every new tester build loses all three permission grants.
+   - Needs the user: make the certificate once and add the two repository secrets. Then hand-test step 11 checks that grants survive a new build.
 
 Decisions that block or shape these steps:
 
-- **Bundle id. Decided (2026-10-12): `evolve.work.capture`** (a short name; a Nebius Academy variant may come later). TCC grants are tied to the bundle id (and, once signed, the Team ID), so a later change makes every tester grant permissions again.
+- **Bundle id. Decided (2026-10-12): `com.nebius.evolve.work.capture`**, the reverse of nebius.com plus the product (academy.nebius.com/business/evolve-work/). It replaced `evolve.work.capture` the same day. TCC grants are tied to the bundle id (and the certificate), so a later change makes every tester grant permissions again. Windows uses the same id wherever it needs one (an AppUserModelID, the installer).
 - **Where labeling runs** (open question 5). Answered for the device (2026-10-08): the macOS app ships no `llama-server` and no Gemma, about 4 GB of RAM and a 3 GB download less. F2 and F3 are obsolete. Where the later semantic step runs (server or vendor API) is still open.
 - **Does the agent keep the HTTP server** (open question 7). The export is an HTTP route today. This decides whether the agent-mode build can drop FastAPI, uvicorn and the dashboard.
-- **Who publishes** (open question 1). Not needed for M0. It blocks signing (M2) and the self-signed certificate trick is the stopgap for testers.
+- **Who publishes** (open question 1). Not needed now: signing (M2) is deferred, and tester builds use the self-signed certificate.
 - **Login item: `SMAppService.agent` or `mainApp`.** Technical, see [Start at login](#start-at-login). We propose `agent`, because only it can restart a crashed agent.
 
 ## Open questions for the user
 
-1. Who publishes? A company account (TripleTen) or a personal one? That decides Apple org enrollment and Azure Artifact Signing eligibility.
+1. Who publishes? A company account or a personal one? That decides Apple org enrollment and Azure Artifact Signing eligibility. Update 2026-10-12: the bundle id `com.nebius.evolve.work.capture` points to a Nebius Apple Developer account and Nebius code signing on Windows. Confirm with the account owner before signing (M2, deferred).
 2. ~~Is Inno Setup's commercial license OK, or do we prefer NSIS (free)?~~ Answered 2026-10-08: NSIS, for the license.
 3. Is a monthly "keep allowing screen recording?" prompt acceptable? There is no way around it for this kind of app.
 4. Is Apple Silicon + Windows x64 enough for the first testers?
