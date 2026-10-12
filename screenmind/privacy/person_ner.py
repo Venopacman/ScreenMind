@@ -48,6 +48,7 @@ Where the model comes from, in this order:
 
 import hashlib
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -205,9 +206,12 @@ def install(model_dir: Optional[Path] = None) -> Path:
         # Converting holds about 400 MB, and this process would keep that
         # memory. So it runs in a child Python. Only dev checkouts and the
         # app build install; a frozen app ships the converted files.
+        # The child does not import screenmind.config, which turns off
+        # onnxruntime's telemetry, so set it here.
         subprocess.run(
             [sys.executable, "-c", _CONVERT_CODE, str(tmp / "model_int8.onnx"), str(tmp / _MODEL)],
             check=True, stdin=subprocess.DEVNULL, capture_output=True, timeout=600,
+            env={**os.environ, "ORT_DISABLE_TELEMETRY": "1"},
         )
         (tmp / "model_int8.onnx").unlink()
 
