@@ -197,3 +197,12 @@ def test_importing_config_writes_no_log_file():
     from logging.handlers import RotatingFileHandler
     assert not [h for h in logging.getLogger("screenmind").handlers
                 if isinstance(h, RotatingFileHandler)]
+
+
+def test_onnxruntime_telemetry_is_off():
+    """onnxruntime's built-in Microsoft telemetry stays off (set in config.py)."""
+    import os
+
+    import screenmind.config  # noqa: F401
+
+    assert os.environ.get("ORT_DISABLE_TELEMETRY") == "1"

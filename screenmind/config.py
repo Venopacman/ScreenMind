@@ -17,6 +17,15 @@ from typing import List, Optional
 from pydantic_settings import BaseSettings
 from pydantic import Field, PrivateAttr, ValidationError
 
+# onnxruntime (OCR) has Microsoft's telemetry client built in, also on macOS
+# and Linux since 1.2x: it keeps a device id and an event queue under
+# ~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime and can
+# upload to mobile.events.data.microsoft.com. A screen recorder must send
+# nothing we did not choose to send. onnxruntime reads this variable when it
+# creates its environment (the first model load), so setting it here, before
+# any of our code loads a model, is enough. A user can still set it to 0.
+os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
+
 
 
 # ── Logging Setup ────────────────────────────────────────────────────────────
