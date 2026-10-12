@@ -370,6 +370,7 @@ Plan: the version check in milestone 1. Then pick Sparkle + WinSparkle (keeps th
   - `package-macos.yml` "Tester certificate" step: it decodes `secrets.MACOS_TESTER_P12_BASE64` into `$RUNNER_TEMP/tester.p12`, exports `MACOS_TESTER_P12` through `$GITHUB_ENV`, and prints a `::notice::` when the secret is missing. In GitLab: a masked file variable gives the `.p12` path directly, and a plain `echo` replaces the notice.
   - Comments only: `make_tester_cert.sh` tells you to store the certificate with `gh secret set`, and `build.sh` and `build.ps1` name the GitHub workflow files.
   - The macOS DMG step retries `hdiutil create`, which sometimes fails on GitHub's runners. Keep the retry on any hosted runner.
+  - On macOS 27, `hdiutil create` and `hdiutil attach` print "deprecated, use `diskutil image create`". They still work. `macos-15` runners have no `diskutil image`, so switch only when every build machine is on macOS 27 or later.
 
 One workflow on a version tag, a matrix of two jobs:
 

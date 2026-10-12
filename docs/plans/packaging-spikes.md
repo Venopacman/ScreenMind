@@ -6,6 +6,8 @@ Build files: [`packaging/evolve-capture.spec`](../../packaging/evolve-capture.sp
 
 ## Results
 
+Names: until 2026-10-12 the app was ScreenMind (`ScreenMind.app`, `ScreenMind.exe`, data in `~/.screenmind`, `SCREENMIND_*` variables, log `screenmind.log`). The rename to Evolve Capture (d3c6886) rewrote those names in this file too. So in results and notes dated before it, read `EvolveCapture` / `evolve-capture` / `EVOLVE_CAPTURE_*` as the ScreenMind names that were really used then.
+
 Update 2026-10-08: Gemma and llama-server were removed (branch `claude/practical-dijkstra-f83cbe`). The notes below about `llama-server`, model downloads (F2), a bundled llama-server (F3), `MEETING_TRANSCRIPTION`, `LLAMA_SERVER_*` and `/api/models` are history. Those settings are ignored now, and `/api/models` returns 404.
 
 | | macOS (arm64) | Windows (x64) |
@@ -15,7 +17,7 @@ Update 2026-10-08: Gemma and llama-server were removed (branch `claude/practical
 | PyInstaller | 6.22.3 (contrib hooks 2026.8), Python 3.14.6 | 6.22.3, Python 3.14.8 (uv) |
 | Build time | 1 min 56 s with the DMG and the tester signature (`packaging/macos/build.sh`, caches and the person-name model warm). 2026-10-07: 2 min 21 s cold, 25 s warm | 2 min 45 s cold, 1 min 36 s warm |
 | Build result | OK. Only harmless warnings: pyobjc lazy names, Windows libraries looked up through ctypes (`user32`, `gdi32`, `shcore`, `dwmapi`), `scipy.special._cdflib`, `pycparser` tables. `ScreenCaptureKit`, `Quartz`, `AppKit`, `HIServices` and `evolve_capture.watchdog` are picked up without hidden imports | OK after a spec fix: the first build took `msvcp140.dll`, `vcruntime140.dll` and `ucrtbase.dll` from a JDK on `PATH` and crashed on the first OCR frame (see notes). Harmless warnings: `UIAutomationClient_VC140_*.dll` "not found" (bundled anyway), `scipy.special._cdflib`, `tzdata`, `pycparser` tables |
-| App size on disk | 466 MB (`EvolveCapture.app`), of it the person-name model 132 MB and our OCR models 25 MB. Without the person-name model: 330 MB. 351 MB on 3092a5f, 343 MB on 2026-10-07, 363 MB before the strip | 394 MB (`dist\EvolveCapture\`, 331 files) |
+| App size on disk | 461 MB (`EvolveCapture.app`, d3c6886 after the rename; 466 MB as `ScreenMind.app` on 0033021), of it the person-name model 132 MB and our OCR models 25 MB. Without the person-name model: 330 MB. 351 MB on 3092a5f, 343 MB on 2026-10-07, 363 MB before the strip | 394 MB (`dist\EvolveCapture\`, 331 files) |
 | Compressed | DMG 196 MB (LZMA, with an Applications link); 116 MB without the person-name model. 121 MB on 2639ae1; 2026-10-07: 157 MB (zlib), 122 MB (LZMA) | zip 172 MB (`Compress-Archive`) |
 | Largest parts | the person-name model 132 MB, onnxruntime 71 MB, cv2 41 MB + its ffmpeg/X11 libs, scipy 33 MB, our OCR models 25 MB, libpython 18 MB | cv2 112 MB (`cv2.pyd` 82 MB + ffmpeg DLL 29 MB), scipy 46 MB + `scipy.libs` 19 MB, onnxruntime 36 MB, rapidocr 30 MB, `numpy.libs` 20 MB. Two OpenBLAS copies (numpy + scipy), 39 MB. Tcl/Tk DLLs (5 MB) came along |
 | Signature | the tester certificate (self-signed, `sign_app.sh`) or ad-hoc without it. Bundle id `com.nebius.evolve.work.capture` (since 2026-10-12) | unsigned |
@@ -77,20 +79,20 @@ Not in this test: start at login (`SMAppService` is not built) and the menu bar 
 
 ## macOS notes (2026-10-08)
 
-- Built twice: on `custom` 2639ae1 (before F1-F4) and on 3092a5f (after). Both ran from `Contents/MacOS/EvolveCapture` under `env -i` with a temp `DATA_DIR`, `API_PORT=7891`, `CAPTURE_ON_START=false`, `UI_EVENTS_ENABLED=false`, `MEETING_TRANSCRIPTION=false`, `LLAMA_SERVER_SHARED=1`, a dead llama port and `PATH=/usr/bin:/bin:/usr/sbin:/sbin`. The main instance kept running. Build outputs were deleted afterwards.
+- Built twice: on `custom` 2639ae1 (before F1-F4) and on 3092a5f (after). Both ran from `Contents/MacOS/ScreenMind` under `env -i` with a temp `DATA_DIR`, `API_PORT=7891`, `CAPTURE_ON_START=false`, `UI_EVENTS_ENABLED=false`, `MEETING_TRANSCRIPTION=false`, `LLAMA_SERVER_SHARED=1`, a dead llama port and `PATH=/usr/bin:/bin:/usr/sbin:/sbin`. The main instance kept running. Build outputs were deleted afterwards.
 - F1 works on macOS: a `.env` in the temp data dir with `OCR_LANGUAGES=en,de` showed as `ocr_languages=en,de (.env)` in the start log. On 2639ae1 no `.env` loaded at all (the path pointed inside the bundle).
-- F4 works for the shortcut: the log says "Desktop shortcut skipped" and nothing appeared on the desktop. On 2639ae1 the first start wrote `~/Desktop/EvolveCapture.command`, which runs `launcher.py` inside the bundle (deleted). The login-item command is now the app binary alone (`startup.py`). Not tested: installing the LaunchAgent, because that changes the user's real login items.
+- F4 works for the shortcut: the log says "Desktop shortcut skipped" and nothing appeared on the desktop. On 2639ae1 the first start wrote `~/Desktop/ScreenMind.command`, which runs `launcher.py` inside the bundle (deleted). The login-item command is now the app binary alone (`startup.py`). Not tested: installing the LaunchAgent, because that changes the user's real login items.
 - F2 and F3 were not tested on macOS: they need a model download and a `llama-server` start. (Update 2026-10-08: F2 and F3 no longer apply; Gemma was removed.)
 - A fresh DB migrated from v0 to v13 in the bundle.
-- The app read the model list from `~/.evolve-capture/models` (it ignores `DATA_DIR`, as on Windows) and wrote nothing there.
+- The app read the model list from `~/.screenmind/models` (it ignores `DATA_DIR`, as on Windows) and wrote nothing there.
 - For the resource budget, a read-only sample of the main instance 20 min after its start: 415 MB footprint, peak 1177 MB, 60 CPU-s (about 5% of one core). Its `llama-server`: 842 MB footprint.
 - Still not tested on macOS, and why: a start from Finder, the permission prompts, SCK grabs from the bundle and OCR on a real frame all need the user (grabs hang in Claude-started processes, see [sck-capture.md](../backlog/sck-capture.md)). Start at login, the menu bar item and the first-run flow are not built.
 
 ## macOS notes (2026-10-07)
 
-- Ran the binary inside the bundle (`Contents/MacOS/EvolveCapture`) from a scratch folder, so no `.env` loaded. Env: temp `DATA_DIR`, `API_PORT=7790`, `CAPTURE_ON_START=false`, `UI_EVENTS_ENABLED=false`, `MEETING_TRANSCRIPTION=false`, a dead llama port, and a `PATH` without Homebrew. It started in degraded mode ("llama-server not found"), as expected.
+- Ran the binary inside the bundle (`Contents/MacOS/ScreenMind`) from a scratch folder, so no `.env` loaded. Env: temp `DATA_DIR`, `API_PORT=7790`, `CAPTURE_ON_START=false`, `UI_EVENTS_ENABLED=false`, `MEETING_TRANSCRIPTION=false`, a dead llama port, and a `PATH` without Homebrew. It started in degraded mode ("llama-server not found"), as expected.
 - Not tested: launching from Finder, permission prompts, screen grabs, OCR on a real frame, model download (fails by design until fix F2 in the plan).
-- OCR benchmark: run with the worktree's `.venv` on saved screenshots from `~/.evolve-capture/screenshots/2026-10-07`. Memory is `phys_footprint` (what Activity Monitor shows). RSS was 5-10% higher. Halving the image size first changed almost nothing. Analysis is in [packaging.md, Resource budget](packaging.md#resource-budget).
+- OCR benchmark: run with the worktree's `.venv` on saved screenshots from `~/.screenmind/screenshots/2026-10-07`. Memory is `phys_footprint` (what Activity Monitor shows). RSS was 5-10% higher. Halving the image size first changed almost nothing. Analysis is in [packaging.md, Resource budget](packaging.md#resource-budget).
 - The bundle holds rapidocr's own default models (`PP-OCRv6_*_small`), which Evolve Capture never uses (fix F6).
 
 ## Windows notes (2026-10-08)

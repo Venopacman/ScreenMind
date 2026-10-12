@@ -68,7 +68,7 @@ if [ "$skip_dmg" -eq 0 ]; then
     # hdiutil sometimes fails on CI runners ("Resource busy"), so retry.
     made=0
     for attempt in 1 2 3; do
-        if hdiutil create -volname Evolve Capture -srcfolder "$stage" -format ULMO -ov "$dmg"; then
+        if hdiutil create -volname "Evolve Capture" -srcfolder "$stage" -format ULMO -ov "$dmg"; then
             made=1
             break
         fi
