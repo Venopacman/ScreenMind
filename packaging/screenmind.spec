@@ -101,7 +101,8 @@ if sys.platform == "darwin":
         version=__version__,
         info_plist={
             "CFBundleDisplayName": "ScreenMind",
-            # Background app: no Dock icon. The UI is the browser dashboard.
+            # No Dock icon for now. The user wants one (2026-10-12): drop this
+            # together with the main-thread AppKit run loop (packaging.md, Menu bar).
             "LSUIElement": True,
             "LSMinimumSystemVersion": "14.0",
         },

@@ -224,7 +224,9 @@ Use `SMAppService.mainApp.register()` (macOS 13+) through pyobjc (`pyobjc-framew
 
 ### Menu bar
 
-An `NSStatusItem` with a status line (Capturing / Paused / Needs permission), Pause or Resume, Permissions..., and Quit. Developer builds can add "Open dashboard". It needs the AppKit run loop on the main thread. Today the main thread runs asyncio, so asyncio moves to a worker thread. Set `LSUIElement` so there is no Dock icon (the spike does this). AppKit in the same process costs little RAM (not measured; expect tens of MB).
+An `NSStatusItem` with a status line (Capturing / Paused / Needs permission), Pause or Resume, Permissions..., and Quit. Developer builds can add "Open dashboard". It needs the AppKit run loop on the main thread. Today the main thread runs asyncio, so asyncio moves to a worker thread. AppKit in the same process costs little RAM (not measured; expect tens of MB).
+
+**Dock icon (user decision, 2026-10-12):** on macOS ScreenMind shows a Dock icon the whole time it runs, until it is quit or killed. A Dock click opens the window process ([native-app.md](native-app.md)), and the Dock menu has Pause/Resume. So the agent becomes a regular app: `LSUIElement` goes out of the Info.plist (or the agent sets its activation policy to Regular at start), and the window process sets itself to Accessory, so there is one icon. Whether the menu bar item stays next to the Dock icon is still open. The spec keeps `LSUIElement` until the main-thread AppKit run loop lands, in the same change: without a running event loop, a Dock icon would likely show the app as "not responding". The tester builds until then have no Dock icon.
 
 ### Does a signed app fix the permission prompts?
 
