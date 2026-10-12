@@ -19,7 +19,7 @@ from screenmind.capture.screen import ScreenCapture
 from screenmind.capture.dedup import ScreenDeduplicator
 from screenmind.capture.window import (
     get_active_window_title, get_active_app_name, get_top_window_in, can_find_top_window,
-    is_screen_locked,
+    is_screen_locked, screen_recording_access,
 )
 from screenmind.config import settings
 from screenmind.engine.a11y_extractor import A11yExtractor
@@ -77,6 +77,10 @@ class CaptureWorker:
         self._last_save_time = 0.0
         self._consecutive_skips = 0  # Track idle state
         self._screen_locked = False  # Lock screen or screensaver seen on the last tick
+        # macOS Screen Recording grant, checked at the first capture tick.
+        # None: not checked yet, or the OS has no such grant.
+        self._screen_access: Optional[bool] = None
+        self._screen_access_checked = False
         # UI events (set by main when the recorder exists)
         self._ui_recorder = None
         self._trigger_lock = threading.Lock()
@@ -148,6 +152,8 @@ class CaptureWorker:
         try:
             if self._check_screen_locked():
                 return
+            if not self._screen_access_checked:
+                self._check_screen_access()
 
             app_name = get_active_app_name()
 
@@ -213,6 +219,24 @@ class CaptureWorker:
             logger.info("Screen locked; capture skipped until unlock" if locked
                         else "Screen unlocked; capture continues")
         return locked
+
+    def _check_screen_access(self):
+        """Ask for Screen Recording once, when capture first runs.
+
+        Fix F7 in docs/plans/packaging.md: without this, macOS asks at some
+        later grab, with no context. The user started capture just now, so
+        the prompt makes sense. Logs where to allow it when it is missing.
+        """
+        self._screen_access_checked = True
+        self._screen_access = screen_recording_access(request=True)
+        if self._screen_access is False:
+            logger.warning(
+                "Screen Recording is not allowed for ScreenMind, so screenshots will not "
+                "show any windows. Allow it in System Settings > Privacy & Security > "
+                "Screen & System Audio Recording, then restart ScreenMind."
+            )
+        elif self._screen_access:
+            logger.info("Screen Recording is allowed")
 
     def _write_lock_marker(self, locked: bool, now: datetime):
         """One ui_events row per lock and unlock, so analysis can tell locked
@@ -495,6 +519,7 @@ class CaptureWorker:
             "captures": self._capture_count,
             "skipped": self._skip_count,
             "screen_locked": self._screen_locked,
+            "screen_recording": self._screen_access,
             "grab": self._screen.grab_status(),
         }
 

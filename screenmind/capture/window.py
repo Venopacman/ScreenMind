@@ -50,6 +50,17 @@ def is_screen_locked() -> bool:
         return False
 
 
+def screen_recording_access(request: bool = False) -> Optional[bool]:
+    """Whether this process may record the screen (macOS Screen Recording).
+
+    None where the OS has no such grant or the check fails.
+    """
+    try:
+        return adapter().screen_recording_access(request)
+    except Exception:
+        return None
+
+
 def can_find_top_window() -> bool:
     """Whether get_top_window_in() is supported on this OS."""
     try:

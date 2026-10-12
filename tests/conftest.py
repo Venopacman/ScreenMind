@@ -33,6 +33,14 @@ def _screen_unlocked(monkeypatch):
     monkeypatch.setattr("screenmind.workers.capture_worker.is_screen_locked", lambda: False)
 
 
+@pytest.fixture(autouse=True)
+def _no_screen_recording_prompt(monkeypatch):
+    """A capture tick asks macOS for Screen Recording. Tests must never show
+    that prompt. Tests of the check itself patch it back."""
+    monkeypatch.setattr("screenmind.workers.capture_worker.screen_recording_access",
+                        lambda request=False: None)
+
+
 @pytest.fixture
 def tmp_data_dir(tmp_path):
     """Provide a temporary data directory for tests."""

@@ -53,6 +53,11 @@ class PlatformAdapter(ABC):
         runs once per capture tick. False if not supported."""
         return False
 
+    def screen_recording_access(self, request: bool = False) -> Optional[bool]:
+        """Whether this process may record the screen. With request=True and
+        no grant, ask the OS for it. None where the OS has no such grant."""
+        return None
+
     def get_browser_url(self) -> Optional[str]:
         """URL of the page in the frontmost browser window. None when the
         frontmost app is not a browser or the OS does not expose it."""

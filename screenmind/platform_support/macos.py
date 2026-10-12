@@ -201,6 +201,26 @@ class MacOSAdapter(PlatformAdapter):
             return None
         return {"pid": front["pid"], "app_name": front["owner"], "title": front["title"]}
 
+    def screen_recording_access(self, request: bool = False) -> Optional[bool]:
+        """The Screen Recording grant of this process's responsible app.
+
+        Without it, grabs return only the wallpaper and window-less frames.
+        CGRequestScreenCaptureAccess shows the system prompt only the first
+        time macOS sees the app; after that it returns False at once, and the
+        user must switch it on in System Settings. A new grant takes effect
+        after a restart of the app. None if the check itself fails.
+        """
+        try:
+            import Quartz  # type: ignore
+            if Quartz.CGPreflightScreenCaptureAccess():
+                return True
+            if request:
+                return bool(Quartz.CGRequestScreenCaptureAccess())
+            return False
+        except Exception as e:
+            logger.debug(f"Screen Recording check failed: {e}")
+            return None
+
     def is_screen_locked(self) -> bool:
         """True while the screen is locked, the screensaver runs, or another
         user has the console (fast user switching).
