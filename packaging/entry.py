@@ -56,7 +56,7 @@ def _watch_quit_event():
 def _self_test(image_path: str) -> int:
     """Build check: run both bundled models inside the app, print JSON.
 
-    `Evolve Capture --self-test <image>`, used by packaging/macos/smoke_test.sh.
+    `EvolveCapture --self-test <image>`, used by packaging/macos/smoke_test.sh.
     It proves that onnxruntime and the bundled models load in the frozen app,
     with no screen access: OCR reads the image (F6), and the person-name
     model finds the name in a fixed line. Exit code 0 when both worked.
