@@ -2,6 +2,7 @@
 import sys
 import types
 from enum import Enum
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -103,7 +104,7 @@ def fake_rapidocr(monkeypatch):
 
     mod.RapidOCR = RapidOCR
     monkeypatch.setitem(sys.modules, "rapidocr", mod)
-    monkeypatch.setattr(ocr, "_ocr_models_dir", lambda: "/tmp/ocr-models")
+    monkeypatch.setattr(ocr, "_ocr_models_dir", lambda rec=None: "/tmp/ocr-models")
     return mod
 
 
@@ -247,3 +248,81 @@ class TestOnnxOptions:
         o = OCRExtractor()
         o._ensure_reader()
         assert o.is_available and o._engine is not None
+
+
+# ── Models inside the app bundle (F6) ────────────────────────────────
+
+BUNDLED_FILES = ["PP-OCRv6_det_tiny.onnx", "ch_ppocr_mobile_v2.0_cls_mobile.onnx",
+                 "en_PP-OCRv5_rec_mobile.onnx", "eslav_PP-OCRv5_rec_mobile.onnx",
+                 "latin_PP-OCRv5_rec_mobile.onnx"]
+
+
+@pytest.fixture
+def app_bundle(monkeypatch, tmp_path):
+    """Pretend to run inside the app, with every bundled model in place."""
+    base = tmp_path / "Frameworks"
+    models = base / ocr.BUNDLED_MODELS_DIRNAME
+    models.mkdir(parents=True)
+    for name in BUNDLED_FILES:
+        (models / name).write_bytes(b"onnx")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(base), raising=False)
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    return models
+
+
+@pytest.mark.parametrize("rec", ["en", "eslav", "latin"])
+def test_app_uses_bundled_models(app_bundle, rec):
+    assert ocr._ocr_models_dir(rec) == app_bundle
+
+
+def test_app_falls_back_when_a_bundled_model_is_missing(app_bundle, tmp_path):
+    (app_bundle / "eslav_PP-OCRv5_rec_mobile.onnx").unlink()
+    assert ocr._ocr_models_dir("eslav") == tmp_path / "home" / ".screenmind" / "models" / "ocr"
+    assert ocr._ocr_models_dir("en") == app_bundle
+
+
+def test_app_downloads_other_languages_to_home(app_bundle, tmp_path):
+    # Korean is not bundled: RapidOCR downloads it, never into the bundle
+    assert ocr._ocr_models_dir("korean") == tmp_path / "home" / ".screenmind" / "models" / "ocr"
+
+
+def test_source_run_ignores_a_bundle(app_bundle, monkeypatch, tmp_path):
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    assert ocr._ocr_models_dir("en") == tmp_path / "home" / ".screenmind" / "models" / "ocr"
+
+
+def test_bundled_file_names_are_rapidocrs():
+    """The names we look for are the ones RapidOCR downloads."""
+    pytest.importorskip("rapidocr")
+    from rapidocr import EngineType, LangCls, LangDet, LangRec, ModelType, OCRVersion
+    from rapidocr.inference_engine.base import FileInfo, InferSession
+    from rapidocr.utils.typings import TaskType
+
+    def name(**kw):
+        info = FileInfo(engine_type=EngineType.ONNXRUNTIME, **kw)
+        return Path(InferSession.get_model_url(info)["model_dir"]).name
+
+    assert name(ocr_version=OCRVersion.PPOCRV6, task_type=TaskType.DET,
+                lang_type=LangDet.CH, model_type=ModelType.TINY) == ocr._DET_FILE
+    assert name(ocr_version=OCRVersion.PPOCRV4, task_type=TaskType.CLS,
+                lang_type=LangCls.CH, model_type=ModelType.MOBILE) == ocr._CLS_FILE
+    for rec in ocr.BUNDLED_REC_MODELS:
+        assert name(ocr_version=OCRVersion.PPOCRV5, task_type=TaskType.REC,
+                    lang_type=LangRec(rec), model_type=ModelType.MOBILE) == ocr._rec_file(rec)
+
+
+def test_fetch_bundled_models_builds_each_recognizer(fake_rapidocr, tmp_path):
+    for name in BUNDLED_FILES:
+        (tmp_path / name).write_bytes(b"onnx")
+    files = ocr.fetch_bundled_models(tmp_path)
+    assert sorted(f.name for f in files) == sorted(BUNDLED_FILES)
+    built = [e.params["Rec.lang_type"].value for e in fake_rapidocr.built]
+    assert built == list(ocr.BUNDLED_REC_MODELS)
+    assert {e.params["Global.model_root_dir"] for e in fake_rapidocr.built} == {str(tmp_path)}
+
+
+def test_fetch_bundled_models_fails_on_a_missing_file(fake_rapidocr, tmp_path):
+    with pytest.raises(FileNotFoundError):
+        ocr.fetch_bundled_models(tmp_path)

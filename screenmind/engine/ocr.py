@@ -5,13 +5,14 @@ Uses RapidOCR (PaddleOCR models on ONNX Runtime). CPU only, no PyTorch.
 """
 
 import logging
+import sys
 import time
 from pathlib import Path
 from typing import Optional
 
 from PIL import Image
 
-from screenmind.config import settings
+from screenmind.config import is_frozen, settings
 
 logger = logging.getLogger("screenmind.engine.ocr")
 
@@ -131,13 +132,86 @@ def _tune_sessions(engine, threads: int) -> None:
         )
 
 
-def _ocr_models_dir():
-    """Where RapidOCR keeps its models: ~/.screenmind/models/ocr, shared by
-    every data dir (dev instances too). RapidOCR downloads them on first use.
-    A copy inside the app bundle would be looked up here, before this one."""
+# The app ships the models for the default languages (F6 in
+# docs/plans/packaging.md), so OCR works offline from the first frame.
+# packaging/screenmind.spec fetches them with fetch_bundled_models().
+# File names are RapidOCR's own (tests/test_ocr.py checks them).
+BUNDLED_REC_MODELS = ("en", "eslav", "latin")
+BUNDLED_MODELS_DIRNAME = "ocr_models"
+_DET_FILE = "PP-OCRv6_det_tiny.onnx"
+_CLS_FILE = "ch_ppocr_mobile_v2.0_cls_mobile.onnx"
+
+
+def _rec_file(rec: str) -> str:
+    return f"{rec}_PP-OCRv5_rec_mobile.onnx"
+
+
+def _bundled_models_dir(rec: str) -> Optional[Path]:
+    """The app's own models folder, if it has every file this recognizer needs.
+
+    Only in the app. The folder is read only (inside the signed bundle), so it
+    is used only when complete: RapidOCR would try to download a missing file
+    into it.
+    """
+    base = getattr(sys, "_MEIPASS", None)
+    if not is_frozen() or not base:
+        return None
+    d = Path(base) / BUNDLED_MODELS_DIRNAME
+    if all((d / name).is_file() for name in (_DET_FILE, _CLS_FILE, _rec_file(rec))):
+        return d
+    return None
+
+
+def _ocr_models_dir(rec: Optional[str] = None) -> Path:
+    """Where RapidOCR finds its models.
+
+    In the app: the bundled models when they cover this recognizer. Otherwise
+    ~/.screenmind/models/ocr, shared by every data dir (dev instances too),
+    where RapidOCR downloads them on first use.
+    """
+    if rec:
+        bundled = _bundled_models_dir(rec)
+        if bundled is not None:
+            return bundled
     d = Path.home() / ".screenmind" / "models" / "ocr"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _rapidocr_params(rec: str, model_dir: Path, threads: int) -> dict:
+    """RapidOCR settings: PP-OCRv6 tiny detection, PP-OCRv5 mobile recognition."""
+    from rapidocr import LangRec, ModelType, OCRVersion
+
+    return {
+        "Global.log_level": "warning",
+        "Global.model_root_dir": str(model_dir),
+        "EngineConfig.onnxruntime.intra_op_num_threads": threads or -1,
+        "EngineConfig.onnxruntime.enable_cpu_mem_arena": False,
+        "Det.ocr_version": OCRVersion.PPOCRV6,
+        "Det.model_type": ModelType.TINY,
+        "Rec.ocr_version": OCRVersion.PPOCRV5,
+        "Rec.model_type": ModelType.MOBILE,
+        "Rec.lang_type": LangRec(rec),
+    }
+
+
+def fetch_bundled_models(dest: Path) -> list:
+    """Download the models the app ships into dest (for the build).
+
+    RapidOCR downloads each file and checks its SHA-256; files already there
+    and valid are kept. Returns the file paths. Raises if one is missing.
+    """
+    from rapidocr import RapidOCR
+
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    for rec in BUNDLED_REC_MODELS:
+        RapidOCR(params=_rapidocr_params(rec, dest, 1))
+    files = [dest / name for name in (_DET_FILE, _CLS_FILE, *map(_rec_file, BUNDLED_REC_MODELS))]
+    missing = [f.name for f in files if not f.is_file()]
+    if missing:
+        raise FileNotFoundError(f"OCR models not downloaded: {', '.join(missing)}")
+    return files
 
 
 class OCRExtractor:
@@ -146,7 +220,9 @@ class OCRExtractor:
 
     Text detection uses PP-OCRv6 tiny (best on dark UIs and fastest in our
     tests); recognition uses the PP-OCRv5 model for the configured language.
-    Models (~15 MB) download to ~/.screenmind/models/ocr on first use.
+    The app ships the models for the default languages. Other models (and
+    all of them when running from source) download to ~/.screenmind/models/ocr
+    on first use.
     """
 
     def __init__(self):
@@ -159,7 +235,7 @@ class OCRExtractor:
         if self._engine is not None or not self._available:
             return
         try:
-            from rapidocr import LangRec, ModelType, OCRVersion, RapidOCR
+            from rapidocr import RapidOCR
         except Exception as e:
             logger.warning(f"RapidOCR unavailable, skipping text extraction: {e}")
             self._available = False
@@ -168,17 +244,8 @@ class OCRExtractor:
         rec = _rec_model(settings.ocr_languages_list)
         threads = settings.ocr_threads
         try:
-            self._engine = RapidOCR(params={
-                "Global.log_level": "warning",
-                "Global.model_root_dir": str(_ocr_models_dir()),
-                "EngineConfig.onnxruntime.intra_op_num_threads": threads or -1,
-                "EngineConfig.onnxruntime.enable_cpu_mem_arena": False,
-                "Det.ocr_version": OCRVersion.PPOCRV6,
-                "Det.model_type": ModelType.TINY,
-                "Rec.ocr_version": OCRVersion.PPOCRV5,
-                "Rec.model_type": ModelType.MOBILE,
-                "Rec.lang_type": LangRec(rec),
-            })
+            model_dir = _ocr_models_dir(rec)
+            self._engine = RapidOCR(params=_rapidocr_params(rec, model_dir, threads))
         except Exception as e:
             logger.warning(f"OCR model '{rec}' unavailable ({e}); skipping text extraction")
             self._available = False
@@ -190,7 +257,7 @@ class OCRExtractor:
             logger.warning(f"Could not apply OCR memory options, using RapidOCR's: {e}")
         self._rec_model = rec
         logger.info(f"OCR initialized (RapidOCR, recognizer: {rec}, threads: {threads or 'all'}, "
-                    f"languages: {', '.join(settings.ocr_languages_list)})")
+                    f"languages: {', '.join(settings.ocr_languages_list)}, models: {model_dir})")
 
     def extract_text(self, image: Image.Image) -> Optional[str]:
         """Extract text only (backward compatible)."""

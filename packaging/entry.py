@@ -53,8 +53,38 @@ def _watch_quit_event():
     threading.Thread(target=wait, name="installer-quit", daemon=True).start()
 
 
+def _ocr_self_test(image_path: str) -> int:
+    """Build check: OCR one image inside the app and print the result as JSON.
+
+    `ScreenMind --ocr-self-test <image>`, used by packaging/macos/smoke_test.sh.
+    It proves that onnxruntime and the bundled OCR models (F6) load in the
+    frozen app, with no screen access. Exit code 0 when text came out.
+    """
+    import json
+    import time
+
+    from PIL import Image
+
+    from screenmind.engine import ocr
+
+    start = time.monotonic()
+    extractor = ocr.OCRExtractor()
+    text = extractor.extract_text(Image.open(image_path))
+    rec = extractor._rec_model
+    print(json.dumps({  # noqa: T201
+        "text": text,
+        "recognizer": rec,
+        "models_dir": str(ocr._ocr_models_dir(rec)) if rec else None,
+        "seconds": round(time.monotonic() - start, 2),
+    }))
+    return 0 if text else 1
+
+
 if sys.platform == "win32" and getattr(sys, "frozen", False):
     _watch_quit_event()
+
+if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "--ocr-self-test":
+    sys.exit(_ocr_self_test(sys.argv[2]))
 
 from screenmind.main import run  # noqa: E402
 

@@ -1,5 +1,5 @@
-# PyInstaller spec for the packaging spike. Not a release build: unsigned,
-# no models inside (OCR downloads its models on first use).
+# PyInstaller spec for ScreenMind. Unsigned. The app ships the OCR models
+# for the default languages (F6); others download on first use.
 #
 # Build from the repo root (macOS or Windows):
 #   uv run --with pyinstaller pyinstaller packaging/screenmind.spec --noconfirm \
@@ -27,7 +27,21 @@ if sys.platform == "win32":
         if os.path.normcase(os.path.abspath(p)).startswith(_windir)
     )
 
-datas = collect_data_files("screenmind") + collect_data_files("rapidocr")
+# OCR models the app uses (F6 in docs/plans/packaging.md): fetched once into
+# packaging/build/ocr_models (RapidOCR checks each SHA-256), then bundled as
+# ocr_models/. engine/ocr.py looks there first inside the app.
+sys.path.insert(0, ROOT)
+from screenmind import __version__  # noqa: E402
+from screenmind.engine.ocr import BUNDLED_MODELS_DIRNAME, fetch_bundled_models  # noqa: E402
+
+_ocr_models = fetch_bundled_models(os.path.join(SPECPATH, "build", "ocr_models"))
+
+datas = (
+    collect_data_files("screenmind")
+    # RapidOCR's own default models (PP-OCRv6 small, 31 MB) are never used.
+    + collect_data_files("rapidocr", excludes=["models/*.onnx"])
+    + [(str(f), BUNDLED_MODELS_DIRNAME) for f in _ocr_models]
+)
 binaries = []
 hiddenimports = (
     collect_submodules("screenmind")
@@ -69,7 +83,8 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="ScreenMind.app",
-        bundle_identifier="com.screenmind.app",
+        bundle_identifier="evolve.work.capture",
+        version=__version__,
         info_plist={
             "CFBundleDisplayName": "ScreenMind",
             # Background app: no Dock icon. The UI is the browser dashboard.

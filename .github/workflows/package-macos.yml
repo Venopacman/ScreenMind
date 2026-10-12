@@ -1,0 +1,88 @@
+name: Package (macOS)
+
+# Builds the unsigned macOS app and DMG (Apple Silicon, macOS 14+):
+# ScreenMind-<version>-macos-arm64.dmg. See packaging/macos/ and
+# docs/plans/packaging-spikes.md ("macOS build").
+#
+# Runs on a push to custom that changes packaging or app code, by hand from
+# the Actions tab (workflow_dispatch needs this file on the default branch),
+# and on a version tag, e.g. v0.2.4. A tag also attaches the DMG to the
+# GitHub Release. The DMG is a workflow artifact for internal testers.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [custom]
+    paths:
+      - "packaging/screenmind.spec"
+      - "packaging/entry.py"
+      - "packaging/macos/**"
+      - "screenmind/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/package-macos.yml"
+    tags:
+      - "v*"
+
+permissions:
+  contents: write  # attach the DMG to the release on tags
+
+concurrency:
+  group: package-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    runs-on: macos-15  # arm64
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' screenmind/__init__.py)"
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::Tag '${GITHUB_REF_NAME#v}' does not match screenmind.__version__ '$version'."
+            exit 1
+          fi
+
+      # The OCR models the app ships (F6). RapidOCR checks their SHA-256.
+      - name: Cache OCR models
+        uses: actions/cache@v4
+        with:
+          path: packaging/build/ocr_models
+          key: ocr-models-${{ hashFiles('uv.lock', 'screenmind/engine/ocr.py') }}
+
+      - name: Build app and DMG
+        run: packaging/macos/build.sh
+
+      - name: Smoke test
+        run: packaging/macos/smoke_test.sh
+
+      # Signing and notarization (milestone M2), not set up yet: import the
+      # Developer ID .p12 into a temporary keychain, build with --skip-dmg,
+      # sign the app with hardened runtime, make the DMG with --skip-pyinstaller,
+      # then notarytool submit --wait and stapler staple. Secrets:
+      # MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD, MACOS_KEYCHAIN_PASSWORD,
+      # ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8.
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScreenMind-macos-arm64-dmg
+          path: packaging/dist/ScreenMind-*-macos-arm64.dmg
+          if-no-files-found: error
+          compression-level: 0  # already LZMA-compressed
+          retention-days: 30
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packaging/dist/ScreenMind-*-macos-arm64.dmg
