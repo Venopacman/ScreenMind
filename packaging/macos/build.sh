@@ -65,6 +65,16 @@ if [ "$skip_dmg" -eq 0 ]; then
     trap 'rm -rf "$stage"' EXIT
     ditto "$APP" "$stage/ScreenMind.app"
     ln -s /Applications "$stage/Applications"
-    hdiutil create -quiet -volname ScreenMind -srcfolder "$stage" -format ULMO -ov "$dmg"
+    # hdiutil sometimes fails on CI runners ("Resource busy"), so retry.
+    made=0
+    for attempt in 1 2 3; do
+        if hdiutil create -volname ScreenMind -srcfolder "$stage" -format ULMO -ov "$dmg"; then
+            made=1
+            break
+        fi
+        echo "hdiutil create failed (attempt $attempt of 3)" >&2
+        sleep $((attempt * 10))
+    done
+    [ "$made" -eq 1 ] || { echo "Could not make the DMG" >&2; exit 1; }
     echo "DMG: $dmg ($(du -sm "$dmg" | cut -f1) MB)"
 fi
