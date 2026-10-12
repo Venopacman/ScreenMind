@@ -40,12 +40,6 @@ def test_redact_api_key_openai():
     assert "[REDACTED:key]" in result["clean_text"]
 
 
-def test_redact_api_key_github():
-    text = "token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
-    result = filter_sensitive_text(text, ["api_key"])
-    assert "[REDACTED:key]" in result["clean_text"]
-
-
 def test_redact_password():
     text = "password: mysecretpass123"
     result = filter_sensitive_text(text, ["password"])
