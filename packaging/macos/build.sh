@@ -5,7 +5,10 @@
 #
 # 1. uv sync --frozen
 # 2. PyInstaller with packaging/screenmind.spec (it also fetches the OCR models, F6)
-# 3. A DMG (LZMA) with the app and an Applications link
+# 3. With MACOS_TESTER_P12 and MACOS_TESTER_P12_PASSWORD set: signs the app
+#    with the tester certificate (sign_app.sh), so testers keep their
+#    permission grants across builds. Without them the app stays ad-hoc signed.
+# 4. A DMG (LZMA) with the app and an Applications link
 #
 # Run from anywhere; paths are relative to the repo. Needs uv and Xcode's
 # command line tools (hdiutil, codesign come with macOS).
@@ -47,6 +50,12 @@ if [ "$skip_pyinstaller" -eq 0 ]; then
         --distpath packaging/dist --workpath packaging/build
 fi
 [ -d "$APP" ] || { echo "Missing $APP" >&2; exit 1; }
+if [ -n "${MACOS_TESTER_P12:-}" ]; then
+    "$REPO/packaging/macos/sign_app.sh" "$APP"
+else
+    echo "Signature: ad-hoc (set MACOS_TESTER_P12 and MACOS_TESTER_P12_PASSWORD to sign" \
+         "with the tester certificate)"
+fi
 codesign --verify --deep "$APP"
 echo "App: $(du -sm "$APP" | cut -f1) MB"
 

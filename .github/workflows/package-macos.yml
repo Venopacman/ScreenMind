@@ -59,17 +59,45 @@ jobs:
           path: packaging/build/ocr_models
           key: ocr-models-${{ hashFiles('uv.lock', 'screenmind/engine/ocr.py') }}
 
+      # The person-name model (privacy/person_ner.py pins its revision).
+      - name: Cache person-name model
+        uses: actions/cache@v4
+        with:
+          path: packaging/build/ner-model
+          key: ner-model-${{ hashFiles('screenmind/privacy/person_ner.py') }}
+
+      # One self-signed certificate for every tester build, so macOS keeps
+      # testers' permission grants across builds. Optional: without the
+      # secrets the app stays ad-hoc signed. Made with
+      # packaging/macos/make_tester_cert.sh.
+      - name: Tester certificate
+        env:
+          P12_BASE64: ${{ secrets.MACOS_TESTER_P12_BASE64 }}
+        run: |
+          if [ -z "$P12_BASE64" ]; then
+            echo "::notice::No MACOS_TESTER_P12_BASE64 secret: the app stays ad-hoc signed."
+            exit 0
+          fi
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/tester.p12"
+          echo "MACOS_TESTER_P12=$RUNNER_TEMP/tester.p12" >> "$GITHUB_ENV"
+
       - name: Build app and DMG
+        env:
+          MACOS_TESTER_P12_PASSWORD: ${{ secrets.MACOS_TESTER_P12_PASSWORD }}
         run: packaging/macos/build.sh
 
       - name: Smoke test
         run: packaging/macos/smoke_test.sh
 
-      # Signing and notarization (milestone M2), not set up yet: import the
-      # Developer ID .p12 into a temporary keychain, build with --skip-dmg,
-      # sign the app with hardened runtime, make the DMG with --skip-pyinstaller,
-      # then notarytool submit --wait and stapler staple. Secrets:
-      # MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD, MACOS_KEYCHAIN_PASSWORD,
+      - name: Remove tester certificate
+        if: always()
+        run: rm -f "$RUNNER_TEMP/tester.p12"
+
+      # Developer ID signing and notarization (milestone M2): deferred by the
+      # user on 2026-10-12. When it comes: import the Developer ID .p12 into a
+      # temporary keychain, build with --skip-dmg, sign with hardened runtime,
+      # make the DMG with --skip-pyinstaller, then notarytool submit --wait and
+      # stapler staple. Secrets: MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD,
       # ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8.
 
       - name: Upload DMG

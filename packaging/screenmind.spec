@@ -1,5 +1,6 @@
 # PyInstaller spec for ScreenMind. Unsigned. The app ships the OCR models
-# for the default languages (F6); others download on first use.
+# for the default languages (F6; others download on first use) and the
+# person-name model (138 MB; a frozen app never downloads it).
 #
 # Build from the repo root (macOS or Windows):
 #   uv run --with pyinstaller pyinstaller packaging/screenmind.spec --noconfirm \
@@ -36,11 +37,24 @@ from screenmind.engine.ocr import BUNDLED_MODELS_DIRNAME, fetch_bundled_models  
 
 _ocr_models = fetch_bundled_models(os.path.join(SPECPATH, "build", "ocr_models"))
 
+# Person-name model (privacy/person_ner.py): downloaded once into
+# packaging/build/ner-model (pinned revision, SHA-256 checked) and converted
+# in a child Python, then bundled at models/ner/<name>. The 4 files must stay
+# together: onnxruntime finds model.onnx.data next to model.onnx.
+from pathlib import Path  # noqa: E402
+
+from screenmind.privacy import person_ner  # noqa: E402
+
+_ner_dir = Path(SPECPATH) / "build" / "ner-model"
+if not person_ner.is_installed(_ner_dir):
+    person_ner.install(_ner_dir)
+
 datas = (
     collect_data_files("screenmind")
     # RapidOCR's own default models (PP-OCRv6 small, 31 MB) are never used.
     + collect_data_files("rapidocr", excludes=["models/*.onnx"])
     + [(str(f), BUNDLED_MODELS_DIRNAME) for f in _ocr_models]
+    + [(str(_ner_dir / f), str(person_ner.BUNDLE_SUBDIR)) for f in person_ner.FILES]
 )
 binaries = []
 hiddenimports = (
@@ -83,7 +97,7 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="ScreenMind.app",
-        bundle_identifier="evolve.work.capture",
+        bundle_identifier="com.nebius.evolve.work.capture",
         version=__version__,
         info_plist={
             "CFBundleDisplayName": "ScreenMind",

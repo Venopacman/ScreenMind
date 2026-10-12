@@ -5,8 +5,9 @@
 #
 # The app runs from its own binary with a temp HOME and data dir, capture,
 # UI events and the tray off, and a port from SMOKE_PORT (default 7899).
-# Checks: the bundle has its OCR models (F6) and no rapidocr defaults, OCR on
-# a fixed image inside the app uses them, the dashboard and API answer,
+# Checks: the bundle has its OCR models (F6) and no rapidocr defaults, and
+# the person-name model; both run inside the app (`--self-test`, OCR on a
+# fixed image and a name in a fixed line); the dashboard and API answer,
 # memory after start, and a clean stop through POST /api/shutdown (exit
 # code 0). Prints the log on failure.
 # It does not grab the screen: that needs a start from Finder (see
@@ -37,6 +38,14 @@ if ls "$APP/Contents/Resources/rapidocr/models/"*.onnx >/dev/null 2>&1; then
 fi
 echo "OK OCR models in the bundle"
 
+# The person-name model: all 4 files side by side (onnxruntime finds
+# model.onnx.data next to model.onnx).
+ner="$APP/Contents/Resources/models/ner/distilbert-multilingual-ner-hrl"
+for f in config.json tokenizer.json model.onnx model.onnx.data; do
+    [ -f "$ner/$f" ] || fail "person-name model file missing from the bundle: $f"
+done
+echo "OK person-name model in the bundle ($(du -sm "$ner" | cut -f1) MB)"
+
 TMP="$(mktemp -d)"
 DATA="$TMP/data"
 mkdir -p "$DATA" "$TMP/home"
@@ -47,16 +56,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# OCR inside the frozen app: onnxruntime and the bundled models load and read
-# a fixed image (no screen access needed).
-ocr_out="$(cd "$TMP" && env -i HOME="$TMP/home" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-    DATA_DIR="$DATA" "$BIN" --ocr-self-test "$REPO/packaging/macos/ocr_self_test.png" 2>&1 | tail -1)" \
-    || fail "OCR self-test failed: $ocr_out"
-echo "$ocr_out" | grep -q '"models_dir": "[^"]*/ocr_models"' \
-    || fail "OCR did not use the bundled models: $ocr_out"
-echo "$ocr_out" | grep -q 'Quarterly report' || fail "OCR read the wrong text: $ocr_out"
-[ -z "$(ls -A "$TMP/home")" ] || fail "OCR wrote into HOME: $(find "$TMP/home" | head)"
-echo "OK OCR in the app: $ocr_out"
+# Both models inside the frozen app: OCR reads a fixed image, the person-name
+# model finds the name in a fixed line (no screen access needed).
+out="$(cd "$TMP" && env -i HOME="$TMP/home" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    DATA_DIR="$DATA" "$BIN" --self-test "$REPO/packaging/macos/ocr_self_test.png" 2>&1 | tail -1)" \
+    || fail "self-test failed: $out"
+echo "$out" | grep -q '"models_dir": "[^"]*/ocr_models"' || fail "OCR did not use the bundled models: $out"
+echo "$out" | grep -q 'Quarterly report' || fail "OCR read the wrong text: $out"
+echo "$out" | grep -q '"ner_model_dir": "[^"]*\.app/' || fail "person-name model not loaded from the app: $out"
+echo "$out" | grep -q 'Mangin' || fail "person-name model found no name: $out"
+[ -z "$(ls -A "$TMP/home")" ] || fail "the models wrote into HOME: $(find "$TMP/home" | head)"
+echo "OK models in the app: $out"
 
 start=$(date +%s)
 (cd "$TMP" && exec env -i HOME="$TMP/home" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
