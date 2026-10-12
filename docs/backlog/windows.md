@@ -54,6 +54,15 @@ Then run the e2e check on both machines: the status header row "Settings not at 
 
 ## Fix now
 
+### Packaging after the Gemma removal and F6 (from the Mac, 2026-10-12)
+Status: open, for the Windows laptop session.
+
+- The NSIS installer's `llama\` handling (`packaging/windows/screenmind.nsi`: replace and remove `<install dir>\llama`, from `73cdb1d`) can go: the app ships and installs no `llama-server` any more. Keep removing an old `llama\` folder on update for one release, so testers' installs get cleaned up.
+- The shared spec changed for F6: it fetches the 5 OCR models into `packaging/build/ocr_models` and bundles them as `ocr_models/`, and leaves out rapidocr's default models. Rebuild once and check OCR on a real frame. The app should log `models: ...\_internal\ocr_models`. The build now needs network access the first time (RapidOCR downloads the models and checks their SHA-256).
+- F9: `config.py` sets `ORT_DISABLE_TELEMETRY=1`. On Windows, onnxruntime's telemetry goes through ETW; check that the variable turns it off there too.
+
+Refs: [packaging.md](../plans/packaging.md) F6, F9; [packaging-spikes.md](../plans/packaging-spikes.md) "macOS build".
+
 ### G37: No overall time limit on UIA reads
 Status: fixed 2026-10-08 (steps 1-3 of [uptime.md](../plans/uptime.md)); steps 4-5 open
 

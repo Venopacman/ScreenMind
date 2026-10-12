@@ -10,25 +10,64 @@ Update 2026-10-08: Gemma and llama-server were removed (branch `claude/practical
 
 | | macOS (arm64) | Windows (x64) |
 |---|---|---|
-| Date, commit | 2026-10-08, `custom` 3092a5f (after F1-F4). First run 2026-10-07 on cd95561 (after the strip) | 2026-10-08, `custom` 4f98416 |
-| OS | macOS 26 (Darwin 25.6) | Windows 11 Home 25H2 (build 26200), Ryzen 7 5800H (16 logical), 16 GB |
+| Date, commit | 2026-10-12, the Gemma-removal branch plus F6, F7, F9 and the CI build (merged into `custom` afterwards). Earlier: 2026-10-08 on 3092a5f, 2026-10-07 on cd95561 | 2026-10-08, `custom` 4f98416 |
+| OS | macOS 27.0.1 (macOS 26 until 2026-10-08) | Windows 11 Home 25H2 (build 26200), Ryzen 7 5800H (16 logical), 16 GB |
 | PyInstaller | 6.22.3 (contrib hooks 2026.8), Python 3.14.6 | 6.22.3, Python 3.14.8 (uv) |
-| Build time | 26 s (uv and PyInstaller caches warm). 2026-10-07: 2 min 21 s cold, 25 s warm | 2 min 45 s cold, 1 min 36 s warm |
-| Build result | OK, no spec change since 2026-10-07. Only harmless warnings: pyobjc lazy names, Windows libraries looked up through ctypes (`user32`, `gdi32`, `shcore`, `dwmapi`, `ntdll`), `scipy.special._cdflib`, `pycparser` tables. `ScreenCaptureKit`, `Quartz`, `AppKit`, `HIServices` and `screenmind.watchdog` are picked up without hidden imports | OK after a spec fix: the first build took `msvcp140.dll`, `vcruntime140.dll` and `ucrtbase.dll` from a JDK on `PATH` and crashed on the first OCR frame (see notes). Harmless warnings: `UIAutomationClient_VC140_*.dll` "not found" (bundled anyway), `scipy.special._cdflib`, `tzdata`, `pycparser` tables |
-| App size on disk | 351 MB (`ScreenMind.app`, 563 files). 342 MB on 2639ae1, 343 MB on 2026-10-07, 363 MB before the strip. The +9 MB since 2639ae1 is not looked into | 394 MB (`dist\ScreenMind\`, 331 files) |
-| Compressed | DMG 121 MB (LZMA, 2639ae1, 41 s). 2026-10-07: 157 MB (zlib), 122 MB (LZMA) | zip 172 MB (`Compress-Archive`) |
-| Largest parts | onnxruntime 71 MB, cv2 41 MB + its ffmpeg/X11 libs, scipy 33 MB, rapidocr 31 MB (its unused default models, F6), libpython 18 MB | cv2 112 MB (`cv2.pyd` 82 MB + ffmpeg DLL 29 MB), scipy 46 MB + `scipy.libs` 19 MB, onnxruntime 36 MB, rapidocr 30 MB, `numpy.libs` 20 MB. Two OpenBLAS copies (numpy + scipy), 39 MB. Tcl/Tk DLLs (5 MB) came along |
-| Signature | ad-hoc (PyInstaller default), bundle id `com.screenmind.app` (placeholder). No signing identity on the user's Mac | unsigned |
-| Dashboard up after | 1.7 s (2 s on 2026-10-07) | 6-7 s (first start, includes the DB migration) |
+| Build time | 1 min 33 s with the DMG (`packaging/macos/build.sh`, caches warm; the DMG takes about 40 s). 2026-10-07: 2 min 21 s cold, 25 s warm | 2 min 45 s cold, 1 min 36 s warm |
+| Build result | OK. Only harmless warnings: pyobjc lazy names, Windows libraries looked up through ctypes (`user32`, `gdi32`, `shcore`, `dwmapi`), `scipy.special._cdflib`, `pycparser` tables. `ScreenCaptureKit`, `Quartz`, `AppKit`, `HIServices` and `screenmind.watchdog` are picked up without hidden imports | OK after a spec fix: the first build took `msvcp140.dll`, `vcruntime140.dll` and `ucrtbase.dll` from a JDK on `PATH` and crashed on the first OCR frame (see notes). Harmless warnings: `UIAutomationClient_VC140_*.dll` "not found" (bundled anyway), `scipy.special._cdflib`, `tzdata`, `pycparser` tables |
+| App size on disk | 330 MB (`ScreenMind.app`, 562 files): our 5 OCR models in (25 MB), rapidocr's defaults (31 MB) and the Gemma code out. 351 MB on 3092a5f, 343 MB on 2026-10-07, 363 MB before the strip | 394 MB (`dist\ScreenMind\`, 331 files) |
+| Compressed | DMG 116 MB (LZMA, with an Applications link). 121 MB on 2639ae1; 2026-10-07: 157 MB (zlib), 122 MB (LZMA) | zip 172 MB (`Compress-Archive`) |
+| Largest parts | onnxruntime 71 MB, cv2 41 MB + its ffmpeg/X11 libs, scipy 33 MB, our OCR models 25 MB, libpython 18 MB | cv2 112 MB (`cv2.pyd` 82 MB + ffmpeg DLL 29 MB), scipy 46 MB + `scipy.libs` 19 MB, onnxruntime 36 MB, rapidocr 30 MB, `numpy.libs` 20 MB. Two OpenBLAS copies (numpy + scipy), 39 MB. Tcl/Tk DLLs (5 MB) came along |
+| Signature | ad-hoc (PyInstaller default), bundle id `evolve.work.capture` (since 2026-10-12; before, the placeholder `com.screenmind.app`). No signing identity on the user's Mac | unsigned |
+| Dashboard up after | about 1 s (1.7 s on 2026-10-08, 2 s on 2026-10-07) | 6-7 s (first start, includes the DB migration) |
 | `/`, `/css/styles.css`, `/js/core.js` | 200 | 200 |
 | `/api/status`, `/api/timeline`, `/api/settings`, `/api/models`, `/api/search?q=test`, `/api/stats` | 200 | 200 |
-| onnxruntime loads | yes, before the strip (the embedder loaded). After the strip only OCR uses it, and OCR was not run | yes, OCR ran on a real frame (after the spec fix) |
-| OCR, capture, UI events | not tested (no screen grabs from Claude sessions on macOS) | all work: `mss` grabs, a11y text, the UI events hook (clicks trigger grabs), OCR on a Photos window. Before the spec fix the app crashed on the first OCR frame |
-| Memory after start | 124 MB RSS, 81 MB footprint. 2026-10-07: 123 MB RSS (317 MB before the strip, with the embedder) | 64 MB private working set (USS), 88 MB working set. After one OCR frame: 175 MB USS, 229 MB working set |
-| Clean stop | `POST /api/shutdown`, stopped in 0.7 s, exit code 0 (2 s on 2026-10-07) | `POST /api/shutdown`, stopped in 1.3 s |
+| onnxruntime loads | yes: OCR read a fixed image inside the app from the bundled models in 0.55 s (`--ocr-self-test`) | yes, OCR ran on a real frame (after the spec fix) |
+| OCR, capture, UI events | OCR on a fixed image works (above). Capture and UI events not tested: no screen grabs from Claude sessions on macOS. That is the hand test | all work: `mss` grabs, a11y text, the UI events hook (clicks trigger grabs), OCR on a Photos window. Before the spec fix the app crashed on the first OCR frame |
+| Memory after start | 116-117 MB RSS, 78-79 MB footprint. 2026-10-08: 124 MB RSS, 81 MB footprint; 2026-10-07: 123 MB RSS (317 MB before the strip, with the embedder) | 64 MB private working set (USS), 88 MB working set. After one OCR frame: 175 MB USS, 229 MB working set |
+| Clean stop | `POST /api/shutdown`, exit code 0, under 1 s (2 s on 2026-10-07) | `POST /api/shutdown`, stopped in 1.3 s |
 | OCR benchmark, `default`, 20 frames (memory at end / max; CPU) | 1770 / 1770 MB footprint; 7.1 CPU-s and 1.46 s wall per frame (3024x1964 frames, 10 cores) | 466 / 466 MB USS; 51.0 CPU-s and 6.83 s wall per frame (2560x1600 frames, 16 logical CPUs) |
 | OCR benchmark, `tuned`, 20 frames | 1314 / 1514 MB footprint; 4.3 CPU-s and 2.14 s wall per frame | 453 / 454 MB USS; 24.2 CPU-s and 12.32 s wall per frame |
 | OCR benchmark, `tuned`, 60 frames | 1072 / 1554 MB footprint; 4.4 CPU-s per frame | not run |
+
+## macOS build (2026-10-12)
+
+Unsigned, for internal testers (milestone M0). Files in [`packaging/macos/`](../../packaging/macos/):
+
+- `build.sh`: `uv sync --frozen` > PyInstaller 6.22.3 with `packaging/screenmind.spec` (it fetches the OCR models into `packaging/build/ocr_models` first) > `codesign --verify` > an LZMA DMG with the app and an Applications link. Output: `packaging/dist/ScreenMind.app` and `packaging/dist/ScreenMind-<version>-macos-arm64.dmg`. `--skip-dmg` stops after the app (to sign it first, later), `--skip-pyinstaller` reuses it.
+- `smoke_test.sh [app]`: checks the 5 OCR models are in `Contents/Resources/ocr_models` and rapidocr's defaults are not, runs `ScreenMind --ocr-self-test ocr_self_test.png` (OCR inside the app must read "Quarterly report" from the bundled models and write nothing under `HOME`), starts the app with a temp `HOME` and data dir on port `SMOKE_PORT` (default 7899) with capture, UI events and the tray off, checks 8 dashboard and API paths, prints memory, and stops it through `POST /api/shutdown` (exit code 0, "Goodbye!" in the log, no traceback). About 8 s.
+- `ocr_self_test.png`: two lines of text, 11 KB.
+- CI: [`.github/workflows/package-macos.yml`](../../.github/workflows/package-macos.yml) on `macos-15`. It runs on pushes to `custom` that change `screenmind/`, `packaging/`, `pyproject.toml` or `uv.lock`, by hand from the Actions tab (only once the file is on the default branch, `main`), and on `v*` tags (which also attach the DMG to the release). The DMG is the artifact `ScreenMind-macos-arm64-dmg`, kept 30 days. The OCR models are cached between runs.
+
+Local result on the user's Mac (macOS 27.0.1): build with the DMG 1 min 33 s, app 330 MB, DMG 116 MB, smoke test passed (OCR 0.55 s, 78 MB footprint after start, clean stop).
+
+Found by the smoke test: **onnxruntime telemetry (F9 in [packaging.md](packaging.md)).** With a temp `HOME`, the first OCR run created `Library/Application Support/Microsoft/DeveloperTools/.onnxruntime/` with a `deviceid` and an event database. onnxruntime 1.30 has Microsoft's telemetry client, with the upload address `mobile.events.data.microsoft.com`, on macOS too. The user's Mac has had that folder since 2026-10-06; its event table was empty on 2026-10-12, so whether anything was sent is not known. `config.py` now sets `ORT_DISABLE_TELEMETRY=1`, and the smoke test fails if anything appears under `HOME`. The old folder can be deleted by hand.
+
+Shared spec, so Windows builds change too: the spec now fetches and bundles the 5 OCR models and leaves out rapidocr's defaults (F6). The Windows session should rebuild and check OCR once.
+
+## macOS hand test
+
+For the user, about 15 minutes, on a DMG from the CI run (Actions > Package (macOS) > the latest run on `custom` > artifact `ScreenMind-macos-arm64-dmg`). It tests what a Claude session cannot: a start from Finder, the permission prompts and screen grabs. Write the result next to each step (pass / fail / what you saw).
+
+Before you start:
+
+- The test app uses `~/.screenmind`, the same data folder as the main instance. Stop the main instance first (dashboard Stop button or `POST http://127.0.0.1:7777/api/shutdown`), and start it again at the end. Two copies at once would share the database.
+- The test app uses port 7777 too, so the dashboard is at `http://127.0.0.1:7777`.
+
+Steps:
+
+1. **Open the DMG** in Finder and drag ScreenMind to Applications. Expected: a window with ScreenMind and an Applications link.
+2. **First start from Finder.** Double-click ScreenMind in Applications. Expected: macOS blocks it ("cannot be opened", unsigned). Open System Settings > Privacy & Security, click "Open Anyway", and confirm. Expected: no Dock icon (it is a background app). `http://127.0.0.1:7777` opens the dashboard.
+3. **Screen Recording prompt.** Your settings keep capture on, so capture starts by itself (if not, click Start Capturing). Expected, within a few seconds: a macOS prompt for Screen Recording that names **ScreenMind** (not Terminal or Python). An Input Monitoring prompt for ScreenMind may come too (UI events are on in your settings). Allow them in System Settings. macOS may ask to quit and reopen ScreenMind; do that.
+4. **Screen grabs.** Work normally for 2-3 minutes in two or three apps. Expected: new frames in the dashboard timeline, with the right app names, and real window content (not just the wallpaper). In `~/.screenmind/screenmind.log`: "Screen Recording is allowed", and no "using the screencapture tool" lines (that would mean SCK fell back).
+5. **OCR on a real frame.** Open an app without accessibility text (a photo or a PDF with text, in Preview). Expected: its frame in the timeline has OCR text. The log has "OCR initialized ... models: /Applications/ScreenMind.app/...".
+6. **UI events.** In the dashboard, Settings > Privacy & Security, the UI events permissions show what is missing. Click the button that asks for them. Expected: prompts for Accessibility and Input Monitoring that name **ScreenMind**. After you allow both (and restart if asked), clicks and app switches show up and trigger frames, and the log no longer says "UI events: no Accessibility permission".
+7. **Status.** `http://127.0.0.1:7777/api/status`: `capture.screen_recording` is `true`, and the grab backend is `sck`.
+8. **Stop.** The dashboard Stop button. Expected: the app quits within a few seconds, and the log ends with "Goodbye!".
+9. **Second start.** Open ScreenMind again from Applications. Expected: no new prompts (the grants are kept for the same build).
+10. **Clean up.** Quit ScreenMind. Start the main instance again. Optional: remove the test grants in System Settings (Screen Recording, Accessibility, Input Monitoring: the ScreenMind entries).
+
+Not in this test: start at login (`SMAppService` is not built), the menu bar item and the first-run window (M1), and grants surviving an update (each unsigned build gets new grants).
 
 ## macOS notes (2026-10-08)
 

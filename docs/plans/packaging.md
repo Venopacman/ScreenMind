@@ -1,6 +1,6 @@
 # Ship ScreenMind as an app
 
-Status: 2026-10-08. Fixes F1, F4 and F5 are done. F2 and F3 are obsolete: the Gemma removal (branch `claude/practical-dijkstra-f83cbe`, 2026-10-08) took out the model download and `llama-server`. No model or binary runs for analysis on the device, and no API key lives in the client. Windows has an unsigned NSIS installer, a tray icon and a CI build. macOS has only the spike: rebuilt on `custom` 3092a5f, it builds with no spec change, starts in 1.7 s at 81 MB footprint, and F1 and F4 work there. macOS still has no CI build, no signing, no menu bar, no first-run flow and no tested login item. F6 and the OCR memory fix are open on both OS. F7 (macOS) is partly done. Next macOS steps, each with its reason: [Next steps for macOS](#next-steps-for-macos-2026-10-08). Spike results: [packaging-spikes.md](packaging-spikes.md).
+Status: 2026-10-12. Fixes F1, F4-F7 and F9 are done. F2 and F3 are obsolete: the Gemma removal (branch `claude/practical-dijkstra-f83cbe`) took out the model download and `llama-server`. No model or binary runs for analysis on the device, and no API key lives in the client. Windows has an unsigned NSIS installer, a tray icon and a CI build. macOS has an unsigned `.app` + DMG built in CI (`package-macos.yml`, 330 MB app, 116 MB DMG) with a smoke test that runs OCR inside the app. Bundle id: `evolve.work.capture`. Not built yet: signing, the menu bar, the first-run window, a tested login item, and the OCR worker process. Not tested yet: a start from Finder and screen grabs from the app; that is the user's hand test ([checklist](packaging-spikes.md#macos-hand-test)). Next macOS steps, each with its reason: [Next steps for macOS](#next-steps-for-macos-2026-10-08).
 
 ## Short answer
 
@@ -11,7 +11,7 @@ Two requirements from the user (2026-10-07) shape the plan:
 
 Recommendation:
 
-- **Both OS: freeze with PyInstaller (onedir).** It supports Python 3.14 and has hooks for onnxruntime and keyring. The macOS spike built a working `ScreenMind.app` (343 MB, 122 MB as a DMG) that started in 2 s. The bundler adds no RAM: the frozen app runs the same single Python process.
+- **Both OS: freeze with PyInstaller (onedir).** It supports Python 3.14 and has hooks for onnxruntime and keyring. The macOS build is a working `ScreenMind.app` (330 MB, 116 MB as a DMG on 2026-10-12) that starts in about 1 s. The bundler adds no RAM: the frozen app runs the same single Python process.
 - **macOS: a signed, notarized `.app` in a DMG.** Native minimum UI through pyobjc: a menu bar item (status, pause, quit) and a short first-run window that explains each permission before macOS asks. Start at login uses `SMAppService`, not a LaunchAgent plist.
 - **Windows: an NSIS wizard, per-user install.** The user chose NSIS over Inno Setup for the license (2026-10-08). The wizard explains what is recorded and has a "Start at login" checkbox. A tray item gives status, pause and quit. Uninstall asks whether to delete `%USERPROFILE%\.screenmind`.
 - **Ship no local model.** Done: the Gemma removal (branch `claude/practical-dijkstra-f83cbe`, 2026-10-08) removed Gemma and `llama-server`. The agent collects and labels each frame by rules (app and site). Semantic analysis comes later, off the device, as an LLM over session text. That removes about 4 GB of RAM and a 3 GB download. There is no opt-in local mode. See [Should local LLM analysis ship?](#should-local-llm-analysis-ship).
@@ -150,9 +150,10 @@ These need fixing before any installer is useful. They are small. Most of them a
 | F3 | `setup_llama.py` (`PROJECT_ROOT`) and `model_manager.start_server()` | They decide "pip install vs checkout" with `is_relative_to(site-packages)`. A frozen app looks like a checkout, so `llama/` resolves to a folder inside the app bundle. Installing there breaks the signature, and `/Applications` may not be writable. | Done (34ae529), then obsolete: `setup_llama.py` and `start_server()` were removed with Gemma (2026-10-08). |
 | F4 | `startup.py` `_get_startup_command()`, `main.run()` `--background`, `launcher.py`, `_install_desktop_shortcut()` | They build commands from `sys.executable -m screenmind`, `pythonw.exe` or `launcher.py`. None of these exist in an app. | Done (34ae529) on Windows: the start command is `"<path>\ScreenMind.exe"` alone. That is the value the installer writes under HKCU `Run\ScreenMind`. `--background` and the launcher start the exe. No desktop shortcut, no `launcher.vbs`. macOS: the LaunchAgent plist runs `ScreenMind.app/Contents/MacOS/ScreenMind` (untested). `SMAppService` is still to do. Checked on macOS on 2026-10-08: no desktop shortcut (before 34ae529 the first start wrote `~/Desktop/ScreenMind.command` pointing at `launcher.py` inside the bundle). |
 | F5 | `config._setup_logging()` | A windowed build has no console. Logs go nowhere unless `SCREENMIND_LOG_FILE` is set. | Done earlier (G38): every start logs to `<data dir>/screenmind.log` (rotating), console or not. Checked in the windowed Windows build on 2026-10-08. |
-| F6 | `engine/ocr.py` (`Global.model_root_dir`) | The app ships rapidocr's own default models (31 MB) but never uses them. It downloads other models into `~/.screenmind/models/ocr` on first use. | Ship the 5 models we use inside the app (works offline) and exclude rapidocr's defaults. |
-| F7 | `capture_worker`, `ui_events` permission requests | Screen Recording is never requested explicitly. macOS asks on the first grab, at a random moment. | The first-run window requests each permission on a button press (see [First-run flow](#first-run-flow-native-no-dashboard)). Partly done: Input Monitoring and Accessibility are checked and requested when UI events start (`capture/ui_events/macos.py`). Nothing calls `CGRequestScreenCaptureAccess` yet. |
+| F6 | `engine/ocr.py` (`Global.model_root_dir`) | The app ships rapidocr's own default models (31 MB) but never uses them. It downloads other models into `~/.screenmind/models/ocr` on first use. | Done (2026-10-12): the spec fetches the 5 models we use (25 MB: PP-OCRv6 tiny detection, the classifier, and the `en`, `eslav` and `latin` recognizers) with `fetch_bundled_models()`, which lets RapidOCR check each SHA-256, and bundles them as `ocr_models/`. rapidocr's own defaults are left out. In the app, `_ocr_models_dir()` uses the bundled folder when it has every file the recognizer needs; other languages still download to `~/.screenmind/models/ocr`, never into the bundle. Checked by the macOS smoke test (OCR on a fixed image inside the app). |
+| F7 | `capture_worker`, `ui_events` permission requests | Screen Recording is never requested explicitly. macOS asks on the first grab, at a random moment. | The first-run window requests each permission on a button press (see [First-run flow](#first-run-flow-native-no-dashboard)). Done for testers (2026-10-12): the first capture tick (not on a locked screen) calls `CGPreflightScreenCaptureAccess()` and, without a grant, `CGRequestScreenCaptureAccess()`. A missing grant logs where to allow it, and `/api/status` shows `capture.screen_recording`. Input Monitoring and Accessibility are requested when UI events start (`capture/ui_events/macos.py`). The first-run window with one step per permission is still M1. |
 | F8 | `packaging/screenmind.spec` on Windows | PyInstaller finds the DLLs that extensions link to through `PATH`. Another app's folder on `PATH` (a JDK on the Windows laptop) put an old `msvcp140.dll` 14.16 into the bundle, and onnxruntime crashed on the first OCR frame. | Fixed in the spec (2026-10-08): on Windows the build keeps only `%SystemRoot%` folders on `PATH`. CI should also check the bundled `msvcp140.dll` is 14.40 or newer. |
+| F9 | onnxruntime 1.30 (OCR), every OS | onnxruntime has Microsoft's telemetry client built in, also on macOS. On the user's Mac it created `~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime/` (a `deviceid` from 2026-10-06 and an event queue, empty when looked at on 2026-10-12), and the library holds the upload address `mobile.events.data.microsoft.com`. Whether anything was sent is not known. | Done (2026-10-12): `config.py` sets `ORT_DISABLE_TELEMETRY=1` before any model loads. With it, the frozen app writes nothing under the home folder (checked by the macOS smoke test with a temp `HOME`). The old folder on the user's Mac can be deleted by hand. |
 
 The spikes ran with F1-F7 still in place. The dashboard worked because the test needed none of these paths. F1-F5 are fixed since 2026-10-08. F1 and F4 were checked on macOS the same day; F2 and F3 only on Windows, and both became obsolete when Gemma was removed.
 
@@ -306,7 +307,7 @@ Obsolete: removed (2026-10-08). Kept as a record. It was only for the opt-in loc
 
 ### OCR models
 
-Ship the 5 RapidOCR models we use (25 MB) inside the app. Exclude rapidocr's own defaults (F6).
+Done (F6, 2026-10-12): the app ships the 5 RapidOCR models we use (25 MB). rapidocr's own defaults are left out.
 
 ### Architectures
 
@@ -341,7 +342,7 @@ Plan: the version check in milestone 1. Then pick Sparkle + WinSparkle (keeps th
 
 One workflow on a version tag, a matrix of two jobs:
 
-- `macos-15` (arm64): `uv sync --frozen` > PyInstaller spec > sign (import the `.p12` into a temporary keychain) > DMG > `notarytool submit --wait` > `stapler staple` > upload to the GitHub Release.
+- `macos-15` (arm64): `uv sync --frozen` > PyInstaller spec > sign (import the `.p12` into a temporary keychain) > DMG > `notarytool submit --wait` > `stapler staple` > upload to the GitHub Release. The unsigned part is built (2026-10-12): `.github/workflows/package-macos.yml` runs `packaging/macos/build.sh` and `packaging/macos/smoke_test.sh` on pushes to `custom` that change the app or its packaging, by hand, and on `v*` tags. The DMG is a workflow artifact (kept 30 days).
 - `windows-2025` (x64): `uv sync --frozen` > PyInstaller > sign the exe and DLLs > `makensis` (NSIS from Chocolatey: the image has none) > sign the installer > upload. The unsigned part is built: `.github/workflows/package-windows.yml`.
 
 No Intel macOS job (no Intel build). `macos-13` was retired in 2025-12 anyway. A `windows-11-arm` runner exists for later.
@@ -379,29 +380,27 @@ The unsigned milestone needs no secrets.
 
 Where macOS stands: the spike builds and runs, F1-F5 work, and nothing else for milestone M0 exists on macOS. Each step says what it is, why, what it costs and whether it needs the user. They are in the order we propose to do them.
 
-1. **A macOS CI build (`package-macos.yml`).** `macos-15` runner: `uv sync --frozen`, PyInstaller with `packaging/screenmind.spec`, an `hdiutil` DMG (LZMA), then the spike's smoke test (temp `DATA_DIR`, the 9 endpoints, `POST /api/shutdown`). Unsigned, on dispatch and on `v*` tags, like `package-windows.yml`.
-   - Why: today a macOS build only exists when someone builds it on the user's Mac. CI gives testers a DMG and catches a broken spec on every tag. On Windows the first CI build found the DLL problem (F8), which a local build hid.
-   - Cost: about 30-60 lines, no secrets, a few minutes of runner time per build. Nothing changes on users' machines.
-   - User decision: none.
-2. **Ship our OCR models in the app (F6).** Put the 5 RapidOCR models we use (25 MB) in the bundle and leave out rapidocr's own `PP-OCRv6_*_small` (31 MB).
-   - Why: the app ships 31 MB it never uses, then downloads 25 MB on the first OCR frame. With the models inside, the first run works offline and has no network step that can fail. The app gets about 6 MB smaller.
-   - Cost: a spec change and a lookup in `engine/ocr.py` (bundle first, then `~/.screenmind/models/ocr`).
-   - User decision: none.
-3. **Ask for Screen Recording at a known moment (the rest of F7).** In the app, call `CGPreflightScreenCaptureAccess()` before the first grab and `CGRequestScreenCaptureAccess()` when it is false, then log the result.
-   - Why: today macOS asks at the first grab, at a random moment, with no context. A tester who misses it gets a silent agent. Input Monitoring and Accessibility already work this way. The full first-run window comes in M1; this is the minimum for testers.
-   - Cost: a few lines in the capture start path, macOS only.
-   - User decision: none.
+1. **A macOS CI build (`package-macos.yml`). Done (2026-10-12).** `packaging/macos/build.sh` builds the app and an LZMA DMG with an Applications link. `packaging/macos/smoke_test.sh` checks the bundled OCR models, runs OCR on a fixed image inside the app (`ScreenMind --ocr-self-test`), hits the dashboard and API, and stops the app through `POST /api/shutdown` (exit code 0). It runs with a temp `HOME` and data dir, so it never touches a user's data. The workflow runs on pushes to `custom` that change the app or its packaging, so each merge gives testers a fresh DMG. The repo is public, so macOS runner minutes cost nothing.
+   - Why: a macOS build no longer depends on the user's Mac, and a broken spec shows up on the next push.
+2. **Ship our OCR models in the app (F6). Done (2026-10-12).** See the F6 row.
+   - Why: the first run works offline, with no network step that can fail in the first minute, and the app no longer carries 31 MB of models it never uses.
+3. **Ask for Screen Recording at a known moment (F7). Done (2026-10-12).** See the F7 row.
+   - Why: a tester who misses a prompt at a random moment gets an agent that records only the wallpaper. Now the prompt comes when capture starts, and the log and `/api/status` say when the grant is missing.
+
+While doing these, the smoke test found F9 (onnxruntime telemetry), now off.
+
 4. **OCR in a short-lived worker process.** See lever 2 in [Resource budget](#levers-biggest-first).
    - Why: once OCR runs, the agent holds 1.07-1.5 GB footprint on the Mac. The hard cap is 500 MB. The onnxruntime tuning is done and was not enough. A worker that exits after a batch gives its memory back to the OS. The tier run says OCR improves extraction (1.85 against 1.63 without it), so dropping OCR is not the answer.
    - Cost: the biggest item, a few days. About 100 MB and 1-2 s per batch to load the models again (to measure). The clean-architecture plan moves it behind a `TextRecognizer` port later (its step 16); building it first is fine.
    - User decision: none. It is needed whatever the labeling decision is.
-5. **Hand test of a CI DMG (needs the user, about 10 minutes).** Open the DMG from Finder, then check: the permission prompts name ScreenMind, SCK grabs work, OCR runs on a real frame, and export works.
-   - Why: these are the reasons to ship an `.app` at all, and none of them can be tested from a Claude session. Grabs hang in Claude-started processes ([sck-capture.md](../backlog/sck-capture.md)).
-   - User decision: pick the bundle id before this test (below).
+5. **Hand test of a CI DMG (needs the user, about 15 minutes).** The checklist: [packaging-spikes.md, macOS hand test](packaging-spikes.md#macos-hand-test).
+   - Why: a start from Finder, the permission prompts naming ScreenMind, SCK grabs and OCR on a real frame are the reasons to ship an `.app` at all. None of them can be tested from a Claude session: grabs hang in Claude-started processes ([sck-capture.md](../backlog/sck-capture.md)).
+   - The OCR worker process (step 4) waits until after this first tester build (user decision, 2026-10-12).
+6. **Bundle the person-name model** once the PII branch merges after the Gemma removal (user decision, 2026-10-12: ship it, no download on first use). About +138 MB on disk and +120 MB RAM; the size and budget numbers here get updated then. Check that `model.onnx.data` sits next to `model.onnx` inside `Contents/Resources` after `BUNDLE`.
 
 Decisions that block or shape these steps:
 
-- **Bundle id.** `com.screenmind.app` is a placeholder. TCC grants are tied to the bundle id (and, once signed, the Team ID). If the id changes after testers grant permissions, every tester grants again. It should be a reverse-DNS name of a domain the publisher owns.
+- **Bundle id. Decided (2026-10-12): `evolve.work.capture`** (a short name; a Nebius Academy variant may come later). TCC grants are tied to the bundle id (and, once signed, the Team ID), so a later change makes every tester grant permissions again.
 - **Where labeling runs** (open question 5). Answered for the device (2026-10-08): the macOS app ships no `llama-server` and no Gemma, about 4 GB of RAM and a 3 GB download less. F2 and F3 are obsolete. Where the later semantic step runs (server or vendor API) is still open.
 - **Does the agent keep the HTTP server** (open question 7). The export is an HTTP route today. This decides whether the agent-mode build can drop FastAPI, uvicorn and the dashboard.
 - **Who publishes** (open question 1). Not needed for M0. It blocks signing (M2) and the self-signed certificate trick is the stopgap for testers.
