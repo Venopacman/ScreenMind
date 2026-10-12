@@ -182,8 +182,9 @@ _CONVERT_CODE = (
 
 def install(model_dir: Optional[Path] = None) -> Path:
     """Download the model, check its hashes and save the weights as external
-    data (needs onnxruntime only). Returns the model dir."""
-    import httpx
+    data (needs onnxruntime only). Returns the model dir. Uses urllib, not
+    httpx, which is a dev dependency only."""
+    import urllib.request
 
     d = model_dir or models_dir()
     tmp = d.with_name(d.name + ".download")
@@ -194,12 +195,10 @@ def install(model_dir: Optional[Path] = None) -> Path:
             url = f"https://huggingface.co/{MODEL_REPO}/resolve/{MODEL_REVISION}/{name}"
             path = tmp / Path(name).name
             h = hashlib.sha256()
-            with httpx.stream("GET", url, follow_redirects=True, timeout=60) as r:
-                r.raise_for_status()
-                with open(path, "wb") as f:
-                    for chunk in r.iter_bytes(1 << 20):
-                        f.write(chunk)
-                        h.update(chunk)
+            with urllib.request.urlopen(url, timeout=60) as r, open(path, "wb") as f:
+                while chunk := r.read(1 << 20):
+                    f.write(chunk)
+                    h.update(chunk)
             if h.hexdigest() != sha:
                 raise ValueError(f"{name}: sha256 mismatch")
 
