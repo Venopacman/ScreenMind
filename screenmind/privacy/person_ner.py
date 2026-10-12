@@ -120,8 +120,9 @@ FILES = ("config.json", "tokenizer.json", _MODEL, _WEIGHTS)
 
 
 def models_dir() -> Path:
-    from screenmind.engine.model_manager import _models_dir
-    return _models_dir() / "ner" / MODEL_NAME
+    """~/.screenmind/models/ner/<MODEL_NAME>, shared by every data dir, like
+    the OCR models (engine/ocr.py)."""
+    return Path.home() / ".screenmind" / "models" / "ner" / MODEL_NAME
 
 
 def bundled_dir() -> Optional[Path]:

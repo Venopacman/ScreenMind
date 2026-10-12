@@ -93,14 +93,12 @@ def test_export_manifest_lists_person_only_with_model(detector, monkeypatch):
     assert "person" in filter_types()
 
 
-def test_meeting_title_transcript_and_summary_filtered(detector, tmp_path, monkeypatch):
+def test_meeting_title_filtered(detector, tmp_path, monkeypatch):
     detector("Ivan Petrov")
     db = Database(db_path=tmp_path / "test.db")
-    monkeypatch.setattr(settings, "meeting_transcription", False)
     monkeypatch.setattr(settings, "meeting_apps", "meet")
     meet = {"owner": "Google Chrome", "title": "Meet - 1:1 Ivan Petrov", "pid": 20, "bounds": (0, 0, 800, 600)}
-    with patch.object(aw.AudioWorker, "_init_transcription"), \
-            patch("screenmind.capture.window.get_window_url", return_value=None):
+    with patch("screenmind.capture.window.get_window_url", return_value=None):
         worker = aw.AudioWorker(database=db)
         worker.update([meet], None, now=1000.0)
         worker.update([meet], None, now=1005.0)
