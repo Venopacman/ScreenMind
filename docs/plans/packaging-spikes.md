@@ -38,6 +38,7 @@ Unsigned, for internal testers (milestone M0). Files in [`packaging/macos/`](../
 - `smoke_test.sh [app]`: checks the 5 OCR models are in `Contents/Resources/ocr_models` and rapidocr's defaults are not, and that the 4 person-name model files sit together in `Contents/Resources/models/ner/...`. It runs `ScreenMind --self-test ocr_self_test.png`: inside the app, OCR must read "Quarterly report" from the bundled models, the person-name model must find "Mangin" in a fixed line, and nothing may be written under `HOME`. Then it starts the app with a temp `HOME` and data dir on port `SMOKE_PORT` (default 7899) with capture, UI events and the tray off, checks 8 dashboard and API paths, prints memory, and stops it through `POST /api/shutdown` (exit code 0, "Goodbye!" in the log, no traceback). About 8 s.
 - `ocr_self_test.png`: two lines of text, 11 KB.
 - `make_tester_cert.sh <dir>` and `sign_app.sh [app]`: the self-signed tester certificate and signing with it, from a temporary keychain. `build.sh` signs when `MACOS_TESTER_P12` and `MACOS_TESTER_P12_PASSWORD` are set. Why and what was checked: [packaging.md, Tester builds](packaging.md#tester-builds-one-self-signed-certificate).
+- Phase 1 tester packages are built by hand on the user's Mac, not in CI (user decision, 2026-10-12): [packaging.md, Manual tester releases](packaging.md#9-manual-tester-releases-phase-1). The GitHub workflow below is a stopgap until the move to GitLab.
 - CI: [`.github/workflows/package-macos.yml`](../../.github/workflows/package-macos.yml) on `macos-15`. It runs on pushes to `custom` that change `screenmind/`, `packaging/`, `pyproject.toml` or `uv.lock`, by hand from the Actions tab (only once the file is on the default branch, `main`), and on `v*` tags (which also attach the DMG to the release). The DMG is the artifact `ScreenMind-macos-arm64-dmg`, kept 30 days. The OCR models and the person-name model are cached between runs. With the secrets `MACOS_TESTER_P12_BASE64` and `MACOS_TESTER_P12_PASSWORD` the app is signed with the tester certificate; without them it stays ad-hoc.
 
 Local result on the user's Mac (macOS 27.0.1): build with the DMG 1 min 33 s, app 330 MB, DMG 116 MB, smoke test passed (OCR 0.55 s, 78 MB footprint after start, clean stop). With the person-name model and the tester signature (0033021): 1 min 56 s, app 466 MB, DMG 196 MB, smoke test passed (OCR 0.6 s, the name found, 78 MB footprint after start: the model loads on first use).
@@ -50,7 +51,7 @@ Shared spec, so Windows builds change too: the spec now fetches and bundles the 
 
 ## macOS hand test
 
-For the user, about 20 minutes, on a DMG from the CI run (Actions > Package (macOS) > the latest run on `custom` > artifact `ScreenMind-macos-arm64-dmg`). It tests what a Claude session cannot: a start from Finder, the permission prompts and screen grabs. Write the result next to each step (pass / fail / what you saw).
+For the user, about 20 minutes, on a DMG built on the user's Mac with the tester certificate and downloaded from the distribution channel in a browser, as in [packaging.md, Manual tester releases](packaging.md#9-manual-tester-releases-phase-1) steps 1-7. The download matters: only a downloaded copy has the quarantine mark, so only it goes through Gatekeeper like a tester's. It tests what a Claude session cannot: a start from Finder, the permission prompts and screen grabs. Write the result next to each step (pass / fail / what you saw).
 
 Before you start:
 
@@ -59,7 +60,7 @@ Before you start:
 
 Steps:
 
-1. **Open the DMG** in Finder and drag ScreenMind to Applications. Expected: a window with ScreenMind and an Applications link.
+1. **Open the downloaded DMG.** First check it is the channel copy: `xattr -p com.apple.quarantine ~/Downloads/ScreenMind-<version>-macos-arm64.dmg` prints a value, and `shasum -a 256` of it matches the release note. Open it in Finder and drag ScreenMind to Applications. Expected: a window with ScreenMind and an Applications link.
 2. **First start from Finder.** Double-click ScreenMind in Applications. Expected: macOS blocks it ("cannot be opened": no Developer ID signature). Open System Settings > Privacy & Security, click "Open Anyway", and confirm. Or, in Terminal: `xattr -dr com.apple.quarantine /Applications/ScreenMind.app`, then double-click again. Expected: no Dock icon (it is a background app). `http://127.0.0.1:7777` opens the dashboard.
 3. **Screen Recording prompt.** Your settings keep capture on, so capture starts by itself (if not, click Start Capturing). Expected, within a few seconds: a macOS prompt for Screen Recording that names **ScreenMind** (not Terminal or Python). An Input Monitoring prompt for ScreenMind may come too (UI events are on in your settings). Allow them in System Settings. macOS may ask to quit and reopen ScreenMind; do that.
 4. **Screen grabs.** Work normally for 2-3 minutes in two or three apps. Expected: new frames in the dashboard timeline, with the right app names, and real window content (not just the wallpaper). In `~/.screenmind/screenmind.log`: "Screen Recording is allowed", and no "using the screencapture tool" lines (that would mean SCK fell back).
@@ -68,8 +69,8 @@ Steps:
 7. **Status.** `http://127.0.0.1:7777/api/status`: `capture.screen_recording` is `true`, and the grab backend is `sck`.
 8. **Stop.** The dashboard Stop button. Expected: the app quits within a few seconds, and the log ends with "Goodbye!".
 9. **Second start.** Open ScreenMind again from Applications. Expected: no new prompts (the grants are kept for the same build).
-10. **Signature.** In Terminal: `codesign -d -r- /Applications/ScreenMind.app`. Expected, when CI has the tester certificate: `identifier "com.nebius.evolve.work.capture" and certificate leaf = H"..."`. If it shows a `cdhash` instead, the build is ad-hoc and step 11 will fail by design.
-11. **Grants survive a new build** (only with the tester certificate). Quit ScreenMind. Install a DMG from a later CI run (any newer push to `custom`) over the old app, then start it. Expected: no Screen Recording, Accessibility or Input Monitoring prompt, and frames with window content at once. If macOS asks again, note which permission.
+10. **Signature.** In Terminal: `codesign -d -r- /Applications/ScreenMind.app`. Expected, for a build signed with the tester certificate: `identifier "com.nebius.evolve.work.capture" and certificate leaf = H"..."`. If it shows a `cdhash` instead, the build is ad-hoc and step 11 will fail by design.
+11. **Grants survive a new build** (only with the tester certificate). Quit ScreenMind. Build again with the same certificate (procedure steps 2-7; a new version or the same commit both work, since the build differs anyway), download it from the channel, and install it over the old app. Start it. Expected: no Screen Recording, Accessibility or Input Monitoring prompt, and frames with window content at once. If macOS asks again, note which permission.
 12. **Clean up.** Quit ScreenMind. Start the main instance again. Optional: remove the test grants in System Settings (Screen Recording, Accessibility, Input Monitoring: the ScreenMind entries).
 
 Not in this test: start at login (`SMAppService` is not built) and the menu bar item and the first-run window (M1).

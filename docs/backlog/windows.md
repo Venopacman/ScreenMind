@@ -62,6 +62,7 @@ Status: open, for the Windows laptop session.
 - Bundle id (user decision, 2026-10-12): `com.nebius.evolve.work.capture`. Use the same id wherever Windows needs one: an AppUserModelID for the tray and notifications, and the installer if it names the app.
 - The spec also bundles the person-name model now (138 MB, `models/ner/...`). Check that its 4 files sit together in `_internal\models\ner\...` and that names get redacted in the app.
 - Signing is deferred (user decision, 2026-10-12): the installer stays unsigned. The tester note already covers SmartScreen ("More info" > "Run anyway").
+- Phase 1 tester releases are built by hand (user decision, 2026-10-12): the Windows steps are in [packaging.md](../plans/packaging.md), section 9, "Windows, on the Windows laptop". Build from a clean worktree of the `tester-<version>` commit, add the SHA-256 to the shared release note, and test your own copy downloaded from the channel (Mark of the Web, SmartScreen).
 - F9: `config.py` sets `ORT_DISABLE_TELEMETRY=1`. On Windows, onnxruntime's telemetry goes through ETW; check that the variable turns it off there too.
 
 Refs: [packaging.md](../plans/packaging.md) F6, F9; [packaging-spikes.md](../plans/packaging-spikes.md) "macOS build".

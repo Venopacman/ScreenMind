@@ -1,6 +1,6 @@
 # Ship ScreenMind as an app
 
-Status: 2026-10-12. Fixes F1, F4-F7 and F9 are done. F2 and F3 are obsolete: the Gemma removal took out the model download and `llama-server`. No model or binary runs for analysis on the device, and no API key lives in the client. Windows has an unsigned NSIS installer, a tray icon and a CI build. macOS has a `.app` + DMG built in CI (`package-macos.yml`) with a smoke test that runs both bundled models inside the app. With the person-name model the app is 466 MB and the DMG 196 MB. Bundle id: `com.nebius.evolve.work.capture`. Real code signing and notarization (M2) are deferred by the user (2026-10-12); tester builds are signed with one self-signed certificate so permission grants survive new builds ([Tester builds](#tester-builds-one-self-signed-certificate)). Not built yet: the menu bar, the first-run window, a tested login item and the OCR worker process. Not tested yet: a start from Finder, screen grabs from the app and grants across builds; that is the user's hand test ([checklist](packaging-spikes.md#macos-hand-test)). Next macOS steps: [Next steps for macOS](#next-steps-for-macos-2026-10-08).
+Status: 2026-10-12. Fixes F1, F4-F7 and F9 are done. F2 and F3 are obsolete: the Gemma removal took out the model download and `llama-server`. No model or binary runs for analysis on the device, and no API key lives in the client. Windows has an unsigned NSIS installer, a tray icon and a CI build. macOS has a `.app` + DMG build script and a smoke test that runs both bundled models inside the app. Phase 1 tester packages are built by hand on the user's Mac ([Manual tester releases](#9-manual-tester-releases-phase-1)); CI waits for the move to GitLab. With the person-name model the app is 466 MB and the DMG 196 MB. Bundle id: `com.nebius.evolve.work.capture`. Real code signing and notarization (M2) are deferred by the user (2026-10-12); tester builds are signed with one self-signed certificate so permission grants survive new builds ([Tester builds](#tester-builds-one-self-signed-certificate)). Not built yet: the menu bar, the first-run window, a tested login item and the OCR worker process. Not tested yet: a start from Finder, screen grabs from the app and grants across builds; that is the user's hand test ([checklist](packaging-spikes.md#macos-hand-test)). Next macOS steps: [Next steps for macOS](#next-steps-for-macos-2026-10-08).
 
 ## Short answer
 
@@ -406,6 +406,68 @@ The unsigned milestone needs no secrets.
 - **Windows:** PyInstaller onedir, NSIS per-user wizard (it explains what is recorded), Azure Artifact Signing, tray item. x64 only.
 - **Start with M0** (the strip has landed). Fix OCR memory first: it is needed whatever we decide about labeling. The PyInstaller spec from the spike (`packaging/screenmind.spec`) is the starting point.
 
+## 9. Manual tester releases (phase 1)
+
+User decision (2026-10-12): phase 1 tester packages are built by hand, with no CI. The macOS package is built on the user's Mac, the Windows one on the Windows laptop. CI comes after the move to GitLab (section 7).
+
+### Distribution channel (open, for the user)
+
+| Option | For | Against |
+|---|---|---|
+| **A shared Google Drive folder** (proposed) | No setup. Access by company account, and you can remove someone. A browser download gives the real quarantine mark (macOS) and Mark of the Web (Windows), so testers see the real Gatekeeper and SmartScreen path. One folder per version keeps old builds for rollback. | No download stats. Drive may warn that it "can't scan this file for viruses" (over 100 MB). |
+| S3, uploaded by hand | The same place the planned updater uses ([updates.md](updates.md)), so links and layout carry over. | Needs a bucket, access rules and AWS credentials on the user's Mac now. Presigned links expire. |
+| Slack (file in a channel or DM) | Fastest for a handful of testers. | Files scatter across messages, are hard to retract, and are easy to forward outside the tester group. |
+
+Proposal: Google Drive for phase 1, and S3 when the updater comes. Below, "the channel" is whatever the user picks.
+
+### Version and tag
+
+- One version for both OS: `__version__` in `screenmind/__init__.py` (`pyproject.toml` reads it). Use plain numbers (`0.3.0`): macOS puts it in `CFBundleShortVersionString`, which must be `x.y.z`.
+- Tag the release commit `tester-<version>`. **Do not use a `v*` tag.** A pushed `v*` tag starts `publish.yml` (PyPI) and the two packaging workflows, which make a GitHub Release. The user decided on no GitHub Releases. A `tester-*` tag starts nothing.
+
+### macOS, on the user's Mac
+
+Once, before the first release:
+
+```bash
+packaging/macos/make_tester_cert.sh ~/screenmind-tester-cert
+```
+
+It prints a password. Keep the `.p12` and the password together, for example in your password manager. They stay on this Mac and go into no CI. A new certificate makes every tester grant permissions again.
+
+Each release:
+
+1. **Bump the version** on `custom`: edit `__version__`, commit `release: <version>`, then `git tag tester-<version>` and push `custom` and the tag.
+2. **Build from a clean copy of that commit**, not from the main checkout. `build.sh` runs `uv sync --frozen`, which would change the main instance's `.venv` while it runs:
+   ```bash
+   git -C ~/projects/ScreenMind worktree add ~/screenmind-release tester-<version>
+   cd ~/screenmind-release
+   read -rs MACOS_TESTER_P12_PASSWORD && export MACOS_TESTER_P12_PASSWORD
+   MACOS_TESTER_P12=~/screenmind-tester-cert/screenmind-tester.p12 packaging/macos/build.sh
+   ```
+   Expected: "Signed ... Designated requirement: identifier "com.nebius.evolve.work.capture" and certificate leaf = H"..."". If it says "Signature: ad-hoc", the certificate was not found; stop.
+3. **Smoke test**, with the main instance still running (it uses port 7899 and temp folders):
+   ```bash
+   packaging/macos/smoke_test.sh
+   ```
+4. **Checksum:**
+   ```bash
+   shasum -a 256 packaging/dist/ScreenMind-<version>-macos-arm64.dmg
+   ```
+5. **Release note**, `ScreenMind-<version>-release-note.txt`, next to the DMG in the channel: version, commit, date, the SHA-256 of each package, what changed for testers (a few lines from `git log tester-<previous>..tester-<version>`), known issues, and the tester steps (open the DMG, "Open Anyway", allow Screen Recording, Accessibility and Input Monitoring).
+6. **Upload** the DMG and the note to the channel, in a folder named after the version.
+7. **Get your own copy through the channel.** Download the DMG from the channel in a browser, as a tester would. A DMG you built yourself has no quarantine mark, so it skips Gatekeeper, and that path would go untested. Check the mark and the checksum:
+   ```bash
+   xattr -p com.apple.quarantine ~/Downloads/ScreenMind-<version>-macos-arm64.dmg
+   shasum -a 256 ~/Downloads/ScreenMind-<version>-macos-arm64.dmg
+   ```
+   The first command must print a value, and the checksum must match step 4. Install from this copy and run the [hand test](packaging-spikes.md#macos-hand-test).
+8. **Tell testers** only after the hand test passes. Then remove the build copy: `git -C ~/projects/ScreenMind worktree remove ~/screenmind-release`.
+
+### Windows, on the Windows laptop (note for the laptop session)
+
+The same steps with `packaging/windows/build.ps1`, from a clean worktree of the same `tester-<version>` commit. No certificate: the installer stays unsigned (signing is deferred). Checksum: `Get-FileHash packaging\dist\ScreenMind-<version>-win-x64-setup.exe -Algorithm SHA256`. Add it to the same release note. Then download your own copy from the channel in a browser. Check the Mark of the Web with `Get-Content <file> -Stream Zone.Identifier` (it must show `ZoneId=3`), so the SmartScreen "More info" > "Run anyway" path really gets tested. The tester note is in [packaging-spikes.md](packaging-spikes.md#tester-note).
+
 ## Next steps for macOS (2026-10-08)
 
 Where macOS stands: the spike builds and runs, F1-F5 work, and nothing else for milestone M0 exists on macOS. Each step says what it is, why, what it costs and whether it needs the user. They are in the order we propose to do them.
@@ -423,7 +485,7 @@ While doing these, the smoke test found F9 (onnxruntime telemetry), now off.
    - Why: once OCR runs, the agent holds 1.07-1.5 GB footprint on the Mac. The hard cap is 500 MB. The onnxruntime tuning is done and was not enough. A worker that exits after a batch gives its memory back to the OS. The tier run says OCR improves extraction (1.85 against 1.63 without it), so dropping OCR is not the answer.
    - Cost: the biggest item, a few days. About 100 MB and 1-2 s per batch to load the models again (to measure). The clean-architecture plan moves it behind a `TextRecognizer` port later (its step 16); building it first is fine.
    - User decision: none. It is needed whatever the labeling decision is.
-5. **Hand test of a CI DMG (needs the user, about 20 minutes).** The checklist: [packaging-spikes.md, macOS hand test](packaging-spikes.md#macos-hand-test).
+5. **Hand test of a locally built DMG (needs the user, about 20 minutes).** Built and downloaded through the channel as in [Manual tester releases](#9-manual-tester-releases-phase-1). The checklist: [packaging-spikes.md, macOS hand test](packaging-spikes.md#macos-hand-test).
    - Why: a start from Finder, the permission prompts naming ScreenMind, SCK grabs and OCR on a real frame are the reasons to ship an `.app` at all. None of them can be tested from a Claude session: grabs hang in Claude-started processes ([sck-capture.md](../backlog/sck-capture.md)).
    - The OCR worker process (step 4) waits until after this first tester build (user decision, 2026-10-12).
 6. **Bundle the person-name model. Done (2026-10-12).** See [Person-name model](#person-name-model). The 4 files sit side by side in `Contents/Resources/models/ner/...` after `BUNDLE`, and the smoke test runs the model inside the app.
