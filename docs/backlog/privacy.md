@@ -35,3 +35,10 @@ Status: idea
 Status: idea
 
 Every name becomes `[REDACTED:person]`, so workflow extraction can't tell that two frames talk to the same colleague. A local, salted hash per name (`[REDACTED:person:3f2a]`) would keep that without the name. The salt must stay on the device. A name list could reverse unsalted hashes.
+
+### Measure the filter on a labelled PII dataset
+Status: blocked on the dataset
+
+The only accuracy numbers are a small synthetic set (41 lines) and a look at real screens. Russian is the least proven: the model is not trained on it. A labelled set is being built by the "PII data processing P0" story. It shares our label names (`person`, `email`, `phone`, `iban`, `credit_card`, `ssn`, `api_key`, `jwt`, `password`, plus labels we don't detect) and a JSONL format: `id`, `lang`, `source`, `tool`, `text`, `spans` (code-point offsets, end exclusive), `negatives`. v1 covers text attachments, EN/RU (2026-10-12). Its OCR/a11y slice is parked. When a file exists, report precision and recall per label and per language, and the latency.
+
+Refs: `data_filter.filter_sensitive_text()`, `tests/test_person_ner.py` (`POSITIVE`, `NEGATIVE`).
