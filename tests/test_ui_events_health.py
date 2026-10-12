@@ -13,15 +13,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from screenmind.capture.ui_events import recorder as recorder_mod
-from screenmind.capture.ui_events.base import PermissionStatus
-from screenmind.capture.ui_events.models import RawEvent
-from screenmind.capture.ui_events.recorder import UiEventRecorder
-from screenmind.config import Settings, settings
+from evolve_capture.capture.ui_events import recorder as recorder_mod
+from evolve_capture.capture.ui_events.base import PermissionStatus
+from evolve_capture.capture.ui_events.models import RawEvent
+from evolve_capture.capture.ui_events.recorder import UiEventRecorder
+from evolve_capture.config import Settings, settings
 
 from test_ui_events import FakeBackend, ui_settings  # noqa: F401
 
-LOGGER = "screenmind.capture.ui_events"
+LOGGER = "evolve_capture.capture.ui_events"
 
 
 def click(ts):
@@ -208,7 +208,7 @@ class TestHealth:
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS backend")
 class TestMacOSTapFallback:
     def _backend(self, results):
-        from screenmind.capture.ui_events.macos import MacOSUiEventBackend
+        from evolve_capture.capture.ui_events.macos import MacOSUiEventBackend
         b = MacOSUiEventBackend.__new__(MacOSUiEventBackend)
         q = MagicMock()
         q.kCGEventLeftMouseDown, q.kCGEventRightMouseDown, q.kCGEventKeyDown = 1, 3, 10
@@ -236,7 +236,7 @@ class TestMacOSTapFallback:
 
     def test_clicks_only_without_input_monitoring(self, caplog):
         b, q = self._backend([None, object()])
-        with caplog.at_level(logging.INFO, logger="screenmind.capture.ui_events.macos"):
+        with caplog.at_level(logging.INFO, logger="evolve_capture.capture.ui_events.macos"):
             assert self._run(b)
         assert b.tap_stats()["keys_tapped"] is False
         mouse_mask = (1 << 1) | (1 << 3)
@@ -245,7 +245,7 @@ class TestMacOSTapFallback:
 
     def test_no_tap_at_all(self, caplog):
         b, q = self._backend([None, None])
-        with caplog.at_level(logging.INFO, logger="screenmind.capture.ui_events.macos"):
+        with caplog.at_level(logging.INFO, logger="evolve_capture.capture.ui_events.macos"):
             assert not self._run(b)
         assert any("Nothing will be recorded" in m for m in messages(caplog, logging.WARNING))
 

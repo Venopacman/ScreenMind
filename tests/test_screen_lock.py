@@ -12,8 +12,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from screenmind.capture.ui_events.models import ALL_EVENT_TYPES, describe_event
-from screenmind.workers.capture_worker import CaptureWorker
+from evolve_capture.capture.ui_events.models import ALL_EVENT_TYPES, describe_event
+from evolve_capture.workers.capture_worker import CaptureWorker
 
 
 def _worker(db=None):
@@ -25,14 +25,14 @@ def _worker(db=None):
 
 
 def _set_locked(monkeypatch, value):
-    monkeypatch.setattr("screenmind.workers.capture_worker.is_screen_locked", lambda: value)
+    monkeypatch.setattr("evolve_capture.workers.capture_worker.is_screen_locked", lambda: value)
 
 
 class TestCaptureWorker:
     async def test_locked_screen_grabs_nothing(self, monkeypatch):
         _set_locked(monkeypatch, True)
         worker = _worker()
-        with patch("screenmind.workers.capture_worker.get_active_app_name") as app:
+        with patch("evolve_capture.workers.capture_worker.get_active_app_name") as app:
             await worker._capture_tick(trigger="periodic")
             await worker._capture_tick(trigger="click")
         worker._screen.capture.assert_not_called()
@@ -45,8 +45,8 @@ class TestCaptureWorker:
         worker = _worker()
         await worker._capture_tick()
         _set_locked(monkeypatch, False)
-        with patch("screenmind.workers.capture_worker.get_active_app_name", return_value="Claude"), \
-             patch("screenmind.workers.capture_worker.get_active_window_title", return_value="Claude"):
+        with patch("evolve_capture.workers.capture_worker.get_active_app_name", return_value="Claude"), \
+             patch("evolve_capture.workers.capture_worker.get_active_window_title", return_value="Claude"):
             await worker._capture_tick()
         worker._screen.capture.assert_called_once()
         assert worker.stats["screen_locked"] is False
@@ -63,7 +63,7 @@ class TestCaptureWorker:
     async def test_lock_logged_once(self, monkeypatch, caplog):
         _set_locked(monkeypatch, True)
         worker = _worker()
-        with caplog.at_level("INFO", logger="screenmind.workers.capture_worker"):
+        with caplog.at_level("INFO", logger="evolve_capture.workers.capture_worker"):
             for _ in range(3):
                 await worker._capture_tick()
         assert sum("Screen locked" in r.message for r in caplog.records) == 1
@@ -94,7 +94,7 @@ class TestMarkerEventType:
 
 class TestWindowHelper:
     def test_failing_adapter_never_stops_capture(self):
-        from screenmind.capture import window
+        from evolve_capture.capture import window
 
         broken = MagicMock()
         broken.is_screen_locked.side_effect = RuntimeError("boom")
@@ -102,7 +102,7 @@ class TestWindowHelper:
             assert window.is_screen_locked() is False
 
     def test_base_adapter_says_unlocked(self):
-        from screenmind.platform_support.base import PlatformAdapter
+        from evolve_capture.platform_support.base import PlatformAdapter
         assert PlatformAdapter.is_screen_locked(MagicMock()) is False
 
 
@@ -110,7 +110,7 @@ class TestWindowHelper:
 class TestMacOSAdapter:
     @pytest.fixture
     def adapter(self):
-        from screenmind.platform_support.macos import MacOSAdapter
+        from evolve_capture.platform_support.macos import MacOSAdapter
         return MacOSAdapter()
 
     @pytest.fixture

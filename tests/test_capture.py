@@ -3,7 +3,7 @@
 import pytest
 from PIL import Image
 
-from screenmind.capture.dedup import ScreenDeduplicator
+from evolve_capture.capture.dedup import ScreenDeduplicator
 
 
 def test_dedup_first_frame_never_duplicate():
@@ -62,7 +62,7 @@ def test_dedup_threshold_sensitivity():
 
 def _fake_capture(monkeypatch, slow_seconds):
     """ScreenCapture with a fake mss and a fake screencapture tool."""
-    from screenmind.capture import screen
+    from evolve_capture.capture import screen
 
     class Raw:
         size = (2, 2)
@@ -129,7 +129,7 @@ def _fake_sck(monkeypatch, displays, shot="ok"):
     ('late' keeps the handler in calls["late"] for the test to call)."""
     import sys
     import types
-    from screenmind.capture import sck
+    from evolve_capture.capture import sck
 
     calls = {"content": 0, "shots": [], "shot": shot, "late": [], "now": 1000.0}
     monkeypatch.setattr(sck, "_clock", lambda: calls["now"])
@@ -213,12 +213,12 @@ def test_sck_refetches_displays_for_unknown_frame(monkeypatch):
 
 
 def _sck_lines(caplog):
-    return [r.getMessage() for r in caplog.records if r.name == "screenmind.capture.sck"]
+    return [r.getMessage() for r in caplog.records if r.name == "evolve_capture.capture.sck"]
 
 
 def test_sck_timeout_cools_down_then_probe_brings_it_back(monkeypatch, caplog):
     import logging
-    caplog.set_level(logging.INFO, logger="screenmind.capture.sck")
+    caplog.set_level(logging.INFO, logger="evolve_capture.capture.sck")
     grabber, calls = _fake_sck(monkeypatch, [_FakeDisplay(1, 0, 0, 1512, 982)])
     assert grabber.grab(_MAIN) is not None
 
@@ -246,7 +246,7 @@ def test_sck_timeout_cools_down_then_probe_brings_it_back(monkeypatch, caplog):
 def test_sck_backoff_grows_and_caps(monkeypatch, caplog):
     import logging
     import re
-    caplog.set_level(logging.INFO, logger="screenmind.capture.sck")
+    caplog.set_level(logging.INFO, logger="evolve_capture.capture.sck")
     grabber, calls = _fake_sck(monkeypatch, [_FakeDisplay(1, 0, 0, 1512, 982)])
     grabber.grab(_MAIN)
     calls["shot"] = "hang"
@@ -296,8 +296,8 @@ def test_sck_late_grab_answer_is_dropped(monkeypatch):
 
 def test_sck_never_worked_stops_after_two_probes(monkeypatch, caplog):
     import logging
-    from screenmind.capture import sck
-    caplog.set_level(logging.INFO, logger="screenmind.capture.sck")
+    from evolve_capture.capture import sck
+    caplog.set_level(logging.INFO, logger="evolve_capture.capture.sck")
     grabber, calls = _fake_sck(monkeypatch, [_FakeDisplay(1, 0, 0, 1512, 982)], shot="hang")
     assert grabber.grab(_MAIN) is None  # the one 3 s stall at start
     for _ in range(sck._MAX_PROBES_NEVER_WORKED):
@@ -314,8 +314,8 @@ def test_sck_never_worked_stops_after_two_probes(monkeypatch, caplog):
 
 def test_sck_backoff_resets_only_after_stable_period(monkeypatch, caplog):
     import logging
-    from screenmind.capture import sck
-    caplog.set_level(logging.INFO, logger="screenmind.capture.sck")
+    from evolve_capture.capture import sck
+    caplog.set_level(logging.INFO, logger="evolve_capture.capture.sck")
     grabber, calls = _fake_sck(monkeypatch, [_FakeDisplay(1, 0, 0, 1512, 982)])
     grabber.grab(_MAIN)
 
@@ -345,7 +345,7 @@ def test_sck_backoff_resets_only_after_stable_period(monkeypatch, caplog):
 
 
 def test_sck_errors_cool_down_after_a_few(monkeypatch):
-    from screenmind.capture import sck
+    from evolve_capture.capture import sck
     grabber, calls = _fake_sck(monkeypatch, [_FakeDisplay(1, 0, 0, 1512, 982)], shot="error")
     for _ in range(sck._MAX_ERRORS - 1):
         assert grabber.grab(_MAIN) is None and not grabber.disabled
@@ -362,7 +362,7 @@ def test_cgimage_to_pil_keeps_colors():
     )
     Quartz.CGContextSetRGBFillColor(ctx, 1.0, 0.5, 0.0, 1.0)
     Quartz.CGContextFillRect(ctx, Quartz.CGRectMake(0, 0, w, h))
-    from screenmind.capture.sck import cgimage_to_pil
+    from evolve_capture.capture.sck import cgimage_to_pil
     img = cgimage_to_pil(Quartz.CGBitmapContextCreateImage(ctx))
     assert img.mode == "RGB" and img.size == (w, h)
     r, g, b = img.getpixel((0, 0))
@@ -386,7 +386,7 @@ def test_grab_order_sck_then_tool_then_mss(monkeypatch):
     cap._grab(mon)
     assert tool_calls == [mon] and sct.grabs == 0
 
-    from screenmind.capture import screen
+    from evolve_capture.capture import screen
     monkeypatch.setattr(screen, "_grab_screencapture", lambda m: None)  # tool fails too
     cap._grab(mon)
     assert sct.grabs == 1
@@ -404,7 +404,7 @@ def test_grab_logs_backend_once_and_on_switch(monkeypatch, caplog):
 
     cap._sck = Grabber()
     mon = {"left": 0, "top": 0, "width": 2, "height": 2}
-    with caplog.at_level(logging.INFO, logger="screenmind.capture.screen"):
+    with caplog.at_level(logging.INFO, logger="evolve_capture.capture.screen"):
         cap._grab(mon)
         cap._grab(mon)
         Grabber.result = None
@@ -428,7 +428,7 @@ def test_grab_logs_switch_back_to_sck(monkeypatch, caplog):
 
     cap._sck = Grabber()
     mon = {"left": 0, "top": 0, "width": 2, "height": 2}
-    with caplog.at_level(logging.INFO, logger="screenmind.capture.screen"):
+    with caplog.at_level(logging.INFO, logger="evolve_capture.capture.screen"):
         cap._grab(mon)
         Grabber.result = None
         cap._grab(mon)

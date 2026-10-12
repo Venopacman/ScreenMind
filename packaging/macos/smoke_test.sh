@@ -1,7 +1,7 @@
 #!/bin/bash
 # Starts the built app once and stops it, without touching the user's data.
 #
-#   packaging/macos/smoke_test.sh [path/to/ScreenMind.app]
+#   packaging/macos/smoke_test.sh [path/to/EvolveCapture.app]
 #
 # The app runs from its own binary with a temp HOME and data dir, capture,
 # UI events and the tray off, and a port from SMOKE_PORT (default 7899).
@@ -15,8 +15,8 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-APP="${1:-$REPO/packaging/dist/ScreenMind.app}"
-BIN="$APP/Contents/MacOS/ScreenMind"
+APP="${1:-$REPO/packaging/dist/EvolveCapture.app}"
+BIN="$APP/Contents/MacOS/EvolveCapture"
 PORT="${SMOKE_PORT:-7899}"
 BASE="http://127.0.0.1:$PORT"
 
@@ -49,7 +49,7 @@ echo "OK person-name model in the bundle ($(du -sm "$ner" | cut -f1) MB)"
 TMP="$(mktemp -d)"
 DATA="$TMP/data"
 mkdir -p "$DATA" "$TMP/home"
-LOG="$DATA/screenmind.log"
+LOG="$DATA/evolve-capture.log"
 cleanup() {
     if [ -n "${PID:-}" ] && kill -0 "$PID" 2>/dev/null; then kill -9 "$PID" 2>/dev/null || true; fi
     rm -rf "$TMP"
@@ -70,7 +70,7 @@ echo "OK models in the app: $out"
 
 start=$(date +%s)
 (cd "$TMP" && exec env -i HOME="$TMP/home" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-    DATA_DIR="$DATA" SCREENMIND_DATA_DIR="$DATA" \
+    DATA_DIR="$DATA" EVOLVE_CAPTURE_DATA_DIR="$DATA" \
     API_PORT="$PORT" SETUP_COMPLETE=true CAPTURE_ON_START=false \
     UI_EVENTS_ENABLED=false TRAY_ICON=false \
     "$BIN" >"$TMP/stdout.txt" 2>&1) &

@@ -2,7 +2,7 @@
 
 From the session "SCK capture" (2026-10-07).
 
-Done on `custom`: `screenmind/capture/sck.py` grabs each display with `SCScreenshotManager`. `ScreenCapture._grab()` tries SCK, then the `screencapture` tool, then mss. After one SCK timeout (3 s) the process uses the tool for a cool-down, then probes SCK again (see "SCK comes back after a fallback" below). `scripts/sck-bench.py` times the backends per display.
+Done on `custom`: `evolve_capture/capture/sck.py` grabs each display with `SCScreenshotManager`. `ScreenCapture._grab()` tries SCK, then the `screencapture` tool, then mss. After one SCK timeout (3 s) the process uses the tool for a cool-down, then probes SCK again (see "SCK comes back after a fallback" below). `scripts/sck-bench.py` times the backends per display.
 
 Live: the main instance (started from Terminal.app, restarted 14:06 on `81bb786`) logs `Screen grab backend: sck` and saves a frame every ~10 s. From Terminal.app, an SCK grab takes ~43 ms against ~250 ms for the `screencapture` tool. Colors match (mean diff 1.19 per channel).
 
@@ -23,14 +23,14 @@ The first bench run from Terminal.app (`scripts/sck-bench.py`) timed out after 3
 ### macOS "still recording your screen" reminder
 Status: open
 
-macOS 15+ can show a periodic reminder or ask again to allow screen recording for apps that capture without a picker. Nobody has seen it for ScreenMind yet. If it shows up, note how often and whether a grab blocks while it is open. A blocked grab hits the 3 s timeout and the process uses the `screencapture` tool until a probe works.
+macOS 15+ can show a periodic reminder or ask again to allow screen recording for apps that capture without a picker. Nobody has seen it for Evolve Capture yet. If it shows up, note how often and whether a grab blocks while it is open. A blocked grab hits the 3 s timeout and the process uses the `screencapture` tool until a probe works.
 
 ### SCK comes back after a fallback
 Status: done 2026-10-08, waiting for a live check on the main instance
 
 Before: one SCK timeout made the process use the `screencapture` tool until restart. On 2026-10-07 the main instance used SCK from 18:09:38, one request timed out at 18:10:50, and it stayed on the tool (~250 ms per grab instead of ~43 ms).
 
-Now (`SCKGrabber` in `screenmind/capture/sck.py`):
+Now (`SCKGrabber` in `evolve_capture/capture/sck.py`):
 
 - A timeout, or 3 errors in a row, start a 5 min cool-down. Grabs use the tool.
 - Then one probe: a screenshot request that the capture tick does not wait for. It reuses the cached display, so it makes no blocking call. The next tick reads the answer. An answer within 3 s brings SCK back.
@@ -45,12 +45,12 @@ Log lines: `ScreenCaptureKit timed out (...); using the screencapture tool, next
 
 Live check from a Claude session (2026-10-08): one 3 s stall at start, the 2 probes cost nothing, then `SCK never worked in this process, so using the screencapture tool from now on`. Still to check: the main instance after a real timeout. Look for the "answered a probe" line after a "timed out" line.
 
-Refs: `SCKGrabber.grab()`, `_probe_says_back()`, `_send_probe()`, `status()` in `screenmind/capture/sck.py`; `ScreenCapture.grab_status()` in `screenmind/capture/screen.py`.
+Refs: `SCKGrabber.grab()`, `_probe_says_back()`, `_send_probe()`, `status()` in `evolve_capture/capture/sck.py`; `ScreenCapture.grab_status()` in `evolve_capture/capture/screen.py`.
 
 ### Leave windows out of screenshots
 Status: idea
 
-`SCContentFilter` can exclude windows. Use it to leave out ScreenMind's own dashboard tab, or the windows of blocked apps instead of skipping the whole display (`CaptureWorker._capture_tick()` skips the display today). Ask the user first.
+`SCContentFilter` can exclude windows. Use it to leave out Evolve Capture's own dashboard tab, or the windows of blocked apps instead of skipping the whole display (`CaptureWorker._capture_tick()` skips the display today). Ask the user first.
 
 ### Find out why grabs hang in Claude-started processes
 Status: open, low priority

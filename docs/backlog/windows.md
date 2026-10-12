@@ -4,7 +4,7 @@ From the session "Win data quality" (2026-10-07/08) on the Windows 11 laptop (RT
 
 ## Principle: lowest resource use
 
-The long-term aim is to use as few resources as possible (CPU, RAM, GPU, battery). So items that would make ScreenMind heavier, such as tuning Gemma per frame onto the GPU, are parked rather than done. See also the resource budget in [packaging.md](../plans/packaging.md).
+The long-term aim is to use as few resources as possible (CPU, RAM, GPU, battery). So items that would make Evolve Capture heavier, such as tuning Gemma per frame onto the GPU, are parked rather than done. See also the resource budget in [packaging.md](../plans/packaging.md).
 
 ## State of this machine
 
@@ -16,19 +16,19 @@ Status: open
 ### Main instance on old code
 Status: open
 
-On 2026-10-08 the main instance still ran `0cac8fa` on the old pip `.venv` (Python 3.12). It needs `git pull`, `uv sync` (from the user's own terminal, see "Claude sessions and AppData" below) and a restart, which runs migration v11. A backup made with SQLite's backup API is at `~/.screenmind/screenmind.db.pre-v11` (schema v10, 495 activities, integrity ok).
+On 2026-10-08 the main instance still ran `0cac8fa` on the old pip `.venv` (Python 3.12). It needs `git pull`, `uv sync` (from the user's own terminal, see "Claude sessions and AppData" below) and a restart, which runs migration v11. A backup made with SQLite's backup API is at `~/.evolve-capture/evolve-capture.db.pre-v11` (schema v10, 495 activities, integrity ok).
 
 ### Settings cleanup (both machines)
 Status: Windows done 2026-10-08 (11:51 start logs only `capture_interval` and `ui_events_types`, both code defaults since `8313d26`/`5c419f8`, so they go away once the main instance runs that code); Mac open
 
-Since `c377a8c` (G39) the code defaults are the shared settings, and the dashboard stores only values that differ from them. Existing files still hold the defaults of the day they were written, and ScreenMind never rewrites them at startup. Clean them up once, with ScreenMind stopped (it writes `settings.json` on pause and resume), then start it and check the log line "Settings that differ from the defaults" in `~/.screenmind/screenmind.log`.
+Since `c377a8c` (G39) the code defaults are the shared settings, and the dashboard stores only values that differ from them. Existing files still hold the defaults of the day they were written, and Evolve Capture never rewrites them at startup. Clean them up once, with Evolve Capture stopped (it writes `settings.json` on pause and resume), then start it and check the log line "Settings that differ from the defaults" in `~/.evolve-capture/evolve-capture.log`.
 
 The user's decisions of 2026-10-08, per key:
 - `capture_interval: 10`: the code default since 2026-10-08, so the key has no effect once the main instance runs that code, and can go then.
 - `ui_events_types: "click,app_switch,text,clipboard"`: the code default since 2026-10-08 (the user's call on G31), so this key too can go once the main instance runs that code. No Mac step. Typed text and clipboard stay on, with the sensitive-data filter and password redaction. G31 stays open.
 - `performance_mode`: Windows follows the default (`balanced`). The Mac keeps `maximum` on purpose: with `balanced`, Apple Silicon ran Gemma on about 4 CPU cores and took 10.5 s per frame against 6.2 s on the GPU. This is the one key where the machines differ. (Update 2026-10-08: Gemma was removed, branch `claude/practical-dijkstra-f83cbe`. `performance_mode`, `context_window`, `kv_cache_quant`, `flash_attention`, `analysis_mode`, `defer_analysis`, `meeting_transcription`, `active_model` and `model_variants` are ignored now and can go from both files.)
 
-Windows `~/.screenmind/settings.json`, whole file:
+Windows `~/.evolve-capture/settings.json`, whole file:
 
 ```json
 {
@@ -45,7 +45,7 @@ What that drops, by key:
 - Keys of removed features, ignored since `cd95561`: `break_reminder_minutes`, `obsidian_*`, `notion_*`, `webhook_*`, `agents_*`, `auto_bookmark*`, `smart_notifications`, `distraction_minutes`, `dashboard_lock_timeout`, `*_hotkey`.
 - Kept: `setup_complete` and `capture_paused` are state, not settings.
 
-Mac `~/.screenmind/settings.json` gets the same file without `setup_complete` (the Mac file never had it). It keeps `performance_mode: maximum` (update 2026-10-08: ignored now, can go too) and drops `capture_active_monitor: true` (a leftover from a 2026-10-06 test), `model_variants` and the old `sensitive_filter_types`. In the checkout's `.env`:
+Mac `~/.evolve-capture/settings.json` gets the same file without `setup_complete` (the Mac file never had it). It keeps `performance_mode: maximum` (update 2026-10-08: ignored now, can go too) and drops `capture_active_monitor: true` (a leftover from a 2026-10-06 test), `model_variants` and the old `sensitive_filter_types`. In the checkout's `.env`:
 - `OCR_LANGUAGES`: drop it once the G32 default `en,es,de,fr,ru` is on `custom`.
 - `CAPTURE_ON_START=true`: drop it. Both machines then restore the last capture state (`capture_paused`). The Windows laptop has never had it.
 - Since `c377a8c` the `.env` is read from the checkout root, so a start at login (LaunchAgent, cwd `/`) now loads it too. Until now such a start ran without it.
@@ -57,7 +57,7 @@ Then run the e2e check on both machines: the status header row "Settings not at 
 ### Packaging after the Gemma removal and F6 (from the Mac, 2026-10-12)
 Status: open, for the Windows laptop session.
 
-- The NSIS installer's `llama\` handling (`packaging/windows/screenmind.nsi`: replace and remove `<install dir>\llama`, from `73cdb1d`) can go: the app ships and installs no `llama-server` any more. Keep removing an old `llama\` folder on update for one release, so testers' installs get cleaned up.
+- The NSIS installer's `llama\` handling (`packaging/windows/evolve-capture.nsi`: replace and remove `<install dir>\llama`, from `73cdb1d`) can go: the app ships and installs no `llama-server` any more. Keep removing an old `llama\` folder on update for one release, so testers' installs get cleaned up.
 - The shared spec changed for F6: it fetches the 5 OCR models into `packaging/build/ocr_models` and bundles them as `ocr_models/`, and leaves out rapidocr's default models. Rebuild once and check OCR on a real frame. The app should log `models: ...\_internal\ocr_models`. The build now needs network access the first time (RapidOCR downloads the models and checks their SHA-256).
 - Bundle id (user decision, 2026-10-12): `com.nebius.evolve.work.capture`. Use the same id wherever Windows needs one: an AppUserModelID for the tray and notifications, and the installer if it names the app.
 - The spec also bundles the person-name model now (138 MB, `models/ner/...`). Check that its 4 files sit together in `_internal\models\ner\...` and that names get redacted in the app.
@@ -85,7 +85,7 @@ What changed:
 
 Open: moving capture off the event loop if the logs still show stalls (step 4), and a process supervisor with packaging (step 5).
 
-Refs: `platform_support/windows.py` `UiaWorker`, `run_uia()`; `screenmind/watchdog.py`; `capture/ui_events/windows.py`; `capture/ui_events/recorder.py` `restart()`; [uptime.md](../plans/uptime.md).
+Refs: `platform_support/windows.py` `UiaWorker`, `run_uia()`; `evolve_capture/watchdog.py`; `capture/ui_events/windows.py`; `capture/ui_events/recorder.py` `restart()`; [uptime.md](../plans/uptime.md).
 
 ### dev-instance.sh crashes on Windows without a console
 Status: fixed 2026-10-08 (`c5e2598`)
@@ -96,7 +96,7 @@ Started with stdout redirected (from a Claude session, a scheduler, a pipe), `se
 
 Fixed: with `llama_server_shared`, `ensure_llama_server()` only logs and returns: no lookup, prompt or download, and `main()` adopts the shared server (before, a dev instance logged "Starting without Gemma 4" with it up). `setup_llama` prints ASCII, and `run()` sets stdout to `errors="backslashreplace"`. Live: `scripts/dev-instance.sh </dev/null > dev.log 2>&1` without `PYTHONIOENCODING` starts and analyzes. The cause of the prompt: a stdin of NUL (`</dev/null`) is a TTY to `isatty()` on Windows.
 
-Refs: `screenmind/setup_llama.py` `ensure_llama_server()`, `scripts/dev-instance.sh`, `73285fa`.
+Refs: `evolve_capture/setup_llama.py` `ensure_llama_server()`, `scripts/dev-instance.sh`, `73285fa`.
 
 ## Parked
 

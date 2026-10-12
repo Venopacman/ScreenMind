@@ -1,6 +1,6 @@
 """Tests for privacy/data_filter.py — sensitive data redaction."""
 
-from screenmind.privacy.data_filter import filter_sensitive_text, parse_enabled_types
+from evolve_capture.privacy.data_filter import filter_sensitive_text, parse_enabled_types
 
 
 def test_redact_credit_card():
@@ -183,7 +183,7 @@ def test_email_kept_when_type_off():
 
 import pytest  # noqa: E402
 
-from screenmind.privacy.data_filter import dangling_secret_label  # noqa: E402
+from evolve_capture.privacy.data_filter import dangling_secret_label  # noqa: E402
 
 PW = "[REDACTED:password]"
 
@@ -264,7 +264,7 @@ def test_dangling_secret_label(text, label):
 
 
 def test_filter_ocr_boxes_joins_label_and_value_boxes():
-    from screenmind.privacy.data_filter import filter_ocr_boxes
+    from evolve_capture.privacy.data_filter import filter_ocr_boxes
     boxes = [
         {"text": "pwd", "conf": 0.9},
         {"text": "- abc123def456", "conf": 0.9},
@@ -281,7 +281,7 @@ def test_filter_ocr_boxes_joins_label_and_value_boxes():
 
 
 def test_filter_ocr_boxes_handles_empty():
-    from screenmind.privacy.data_filter import filter_ocr_boxes
+    from evolve_capture.privacy.data_filter import filter_ocr_boxes
     assert filter_ocr_boxes(None) is None
     assert filter_ocr_boxes([{"text": ""}, {"box": []}]) == [{"text": ""}, {"box": []}]
 
@@ -391,6 +391,6 @@ def test_types_run_in_fixed_order():
 
 
 def test_config_default_matches_filter_default():
-    from screenmind.config import Settings
-    from screenmind.privacy.data_filter import DEFAULT_TYPES
+    from evolve_capture.config import Settings
+    from evolve_capture.privacy.data_filter import DEFAULT_TYPES
     assert Settings.model_fields["sensitive_filter_types"].default == ",".join(DEFAULT_TYPES)

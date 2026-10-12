@@ -2,7 +2,7 @@
 
 The shared place for packaging experiments on each machine. The plan is in [packaging.md](packaging.md). Each machine adds its results to its own section. Keep the same table rows, so results compare side by side.
 
-Build files: [`packaging/screenmind.spec`](../../packaging/screenmind.spec) and [`packaging/entry.py`](../../packaging/entry.py). OCR resource benchmark: [`packaging/ocr_mem_bench.py`](../../packaging/ocr_mem_bench.py). Output goes to `packaging/build/` and `packaging/dist/` (both in `.gitignore`). PyInstaller is not a project dependency. `uv run --with pyinstaller` pulls it in for the one command.
+Build files: [`packaging/evolve-capture.spec`](../../packaging/evolve-capture.spec) and [`packaging/entry.py`](../../packaging/entry.py). OCR resource benchmark: [`packaging/ocr_mem_bench.py`](../../packaging/ocr_mem_bench.py). Output goes to `packaging/build/` and `packaging/dist/` (both in `.gitignore`). PyInstaller is not a project dependency. `uv run --with pyinstaller` pulls it in for the one command.
 
 ## Results
 
@@ -14,8 +14,8 @@ Update 2026-10-08: Gemma and llama-server were removed (branch `claude/practical
 | OS | macOS 27.0.1 (macOS 26 until 2026-10-08) | Windows 11 Home 25H2 (build 26200), Ryzen 7 5800H (16 logical), 16 GB |
 | PyInstaller | 6.22.3 (contrib hooks 2026.8), Python 3.14.6 | 6.22.3, Python 3.14.8 (uv) |
 | Build time | 1 min 56 s with the DMG and the tester signature (`packaging/macos/build.sh`, caches and the person-name model warm). 2026-10-07: 2 min 21 s cold, 25 s warm | 2 min 45 s cold, 1 min 36 s warm |
-| Build result | OK. Only harmless warnings: pyobjc lazy names, Windows libraries looked up through ctypes (`user32`, `gdi32`, `shcore`, `dwmapi`), `scipy.special._cdflib`, `pycparser` tables. `ScreenCaptureKit`, `Quartz`, `AppKit`, `HIServices` and `screenmind.watchdog` are picked up without hidden imports | OK after a spec fix: the first build took `msvcp140.dll`, `vcruntime140.dll` and `ucrtbase.dll` from a JDK on `PATH` and crashed on the first OCR frame (see notes). Harmless warnings: `UIAutomationClient_VC140_*.dll` "not found" (bundled anyway), `scipy.special._cdflib`, `tzdata`, `pycparser` tables |
-| App size on disk | 466 MB (`ScreenMind.app`), of it the person-name model 132 MB and our OCR models 25 MB. Without the person-name model: 330 MB. 351 MB on 3092a5f, 343 MB on 2026-10-07, 363 MB before the strip | 394 MB (`dist\ScreenMind\`, 331 files) |
+| Build result | OK. Only harmless warnings: pyobjc lazy names, Windows libraries looked up through ctypes (`user32`, `gdi32`, `shcore`, `dwmapi`), `scipy.special._cdflib`, `pycparser` tables. `ScreenCaptureKit`, `Quartz`, `AppKit`, `HIServices` and `evolve_capture.watchdog` are picked up without hidden imports | OK after a spec fix: the first build took `msvcp140.dll`, `vcruntime140.dll` and `ucrtbase.dll` from a JDK on `PATH` and crashed on the first OCR frame (see notes). Harmless warnings: `UIAutomationClient_VC140_*.dll` "not found" (bundled anyway), `scipy.special._cdflib`, `tzdata`, `pycparser` tables |
+| App size on disk | 466 MB (`EvolveCapture.app`), of it the person-name model 132 MB and our OCR models 25 MB. Without the person-name model: 330 MB. 351 MB on 3092a5f, 343 MB on 2026-10-07, 363 MB before the strip | 394 MB (`dist\EvolveCapture\`, 331 files) |
 | Compressed | DMG 196 MB (LZMA, with an Applications link); 116 MB without the person-name model. 121 MB on 2639ae1; 2026-10-07: 157 MB (zlib), 122 MB (LZMA) | zip 172 MB (`Compress-Archive`) |
 | Largest parts | the person-name model 132 MB, onnxruntime 71 MB, cv2 41 MB + its ffmpeg/X11 libs, scipy 33 MB, our OCR models 25 MB, libpython 18 MB | cv2 112 MB (`cv2.pyd` 82 MB + ffmpeg DLL 29 MB), scipy 46 MB + `scipy.libs` 19 MB, onnxruntime 36 MB, rapidocr 30 MB, `numpy.libs` 20 MB. Two OpenBLAS copies (numpy + scipy), 39 MB. Tcl/Tk DLLs (5 MB) came along |
 | Signature | the tester certificate (self-signed, `sign_app.sh`) or ad-hoc without it. Bundle id `com.nebius.evolve.work.capture` (since 2026-10-12) | unsigned |
@@ -34,12 +34,12 @@ Update 2026-10-08: Gemma and llama-server were removed (branch `claude/practical
 
 Unsigned, for internal testers (milestone M0). Files in [`packaging/macos/`](../../packaging/macos/):
 
-- `build.sh`: `uv sync --frozen` > PyInstaller 6.22.3 with `packaging/screenmind.spec` (it fetches the OCR models into `packaging/build/ocr_models` first) > `codesign --verify` > an LZMA DMG with the app and an Applications link. Output: `packaging/dist/ScreenMind.app` and `packaging/dist/ScreenMind-<version>-macos-arm64.dmg`. `--skip-dmg` stops after the app (to sign it first, later), `--skip-pyinstaller` reuses it.
-- `smoke_test.sh [app]`: checks the 5 OCR models are in `Contents/Resources/ocr_models` and rapidocr's defaults are not, and that the 4 person-name model files sit together in `Contents/Resources/models/ner/...`. It runs `ScreenMind --self-test ocr_self_test.png`: inside the app, OCR must read "Quarterly report" from the bundled models, the person-name model must find "Mangin" in a fixed line, and nothing may be written under `HOME`. Then it starts the app with a temp `HOME` and data dir on port `SMOKE_PORT` (default 7899) with capture, UI events and the tray off, checks 8 dashboard and API paths, prints memory, and stops it through `POST /api/shutdown` (exit code 0, "Goodbye!" in the log, no traceback). About 8 s.
+- `build.sh`: `uv sync --frozen` > PyInstaller 6.22.3 with `packaging/evolve-capture.spec` (it fetches the OCR models into `packaging/build/ocr_models` first) > `codesign --verify` > an LZMA DMG with the app and an Applications link. Output: `packaging/dist/EvolveCapture.app` and `packaging/dist/EvolveCapture-<version>-macos-arm64.dmg`. `--skip-dmg` stops after the app (to sign it first, later), `--skip-pyinstaller` reuses it.
+- `smoke_test.sh [app]`: checks the 5 OCR models are in `Contents/Resources/ocr_models` and rapidocr's defaults are not, and that the 4 person-name model files sit together in `Contents/Resources/models/ner/...`. It runs `Evolve Capture --self-test ocr_self_test.png`: inside the app, OCR must read "Quarterly report" from the bundled models, the person-name model must find "Mangin" in a fixed line, and nothing may be written under `HOME`. Then it starts the app with a temp `HOME` and data dir on port `SMOKE_PORT` (default 7899) with capture, UI events and the tray off, checks 8 dashboard and API paths, prints memory, and stops it through `POST /api/shutdown` (exit code 0, "Goodbye!" in the log, no traceback). About 8 s.
 - `ocr_self_test.png`: two lines of text, 11 KB.
 - `make_tester_cert.sh <dir>` and `sign_app.sh [app]`: the self-signed tester certificate and signing with it, from a temporary keychain. `build.sh` signs when `MACOS_TESTER_P12` and `MACOS_TESTER_P12_PASSWORD` are set. Why and what was checked: [packaging.md, Tester builds](packaging.md#tester-builds-one-self-signed-certificate).
 - Phase 1 tester packages are built by hand on the user's Mac, not in CI (user decision, 2026-10-12): [packaging.md, Manual tester releases](packaging.md#9-manual-tester-releases-phase-1). The GitHub workflow below is a stopgap until the move to GitLab.
-- CI: [`.github/workflows/package-macos.yml`](../../.github/workflows/package-macos.yml) on `macos-15`. It runs on pushes to `custom` that change `screenmind/`, `packaging/`, `pyproject.toml` or `uv.lock`, and by hand from the Actions tab (only once the file is on the default branch, `main`). The DMG is the artifact `ScreenMind-macos-arm64-dmg`, kept 30 days. The OCR models and the person-name model are cached between runs. With the secrets `MACOS_TESTER_P12_BASE64` and `MACOS_TESTER_P12_PASSWORD` the app is signed with the tester certificate; without them it stays ad-hoc.
+- CI: [`.github/workflows/package-macos.yml`](../../.github/workflows/package-macos.yml) on `macos-15`. It runs on pushes to `custom` that change `evolve_capture/`, `packaging/`, `pyproject.toml` or `uv.lock`, and by hand from the Actions tab (only once the file is on the default branch, `main`). The DMG is the artifact `EvolveCapture-macos-arm64-dmg`, kept 30 days. The OCR models and the person-name model are cached between runs. With the secrets `MACOS_TESTER_P12_BASE64` and `MACOS_TESTER_P12_PASSWORD` the app is signed with the tester certificate; without them it stays ad-hoc.
 
 Local result on the user's Mac (macOS 27.0.1): build with the DMG 1 min 33 s, app 330 MB, DMG 116 MB, smoke test passed (OCR 0.55 s, 78 MB footprint after start, clean stop). With the person-name model and the tester signature (0033021): 1 min 56 s, app 466 MB, DMG 196 MB, smoke test passed (OCR 0.6 s, the name found, 78 MB footprint after start: the model loads on first use).
 
@@ -55,57 +55,57 @@ For the user, about 20 minutes, on a DMG built on the user's Mac with the tester
 
 Before you start:
 
-- The test app uses `~/.screenmind`, the same data folder as the main instance. Stop the main instance first (dashboard Stop button or `POST http://127.0.0.1:7777/api/shutdown`), and start it again at the end. Two copies at once would share the database.
+- The test app uses `~/.evolve-capture`, the same data folder as the main instance. Stop the main instance first (dashboard Stop button or `POST http://127.0.0.1:7777/api/shutdown`), and start it again at the end. Two copies at once would share the database.
 - The test app uses port 7777 too, so the dashboard is at `http://127.0.0.1:7777`.
 
 Steps:
 
-1. **Open the downloaded DMG.** First check it is the channel copy: `xattr -p com.apple.quarantine ~/Downloads/ScreenMind-<version>-macos-arm64.dmg` prints a value, and `shasum -a 256` of it matches the release note. Open it in Finder and drag ScreenMind to Applications. Expected: a window with ScreenMind and an Applications link.
-2. **First start from Finder.** Double-click ScreenMind in Applications. Expected: macOS blocks it ("cannot be opened": no Developer ID signature). Open System Settings > Privacy & Security, click "Open Anyway", and confirm. Or, in Terminal: `xattr -dr com.apple.quarantine /Applications/ScreenMind.app`, then double-click again. Expected: no Dock icon (it is a background app). `http://127.0.0.1:7777` opens the dashboard.
-3. **Screen Recording prompt.** Your settings keep capture on, so capture starts by itself (if not, click Start Capturing). Expected, within a few seconds: a macOS prompt for Screen Recording that names **ScreenMind** (not Terminal or Python). An Input Monitoring prompt for ScreenMind may come too (UI events are on in your settings). Allow them in System Settings. macOS may ask to quit and reopen ScreenMind; do that.
-4. **Screen grabs.** Work normally for 2-3 minutes in two or three apps. Expected: new frames in the dashboard timeline, with the right app names, and real window content (not just the wallpaper). In `~/.screenmind/screenmind.log`: "Screen Recording is allowed", and no "using the screencapture tool" lines (that would mean SCK fell back).
-5. **OCR on a real frame.** Open an app without accessibility text (a photo or a PDF with text, in Preview). Expected: its frame in the timeline has OCR text. The log has "OCR initialized ... models: /Applications/ScreenMind.app/...".
-6. **UI events.** In the dashboard, Settings > Privacy & Security, the UI events permissions show what is missing. Click the button that asks for them. Expected: prompts for Accessibility and Input Monitoring that name **ScreenMind**. After you allow both (and restart if asked), clicks and app switches show up and trigger frames, and the log no longer says "UI events: no Accessibility permission".
+1. **Open the downloaded DMG.** First check it is the channel copy: `xattr -p com.apple.quarantine ~/Downloads/EvolveCapture-<version>-macos-arm64.dmg` prints a value, and `shasum -a 256` of it matches the release note. Open it in Finder and drag Evolve Capture to Applications. Expected: a window with Evolve Capture and an Applications link.
+2. **First start from Finder.** Double-click Evolve Capture in Applications. Expected: macOS blocks it ("cannot be opened": no Developer ID signature). Open System Settings > Privacy & Security, click "Open Anyway", and confirm. Or, in Terminal: `xattr -dr com.apple.quarantine /Applications/EvolveCapture.app`, then double-click again. Expected: no Dock icon (it is a background app). `http://127.0.0.1:7777` opens the dashboard.
+3. **Screen Recording prompt.** Your settings keep capture on, so capture starts by itself (if not, click Start Capturing). Expected, within a few seconds: a macOS prompt for Screen Recording that names **Evolve Capture** (not Terminal or Python). An Input Monitoring prompt for Evolve Capture may come too (UI events are on in your settings). Allow them in System Settings. macOS may ask to quit and reopen Evolve Capture; do that.
+4. **Screen grabs.** Work normally for 2-3 minutes in two or three apps. Expected: new frames in the dashboard timeline, with the right app names, and real window content (not just the wallpaper). In `~/.evolve-capture/evolve-capture.log`: "Screen Recording is allowed", and no "using the screencapture tool" lines (that would mean SCK fell back).
+5. **OCR on a real frame.** Open an app without accessibility text (a photo or a PDF with text, in Preview). Expected: its frame in the timeline has OCR text. The log has "OCR initialized ... models: /Applications/EvolveCapture.app/...".
+6. **UI events.** In the dashboard, Settings > Privacy & Security, the UI events permissions show what is missing. Click the button that asks for them. Expected: prompts for Accessibility and Input Monitoring that name **Evolve Capture**. After you allow both (and restart if asked), clicks and app switches show up and trigger frames, and the log no longer says "UI events: no Accessibility permission".
 7. **Status.** `http://127.0.0.1:7777/api/status`: `capture.screen_recording` is `true`, and the grab backend is `sck`.
 8. **Stop.** The dashboard Stop button. Expected: the app quits within a few seconds, and the log ends with "Goodbye!".
-9. **Second start.** Open ScreenMind again from Applications. Expected: no new prompts (the grants are kept for the same build).
-10. **Signature.** In Terminal: `codesign -d -r- /Applications/ScreenMind.app`. Expected, for a build signed with the tester certificate: `identifier "com.nebius.evolve.work.capture" and certificate leaf = H"..."`. If it shows a `cdhash` instead, the build is ad-hoc and step 11 will fail by design.
-11. **Grants survive a new build** (only with the tester certificate). Quit ScreenMind. Build again with the same certificate (procedure steps 2-7; a new version or the same commit both work, since the build differs anyway), download it from the channel, and install it over the old app. Start it. Expected: no Screen Recording, Accessibility or Input Monitoring prompt, and frames with window content at once. If macOS asks again, note which permission.
-12. **Clean up.** Quit ScreenMind. Start the main instance again. Optional: remove the test grants in System Settings (Screen Recording, Accessibility, Input Monitoring: the ScreenMind entries).
+9. **Second start.** Open Evolve Capture again from Applications. Expected: no new prompts (the grants are kept for the same build).
+10. **Signature.** In Terminal: `codesign -d -r- /Applications/EvolveCapture.app`. Expected, for a build signed with the tester certificate: `identifier "com.nebius.evolve.work.capture" and certificate leaf = H"..."`. If it shows a `cdhash` instead, the build is ad-hoc and step 11 will fail by design.
+11. **Grants survive a new build** (only with the tester certificate). Quit Evolve Capture. Build again with the same certificate (procedure steps 2-7; a new version or the same commit both work, since the build differs anyway), download it from the channel, and install it over the old app. Start it. Expected: no Screen Recording, Accessibility or Input Monitoring prompt, and frames with window content at once. If macOS asks again, note which permission.
+12. **Clean up.** Quit Evolve Capture. Start the main instance again. Optional: remove the test grants in System Settings (Screen Recording, Accessibility, Input Monitoring: the Evolve Capture entries).
 
 Not in this test: start at login (`SMAppService` is not built) and the menu bar item and the first-run window (M1).
 
 ## macOS notes (2026-10-08)
 
-- Built twice: on `custom` 2639ae1 (before F1-F4) and on 3092a5f (after). Both ran from `Contents/MacOS/ScreenMind` under `env -i` with a temp `DATA_DIR`, `API_PORT=7891`, `CAPTURE_ON_START=false`, `UI_EVENTS_ENABLED=false`, `MEETING_TRANSCRIPTION=false`, `LLAMA_SERVER_SHARED=1`, a dead llama port and `PATH=/usr/bin:/bin:/usr/sbin:/sbin`. The main instance kept running. Build outputs were deleted afterwards.
+- Built twice: on `custom` 2639ae1 (before F1-F4) and on 3092a5f (after). Both ran from `Contents/MacOS/EvolveCapture` under `env -i` with a temp `DATA_DIR`, `API_PORT=7891`, `CAPTURE_ON_START=false`, `UI_EVENTS_ENABLED=false`, `MEETING_TRANSCRIPTION=false`, `LLAMA_SERVER_SHARED=1`, a dead llama port and `PATH=/usr/bin:/bin:/usr/sbin:/sbin`. The main instance kept running. Build outputs were deleted afterwards.
 - F1 works on macOS: a `.env` in the temp data dir with `OCR_LANGUAGES=en,de` showed as `ocr_languages=en,de (.env)` in the start log. On 2639ae1 no `.env` loaded at all (the path pointed inside the bundle).
-- F4 works for the shortcut: the log says "Desktop shortcut skipped" and nothing appeared on the desktop. On 2639ae1 the first start wrote `~/Desktop/ScreenMind.command`, which runs `launcher.py` inside the bundle (deleted). The login-item command is now the app binary alone (`startup.py`). Not tested: installing the LaunchAgent, because that changes the user's real login items.
+- F4 works for the shortcut: the log says "Desktop shortcut skipped" and nothing appeared on the desktop. On 2639ae1 the first start wrote `~/Desktop/EvolveCapture.command`, which runs `launcher.py` inside the bundle (deleted). The login-item command is now the app binary alone (`startup.py`). Not tested: installing the LaunchAgent, because that changes the user's real login items.
 - F2 and F3 were not tested on macOS: they need a model download and a `llama-server` start. (Update 2026-10-08: F2 and F3 no longer apply; Gemma was removed.)
 - A fresh DB migrated from v0 to v13 in the bundle.
-- The app read the model list from `~/.screenmind/models` (it ignores `DATA_DIR`, as on Windows) and wrote nothing there.
+- The app read the model list from `~/.evolve-capture/models` (it ignores `DATA_DIR`, as on Windows) and wrote nothing there.
 - For the resource budget, a read-only sample of the main instance 20 min after its start: 415 MB footprint, peak 1177 MB, 60 CPU-s (about 5% of one core). Its `llama-server`: 842 MB footprint.
 - Still not tested on macOS, and why: a start from Finder, the permission prompts, SCK grabs from the bundle and OCR on a real frame all need the user (grabs hang in Claude-started processes, see [sck-capture.md](../backlog/sck-capture.md)). Start at login, the menu bar item and the first-run flow are not built.
 
 ## macOS notes (2026-10-07)
 
-- Ran the binary inside the bundle (`Contents/MacOS/ScreenMind`) from a scratch folder, so no `.env` loaded. Env: temp `DATA_DIR`, `API_PORT=7790`, `CAPTURE_ON_START=false`, `UI_EVENTS_ENABLED=false`, `MEETING_TRANSCRIPTION=false`, a dead llama port, and a `PATH` without Homebrew. It started in degraded mode ("llama-server not found"), as expected.
+- Ran the binary inside the bundle (`Contents/MacOS/EvolveCapture`) from a scratch folder, so no `.env` loaded. Env: temp `DATA_DIR`, `API_PORT=7790`, `CAPTURE_ON_START=false`, `UI_EVENTS_ENABLED=false`, `MEETING_TRANSCRIPTION=false`, a dead llama port, and a `PATH` without Homebrew. It started in degraded mode ("llama-server not found"), as expected.
 - Not tested: launching from Finder, permission prompts, screen grabs, OCR on a real frame, model download (fails by design until fix F2 in the plan).
-- OCR benchmark: run with the worktree's `.venv` on saved screenshots from `~/.screenmind/screenshots/2026-10-07`. Memory is `phys_footprint` (what Activity Monitor shows). RSS was 5-10% higher. Halving the image size first changed almost nothing. Analysis is in [packaging.md, Resource budget](packaging.md#resource-budget).
-- The bundle holds rapidocr's own default models (`PP-OCRv6_*_small`), which ScreenMind never uses (fix F6).
+- OCR benchmark: run with the worktree's `.venv` on saved screenshots from `~/.evolve-capture/screenshots/2026-10-07`. Memory is `phys_footprint` (what Activity Monitor shows). RSS was 5-10% higher. Halving the image size first changed almost nothing. Analysis is in [packaging.md, Resource budget](packaging.md#resource-budget).
+- The bundle holds rapidocr's own default models (`PP-OCRv6_*_small`), which Evolve Capture never uses (fix F6).
 
 ## Windows notes (2026-10-08)
 
 - Ran steps 1-9 below from a Claude session in a worktree, with temp data dirs under `C:\Users\pdsmi\sm-spike*`, port 7790 and a dead llama port. It started in degraded mode ("Starting without Gemma 4"), as expected.
-- **The first build crashed on the first OCR frame.** Windows Error Reporting: `ScreenMind.exe`, faulting module `_internal\MSVCP140.dll` 14.16.27033, `0xc0000005`. PyInstaller resolves the DLLs that extensions link to through `PATH`. On this laptop `C:\Program Files\Microsoft\jdk-11.0.16.8-hotspot\bin` comes before `System32`, so the bundle got the JDK's `msvcp140.dll`, `vcruntime140.dll`, `ucrtbase.dll` and about 40 `api-ms-win-*` stubs, all from 2019-2022. onnxruntime needs a newer `msvcp140.dll` (14.40 or later, the `std::mutex` change in VS 2022 17.10). Fix in the spec: on Windows, `PATH` keeps only folders under `%SystemRoot%` during the build. The bundle now has `msvcp140.dll` and `vcruntime140.dll` 14.51 from `System32` and no `ucrtbase`/`api-ms-win-*` copies. Any build machine with Java, an old app or a dev tool on `PATH` would have hit this; a CI runner too.
-- After the fix: a Photos window (no a11y text) went through OCR in the frozen app. OCR models came from the shared `%USERPROFILE%\.screenmind\models\ocr` (they were already there, so no download). The models folder ignores `DATA_DIR`.
+- **The first build crashed on the first OCR frame.** Windows Error Reporting: `EvolveCapture.exe`, faulting module `_internal\MSVCP140.dll` 14.16.27033, `0xc0000005`. PyInstaller resolves the DLLs that extensions link to through `PATH`. On this laptop `C:\Program Files\Microsoft\jdk-11.0.16.8-hotspot\bin` comes before `System32`, so the bundle got the JDK's `msvcp140.dll`, `vcruntime140.dll`, `ucrtbase.dll` and about 40 `api-ms-win-*` stubs, all from 2019-2022. onnxruntime needs a newer `msvcp140.dll` (14.40 or later, the `std::mutex` change in VS 2022 17.10). Fix in the spec: on Windows, `PATH` keeps only folders under `%SystemRoot%` during the build. The bundle now has `msvcp140.dll` and `vcruntime140.dll` 14.51 from `System32` and no `ucrtbase`/`api-ms-win-*` copies. Any build machine with Java, an old app or a dev tool on `PATH` would have hit this; a CI runner too.
+- After the fix: a Photos window (no a11y text) went through OCR in the frozen app. OCR models came from the shared `%USERPROFILE%\.evolve-capture\models\ocr` (they were already there, so no download). The models folder ignores `DATA_DIR`.
 - UI events: the low-level hooks install and clicks trigger grabs. `UIAutomationClient_VC140_X64.dll` lands in `_internal\uiautomation\bin\`, where `uiautomation` loads it from, so the build warning about it does not matter.
-- F4 seen for real: the first start wrote `launcher.vbs` into the data dir. It runs `ScreenMind.exe "...\_internal\screenmind\launcher.py"`, which cannot work. It also tried to put `ScreenMind.lnk` on the desktop. Nothing appeared there: this laptop's desktop is `OneDrive\<localized name>`, not `%USERPROFILE%\Desktop`, and the PowerShell step fails without an error.
+- F4 seen for real: the first start wrote `launcher.vbs` into the data dir. It runs `EvolveCapture.exe "...\_internal\evolve_capture\launcher.py"`, which cannot work. It also tried to put `EvolveCapture.lnk` on the desktop. Nothing appeared there: this laptop's desktop is `OneDrive\<localized name>`, not `%USERPROFILE%\Desktop`, and the PowerShell step fails without an error.
 - OCR costs much more CPU than on the Mac: 24 CPU-s and 12 s wall per frame tuned, against 4.3 CPU-s on the Mac, with smaller frames (2560x1600). Memory is much lower (450 MB against 1.3-1.8 GB). See [Windows OCR CPU](#windows-ocr-cpu-2026-10-08). At a 10 s interval, OCR on every frame would not keep up on this laptop; it only runs when a11y text is chrome-only.
 - Private bytes (commit) were 548 MB at idle and 1150 MB after one OCR frame, against 64 / 175 MB USS. Task Manager's Memory column shows the USS-like number; commit counts against the page file, not RAM.
 - `Get-Content` in PowerShell 5.1 shows the log's `→` as `â†'`. The log file is UTF-8; pass `-Encoding UTF8`.
 - Not tested: an installer, start at login, a start from Explorer or the Start menu, SmartScreen, the microphone and call transcription, llama-server inside the app, model download (F2).
-- After fixes F1-F5 (34ae529), built and run on port 7791 with a temp data dir and a temp `USERPROFILE`. The data dir's `.env` loaded, and a `.env` in the cwd did not. The log was written without `SCREENMIND_LOG_FILE`. No `launcher.vbs`, nothing new on the desktop. `POST /api/startup/install` wrote `Run\ScreenMind = "...\ScreenMind.exe"`, and uninstall removed it. A Gemma download ran in the app's own process (no second `ScreenMind.exe`), showed progress (100 MB in 8 s), and cancel stopped it and deleted the partial files. Shutdown took 1 s.
-- Tray icon (2026-10-08), built and run on port 7792 with a temp data dir and capture off. It is `Shell_NotifyIconW` through ctypes. `pystray` cost about 3 MB USS and two packages (`pystray`, `six`) in a bare test; the ctypes version cost under 0.5 MB. Both use one thread that sleeps in `GetMessageW`. In the app: 62.4 MB USS and 26 threads with `TRAY_ICON=false`, 62.9 MB and 27 threads with the tray. The icon showed up in the hidden icons (Windows 11 puts new icons there), as "ScreenMind — paused". Through Explorer (UI Automation on the overflow button, then on the menu): Resume and Pause changed `/api/status`, an incognito toggle from the API changed the tooltip within 2 s, and Quit stopped the app cleanly ("Goodbye!") in about 1 s with no icon left behind. Not tested: Open dashboard by hand, an Explorer restart (`TaskbarCreated`), a start at login before the taskbar is ready (the 2 s timer retries the icon), high DPI.
+- After fixes F1-F5 (34ae529), built and run on port 7791 with a temp data dir and a temp `USERPROFILE`. The data dir's `.env` loaded, and a `.env` in the cwd did not. The log was written without `EVOLVE_CAPTURE_LOG_FILE`. No `launcher.vbs`, nothing new on the desktop. `POST /api/startup/install` wrote `Run\Evolve Capture = "...\EvolveCapture.exe"`, and uninstall removed it. A Gemma download ran in the app's own process (no second `EvolveCapture.exe`), showed progress (100 MB in 8 s), and cancel stopped it and deleted the partial files. Shutdown took 1 s.
+- Tray icon (2026-10-08), built and run on port 7792 with a temp data dir and capture off. It is `Shell_NotifyIconW` through ctypes. `pystray` cost about 3 MB USS and two packages (`pystray`, `six`) in a bare test; the ctypes version cost under 0.5 MB. Both use one thread that sleeps in `GetMessageW`. In the app: 62.4 MB USS and 26 threads with `TRAY_ICON=false`, 62.9 MB and 27 threads with the tray. The icon showed up in the hidden icons (Windows 11 puts new icons there), as "Evolve Capture — paused". Through Explorer (UI Automation on the overflow button, then on the menu): Resume and Pause changed `/api/status`, an incognito toggle from the API changed the tooltip within 2 s, and Quit stopped the app cleanly ("Goodbye!") in about 1 s with no icon left behind. Not tested: Open dashboard by hand, an Explorer restart (`TaskbarCreated`), a start at login before the taskbar is ready (the 2 s timer retries the icon), high DPI.
 
 ## Windows installer
 
@@ -113,28 +113,28 @@ Added 2026-10-08. Unsigned, per-user, for internal testers (milestone M0). The u
 
 Files, all in [`packaging/windows/`](../../packaging/windows/):
 
-- `screenmind.nsi`: the NSIS 3 script (Modern UI 2, nsDialogs).
-- `build.ps1`: `uv sync --frozen` > PyInstaller 6.22.3 with `packaging/screenmind.spec` > checks the bundled `msvcp140.dll` is 14.40 or newer (F8) > `makensis`. Output: `packaging/dist/ScreenMind-<version>-win-x64-setup.exe`. The version comes from `screenmind/__init__.py`.
-- `stop-screenmind.ps1`: stops a running copy before install and uninstall (below).
+- `evolve-capture.nsi`: the NSIS 3 script (Modern UI 2, nsDialogs).
+- `build.ps1`: `uv sync --frozen` > PyInstaller 6.22.3 with `packaging/evolve-capture.spec` > checks the bundled `msvcp140.dll` is 14.40 or newer (F8) > `makensis`. Output: `packaging/dist/EvolveCapture-<version>-win-x64-setup.exe`. The version comes from `evolve_capture/__init__.py`.
+- `stop-evolve-capture.ps1`: stops a running copy before install and uninstall (below).
 - CI: [`.github/workflows/package-windows.yml`](../../.github/workflows/package-windows.yml). `windows-2025` has Inno Setup but no NSIS, so the job installs NSIS with Chocolatey. It runs by hand from the Actions tab, which needs the workflow on the default branch (`main`).
 
 What the installer does:
 
-- Installs to `%LOCALAPPDATA%\Programs\ScreenMind` with no admin rights. x64 Windows only.
-- Pages: welcome, "What ScreenMind records" (Next stays off until "I understand" is ticked), folder, "Start ScreenMind when I sign in" (on by default; an upgrade keeps the earlier choice), progress, finish with "Start ScreenMind now".
-- Start at sign-in: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `ScreenMind` = `"<folder>\ScreenMind.exe"` (quoted, no arguments). `startup.py` must write the same value in the frozen app (F4). The installer and uninstaller remove the value only when it points to their own `ScreenMind.exe`. A value for a dev checkout stays. Installing with the box ticked does replace a dev checkout's value, because both use the name `ScreenMind`.
+- Installs to `%LOCALAPPDATA%\Programs\Evolve Capture` with no admin rights. x64 Windows only.
+- Pages: welcome, "What Evolve Capture records" (Next stays off until "I understand" is ticked), folder, "Start Evolve Capture when I sign in" (on by default; an upgrade keeps the earlier choice), progress, finish with "Start Evolve Capture now".
+- Start at sign-in: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `Evolve Capture` = `"<folder>\EvolveCapture.exe"` (quoted, no arguments). `startup.py` must write the same value in the frozen app (F4). The installer and uninstaller remove the value only when it points to their own `EvolveCapture.exe`. A value for a dev checkout stays. Installing with the box ticked does replace a dev checkout's value, because both use the name `Evolve Capture`.
 - A Start menu shortcut. No desktop icon. An uninstall entry in Settings > Apps (HKCU).
 - An upgrade deletes the old `_internal` folder first, so no modules from the older build stay.
 - Silent install: `/S`. Add `/NOSTARTUP` to leave start at sign-in off.
 
-Stopping a running ScreenMind: the windowed app has no console and no window, so Ctrl+C and `WM_CLOSE` cannot reach it, and Restart Manager could only kill it. A POST to `/api/shutdown` would need the port, and on a dev machine port 7777 is the user's main instance. So `packaging/entry.py` (frozen app only) creates the event `Local\ScreenMind-Quit-<pid>` and waits on it in a thread. When the event is set, it runs the same clean stop as `/api/shutdown`. `stop-screenmind.ps1` finds `ScreenMind.exe` processes by full path (only the one in the install folder), sets their events, waits up to 50 s (the app forces its own exit after 45 s), then kills what is left. Tested on the laptop with a scratch instance of the PyInstaller build: a clean stop ("Goodbye!", exit code 0) in 2.6 s. A run for another folder left it alone.
+Stopping a running Evolve Capture: the windowed app has no console and no window, so Ctrl+C and `WM_CLOSE` cannot reach it, and Restart Manager could only kill it. A POST to `/api/shutdown` would need the port, and on a dev machine port 7777 is the user's main instance. So `packaging/entry.py` (frozen app only) creates the event `Local\EvolveCapture-Quit-<pid>` and waits on it in a thread. When the event is set, it runs the same clean stop as `/api/shutdown`. `stop-evolve-capture.ps1` finds `EvolveCapture.exe` processes by full path (only the one in the install folder), sets their events, waits up to 50 s (the app forces its own exit after 45 s), then kills what is left. Tested on the laptop with a scratch instance of the PyInstaller build: a clean stop ("Goodbye!", exit code 0) in 2.6 s. A run for another folder left it alone.
 
 Uninstall: stops the app, removes the shortcut, the Run value (if it is ours), the program files and the uninstall entry. Then it asks two questions, both default No:
 
-1. "Also delete your ScreenMind data (screenshots, database, settings: N GB)?"
-2. "Also delete the downloaded models (N GB)?" (`models` and `llama` in `.screenmind`). Only asked if they exist.
+1. "Also delete your Evolve Capture data (screenshots, database, settings: N GB)?"
+2. "Also delete the downloaded models (N GB)?" (`models` and `llama` in `.evolve-capture`). Only asked if they exist.
 
-It measures the folder first. With months of screenshots this may take some seconds. A silent uninstall (`/S`) keeps all data. It only knows `%USERPROFILE%\.screenmind`; a `data_dir` changed in the settings is not deleted.
+It measures the folder first. With months of screenshots this may take some seconds. A silent uninstall (`/S`) keeps all data. It only knows `%USERPROFILE%\.evolve-capture`; a `data_dir` changed in the settings is not deleted.
 
 Results:
 
@@ -152,11 +152,11 @@ Not tested yet: running the installer, the wizard pages, start at sign-in, the S
 
 ### Tester note
 
-1. Download `ScreenMind-<version>-win-x64-setup.exe`.
+1. Download `EvolveCapture-<version>-win-x64-setup.exe`.
 2. Windows shows "Windows protected your PC" because the installer is not signed. Click **More info**, then **Run anyway**. If Smart App Control is on (Windows 11), it may block the installer with no way around it; tell us.
-3. Read the "What ScreenMind records" page and tick "I understand".
-4. Keep the folder, choose whether ScreenMind starts when you sign in, and finish with "Start ScreenMind now".
-5. To remove it: Settings > Apps > Installed apps > ScreenMind > Uninstall. It asks whether to delete your data and the models. Both default to No.
+3. Read the "What Evolve Capture records" page and tick "I understand".
+4. Keep the folder, choose whether Evolve Capture starts when you sign in, and finish with "Start Evolve Capture now".
+5. To remove it: Settings > Apps > Installed apps > Evolve Capture > Uninstall. It asks whether to delete your data and the models. Both default to No.
 
 ## Windows OCR CPU (2026-10-08)
 
@@ -187,15 +187,15 @@ For the Windows laptop session. It only builds and starts the app. It installs n
 2. Build (takes a few minutes):
 
    ```powershell
-   Measure-Command { uv run --with pyinstaller pyinstaller packaging/screenmind.spec --noconfirm --distpath packaging/dist --workpath packaging/build | Out-Default }
+   Measure-Command { uv run --with pyinstaller pyinstaller packaging/evolve-capture.spec --noconfirm --distpath packaging/dist --workpath packaging/build | Out-Default }
    ```
 
 3. Size, unpacked and zipped:
 
    ```powershell
-   "{0:N0} MB" -f ((Get-ChildItem -Recurse packaging\dist\ScreenMind | Measure-Object Length -Sum).Sum / 1MB)
-   Compress-Archive packaging\dist\ScreenMind "$env:TEMP\ScreenMind-spike.zip" -Force
-   "{0:N0} MB" -f ((Get-Item "$env:TEMP\ScreenMind-spike.zip").Length / 1MB)
+   "{0:N0} MB" -f ((Get-ChildItem -Recurse packaging\dist\EvolveCapture | Measure-Object Length -Sum).Sum / 1MB)
+   Compress-Archive packaging\dist\EvolveCapture "$env:TEMP\EvolveCapture-spike.zip" -Force
+   "{0:N0} MB" -f ((Get-Item "$env:TEMP\EvolveCapture-spike.zip").Length / 1MB)
    ```
 
 4. Start it with a temp data dir, a spare port and capture off. The build is windowed (no console), so set a log file:
@@ -203,12 +203,12 @@ For the Windows laptop session. It only builds and starts the app. It installs n
    ```powershell
    $repo = (Get-Location).Path
    $d = "$env:TEMP\sm-spike"; New-Item -ItemType Directory -Force $d | Out-Null
-   $env:DATA_DIR = $d; $env:SCREENMIND_DATA_DIR = $d; $env:SCREENMIND_LOG_FILE = "$d\screenmind.log"
+   $env:DATA_DIR = $d; $env:EVOLVE_CAPTURE_DATA_DIR = $d; $env:EVOLVE_CAPTURE_LOG_FILE = "$d\evolve-capture.log"
    $env:API_PORT = "7790"; $env:SETUP_COMPLETE = "true"; $env:CAPTURE_ON_START = "false"
    $env:UI_EVENTS_ENABLED = "false"; $env:MEETING_TRANSCRIPTION = "false"
    $env:LLAMA_SERVER_HOST = "http://127.0.0.1:5898"; $env:LLAMA_SERVER_PORT = "5898"
    Push-Location $env:TEMP
-   Start-Process "$repo\packaging\dist\ScreenMind\ScreenMind.exe"
+   Start-Process "$repo\packaging\dist\EvolveCapture\EvolveCapture.exe"
    Pop-Location
    ```
 
@@ -216,7 +216,7 @@ For the Windows laptop session. It only builds and starts the app. It installs n
 
    ```powershell
    foreach ($u in "/", "/css/styles.css", "/js/core.js", "/api/status", "/api/timeline", "/api/settings", "/api/models", "/api/search?q=test") { "$u " + (curl.exe -s -o NUL -w "%{http_code}" "http://127.0.0.1:7790$u") }
-   Get-Content "$env:TEMP\sm-spike\screenmind.log" -Tail 40 -Encoding UTF8
+   Get-Content "$env:TEMP\sm-spike\evolve-capture.log" -Tail 40 -Encoding UTF8
    ```
 
 6. Optional, Windows only (grabs work from Claude-started processes there): in the dashboard on port 7790, turn on UI events and start capturing for a minute. Check that screenshots, a11y text and clicks arrive. This tests `uiautomation`/`comtypes` and `mss` inside the frozen app. The spec collects `uiautomation` DLLs and `comtypes` submodules on Windows; that part is untested.
@@ -224,10 +224,10 @@ For the Windows laptop session. It only builds and starts the app. It installs n
 7. Memory of the running app (Task Manager's "Memory" column is the private working set):
 
    ```powershell
-   uv run --with psutil python -c "import psutil; p=[x for x in psutil.process_iter(['name']) if x.info['name']=='ScreenMind.exe']; print([round(x.memory_full_info().uss/2**20) for x in p], 'MB')"
+   uv run --with psutil python -c "import psutil; p=[x for x in psutil.process_iter(['name']) if x.info['name']=='EvolveCapture.exe']; print([round(x.memory_full_info().uss/2**20) for x in p], 'MB')"
    ```
 
-8. OCR resource benchmark (no screen grabs; uses saved screenshots from `%USERPROFILE%\.screenmind\screenshots`):
+8. OCR resource benchmark (no screen grabs; uses saved screenshots from `%USERPROFILE%\.evolve-capture\screenshots`):
 
    ```powershell
    uv run --with psutil python packaging/ocr_mem_bench.py default
@@ -240,4 +240,4 @@ For the Windows laptop session. It only builds and starts the app. It installs n
    curl.exe -s -X POST http://127.0.0.1:7790/api/shutdown
    ```
 
-10. Fill in the Windows column above and add a "Windows notes" section: errors, missing modules from `packaging\build\screenmind\warn-screenmind.txt` that matter, and anything that differs from macOS. Commit only this file (and spec fixes, if any).
+10. Fill in the Windows column above and add a "Windows notes" section: errors, missing modules from `packaging\build\evolve_capture\warn-evolve_capture.txt` that matter, and anything that differs from macOS. Commit only this file (and spec fixes, if any).

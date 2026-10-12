@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from screenmind.storage.database import Database
+from evolve_capture.storage.database import Database
 
 
 def _create_v6_database(db_path: Path) -> sqlite3.Connection:

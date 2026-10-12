@@ -20,10 +20,10 @@ call UIA on the taskbar, which is always there:
 Hang scenario:
 
     hung     starts a Tk window that stops pumping messages (a hung app) and
-             times ScreenMind's UIA reads on it. Each must end within its UIA
+             times Evolve Capture's UIA reads on it. Each must end within its UIA
              job timeout (3 s for a11y text, 1.5 s for lookups).
 
-Touches no ScreenMind data; only reads UIA.
+Touches no Evolve Capture data; only reads UIA.
 """
 
 import ctypes
@@ -35,7 +35,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from screenmind.platform_support import windows as w  # noqa: E402
+from evolve_capture.platform_support import windows as w  # noqa: E402
 
 user32 = ctypes.WinDLL("user32")
 user32.FindWindowW.restype = ctypes.c_void_p
@@ -154,7 +154,7 @@ print("hung", flush=True); time.sleep(float(sys.argv[1]))  # noqa: T201
 
 
 def scenario_hung():
-    from screenmind.capture.ui_events.windows import WindowsUiEventBackend
+    from evolve_capture.capture.ui_events.windows import WindowsUiEventBackend
     child = subprocess.Popen([sys.executable, "-c", HUNG_APP, "90"], stdout=subprocess.PIPE, text=True)
     try:
         child.stdout.readline()

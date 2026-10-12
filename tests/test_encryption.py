@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 from PIL import Image
 
-from screenmind.privacy.encryption import (
+from evolve_capture.privacy.encryption import (
     is_encrypted, encrypt_image, decrypt_image_bytes,
     open_image, serve_image, MAGIC, MAGIC_LEN,
 )
@@ -48,7 +48,7 @@ class TestIsEncrypted:
 class TestEncryptDecrypt:
     """Tests for encrypt/decrypt roundtrip."""
 
-    @patch("screenmind.privacy.encryption.settings")
+    @patch("evolve_capture.privacy.encryption.settings")
     def test_encrypt_disabled_returns_false(self, mock_settings, tmp_path):
         """Encryption does nothing when disabled."""
         mock_settings.encryption_enabled = False
@@ -57,8 +57,8 @@ class TestEncryptDecrypt:
         assert encrypt_image(f) is False
         assert f.read_bytes() == b"original data"
 
-    @patch("screenmind.privacy.encryption._get_fernet")
-    @patch("screenmind.privacy.encryption.settings")
+    @patch("evolve_capture.privacy.encryption._get_fernet")
+    @patch("evolve_capture.privacy.encryption.settings")
     def test_encrypt_then_decrypt_roundtrip(self, mock_settings, mock_fernet, tmp_path):
         """Encrypted file decrypts back to original."""
         from cryptography.fernet import Fernet
@@ -79,8 +79,8 @@ class TestEncryptDecrypt:
         decrypted = decrypt_image_bytes(f)
         assert decrypted == original
 
-    @patch("screenmind.privacy.encryption._get_fernet")
-    @patch("screenmind.privacy.encryption.settings")
+    @patch("evolve_capture.privacy.encryption._get_fernet")
+    @patch("evolve_capture.privacy.encryption.settings")
     def test_double_encrypt_is_noop(self, mock_settings, mock_fernet, tmp_path):
         """Encrypting an already-encrypted file doesn't double-encrypt."""
         from cryptography.fernet import Fernet
@@ -108,7 +108,7 @@ class TestEncryptDecrypt:
         """Decrypting non-existent file returns None."""
         assert decrypt_image_bytes(Path("/no/such/file.jpg")) is None
 
-    @patch("screenmind.privacy.encryption._get_fernet")
+    @patch("evolve_capture.privacy.encryption._get_fernet")
     def test_decrypt_with_no_key_returns_none(self, mock_fernet, tmp_path):
         """Encrypted file with unavailable key returns None."""
         mock_fernet.return_value = None
@@ -129,8 +129,8 @@ class TestOpenImage:
         result = open_image(f)
         assert result.size == (100, 50)
 
-    @patch("screenmind.privacy.encryption._get_fernet")
-    @patch("screenmind.privacy.encryption.settings")
+    @patch("evolve_capture.privacy.encryption._get_fernet")
+    @patch("evolve_capture.privacy.encryption.settings")
     def test_open_encrypted_jpeg(self, mock_settings, mock_fernet, tmp_path):
         """Opens an encrypted JPEG transparently."""
         from cryptography.fernet import Fernet
@@ -178,7 +178,7 @@ class TestServeImage:
         encrypted = fernet.encrypt(original_bytes)
         f.write_bytes(MAGIC + encrypted)
 
-        with patch("screenmind.privacy.encryption._get_fernet", return_value=fernet):
+        with patch("evolve_capture.privacy.encryption._get_fernet", return_value=fernet):
             response = serve_image(f)
         assert isinstance(response, Response)
         assert response.body == original_bytes

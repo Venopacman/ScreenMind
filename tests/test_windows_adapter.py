@@ -4,7 +4,7 @@ docs/plans/ui-events.md (Windows implementation notes)."""
 
 import pytest
 
-pw = pytest.importorskip("screenmind.platform_support.windows")
+pw = pytest.importorskip("evolve_capture.platform_support.windows")
 
 
 def doc(url, nested=False, onscreen=True, name="Page", element=None, web=True):

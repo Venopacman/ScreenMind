@@ -1,4 +1,4 @@
-# ScreenMind as a data source for the workflows questionnaire
+# Evolve Capture as a data source for the workflows questionnaire
 
 From the session "Questionnaire extraction from screenshots" (2026-10-06).
 
@@ -21,7 +21,7 @@ Measured on live frames, morning vs evening:
   - It freezes real frames as fixtures and replays them through `AnalysisWorker._process` against a throwaway data dir, then checks the stored row.
   - Fixtures and `scenarios.yaml` are in `~/.screenmind-bench/`. They hold private screen content, so they stay outside the repo.
   - Last score on `custom` (`752b04c`): 8 pass, 3 known gaps, 1 fail.
-- **Data-quality scan, `~/.screenmind-bench/scan/scan.py`.** It reads `~/.screenmind` read-only, with snapshots and a running log (`notes.md`) in the same folder. It is not in the repo and not scheduled.
+- **Data-quality scan, `~/.screenmind-bench/scan/scan.py`.** It reads `~/.evolve-capture` read-only, with snapshots and a running log (`notes.md`) in the same folder. It is not in the repo and not scheduled.
 
 ## Items
 
@@ -37,7 +37,7 @@ Status: closed, obsolete (2026-10-08). Gemma was removed (branch `claude/practic
 
 38 of 71 Slack frames (15:20-16:10) got summaries like "viewing a Slack channel conversation", even though the window title names the channel or DM. The benchmark scenario `slack_channel_goals` fails because the cycle goals are visible but not mentioned. Make the analysis prompt use the title and the OCR text, and check whether Gemma E2B is enough.
 
-Refs: `screenmind/engine/analyzer.py` (`analyze_screenshot_fast` prompt), bench scenarios `slack_channel_goals`, `slack_dm`.
+Refs: `evolve_capture/engine/analyzer.py` (`analyze_screenshot_fast` prompt), bench scenarios `slack_channel_goals`, `slack_dm`.
 
 ### Normalize app names for tools_used
 Status: open

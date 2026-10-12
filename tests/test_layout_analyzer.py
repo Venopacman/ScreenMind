@@ -1,6 +1,6 @@
 """Tests for engine/layout_analyzer.py — pure geometry logic."""
 import pytest
-from screenmind.engine.layout_analyzer import (
+from evolve_capture.engine.layout_analyzer import (
     _is_timestamp,
     _group_into_rows,
     _format_rows_simple,

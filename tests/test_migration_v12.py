@@ -7,7 +7,7 @@ never retried them and feeds showed them as real analyses.
 
 import sqlite3
 
-from screenmind.storage.database import Database
+from evolve_capture.storage.database import Database
 
 
 def _make_v11_db(path):

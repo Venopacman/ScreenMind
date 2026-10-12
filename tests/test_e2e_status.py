@@ -67,7 +67,7 @@ def test_summary_puts_machines_side_by_side(e2e, tmp_path):
 
 
 def test_settings_row_lists_only_what_differs_between_machines(e2e):
-    log = ("2026-10-08 10:00:00 [screenmind.main] INFO: Settings that differ from the defaults: "
+    log = ("2026-10-08 10:00:00 [evolve_capture.main] INFO: Settings that differ from the defaults: "
            "data_dir=C:\\tmp\\x (env); api_port=7901 (env); capture_interval=10 (env); "
            "ocr_languages=en,ru (.env); capture_on_start=True (.env); blocked_apps=bank (.env)\n")
     assert e2e._settings_text(log) == "ocr_languages=en,ru (.env); blocked_apps=bank (.env)"

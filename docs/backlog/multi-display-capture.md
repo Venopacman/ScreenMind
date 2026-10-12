@@ -16,14 +16,14 @@ Status: idea
 
 The workflows/questionnaire work needs to know which apps were visible in each frame, and whether a call was running. That way call time and participants count even while the user types in another app. Store the visible layer-0 windows (owner, title, bounds) per activity. Mark frames taken during a call.
 
-`list_visible_windows()` in `screenmind/capture/window.py` already returns these windows, and `AudioWorker.in_meeting` says whether a call is running. Needs a DB migration, so check the next free version number first: v10 is the last one used.
+`list_visible_windows()` in `evolve_capture/capture/window.py` already returns these windows, and `AudioWorker.in_meeting` says whether a call is running. Needs a DB migration, so check the next free version number first: v10 is the last one used.
 
 ### Linux: no per-display app lookup
 Status: open
 
 `get_top_window_in()` and `can_find_top_window` exist on macOS and, since `16f933a`, on Windows. On Linux X11 the display without focus is still saved with no app name, so Gemma guesses it, or the idle rule fires when there is no text. (Update 2026-10-08: Gemma was removed, branch `claude/practical-dijkstra-f83cbe`. Such a frame now gets a rule label with no app name to work from. The item still applies.) Implement both in `LinuxAdapter`, for example with `xdotool search --onlyvisible` plus window geometry, or with python-xlib. Wayland can't do this.
 
-Refs: `screenmind/platform_support/linux.py`, `base.py`, `CaptureWorker._label_monitor()`.
+Refs: `evolve_capture/platform_support/linux.py`, `base.py`, `CaptureWorker._label_monitor()`.
 
 ### Focus-only mode: label and image can disagree on a focus switch
 Status: open, low priority
@@ -47,7 +47,7 @@ When both screens change, there are up to 2 Gemma runs per tick (about 8 s each 
 ### Leftover test setting
 Status: open, trivial
 
-`~/.screenmind/settings.json` still has `capture_active_monitor: true` from the focus-only test. All-displays mode wins, so it has no effect. Set it back to false via Settings or `POST /api/settings`, after asking the user.
+`~/.evolve-capture/settings.json` still has `capture_active_monitor: true` from the focus-only test. All-displays mode wins, so it has no effect. Set it back to false via Settings or `POST /api/settings`, after asking the user.
 
 ### Dev instance: small rough edges
 Status: idea

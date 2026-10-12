@@ -2,7 +2,7 @@
 cased BERT tokenizer.json (checked on the whole EDA snapshot, 0 differences).
 These tests pin the rules with a tiny vocab."""
 
-from screenmind.privacy.wordpiece import WordPiece
+from evolve_capture.privacy.wordpiece import WordPiece
 
 VOCAB = {t: i for i, t in enumerate(
     ["[PAD]", "[UNK]", "[CLS]", "[SEP]", "Iv", "##an", "Pet", "##rov", ",", ":", "hi", "日", "本", "-", "caf", "##é"])}

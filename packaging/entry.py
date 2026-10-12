@@ -1,4 +1,4 @@
-"""Entry point for the frozen ScreenMind app (PyInstaller spike).
+"""Entry point for the frozen Evolve Capture app (PyInstaller spike).
 
 See docs/plans/packaging.md and docs/plans/packaging-spikes.md.
 """
@@ -20,7 +20,7 @@ def _watch_quit_event():
 
     The windowed app has no console and no window, so Ctrl+C and WM_CLOSE
     cannot reach it. The installer and uninstaller (packaging/windows/
-    stop-screenmind.ps1) set the event Local\\ScreenMind-Quit-<pid> instead.
+    stop-evolve-capture.ps1) set the event Local\\EvolveCapture-Quit-<pid> instead.
     A daemon thread blocks on it (no CPU). On the signal it runs the same
     clean stop as /api/shutdown, or exits at once if startup is not done yet.
     """
@@ -34,14 +34,14 @@ def _watch_quit_event():
     kernel32.WaitForSingleObject.restype = wintypes.DWORD
     kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
 
-    handle = kernel32.CreateEventW(None, True, False, f"Local\\ScreenMind-Quit-{os.getpid()}")
+    handle = kernel32.CreateEventW(None, True, False, f"Local\\EvolveCapture-Quit-{os.getpid()}")
     if not handle:
         return
 
     def wait():
         kernel32.WaitForSingleObject(handle, 0xFFFFFFFF)  # INFINITE
         try:
-            from screenmind.api import dependencies
+            from evolve_capture.api import dependencies
 
             if dependencies.request_shutdown is not None:
                 dependencies.request_shutdown()
@@ -56,7 +56,7 @@ def _watch_quit_event():
 def _self_test(image_path: str) -> int:
     """Build check: run both bundled models inside the app, print JSON.
 
-    `ScreenMind --self-test <image>`, used by packaging/macos/smoke_test.sh.
+    `Evolve Capture --self-test <image>`, used by packaging/macos/smoke_test.sh.
     It proves that onnxruntime and the bundled models load in the frozen app,
     with no screen access: OCR reads the image (F6), and the person-name
     model finds the name in a fixed line. Exit code 0 when both worked.
@@ -66,8 +66,8 @@ def _self_test(image_path: str) -> int:
 
     from PIL import Image
 
-    from screenmind.engine import ocr
-    from screenmind.privacy import person_ner
+    from evolve_capture.engine import ocr
+    from evolve_capture.privacy import person_ner
 
     start = time.monotonic()
     extractor = ocr.OCRExtractor()
@@ -98,7 +98,7 @@ if sys.platform == "win32" and getattr(sys, "frozen", False):
 if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "--self-test":
     sys.exit(_self_test(sys.argv[2]))
 
-from screenmind.main import run  # noqa: E402
+from evolve_capture.main import run  # noqa: E402
 
 if __name__ == "__main__":
     run()

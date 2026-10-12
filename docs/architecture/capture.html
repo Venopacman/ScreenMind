@@ -1,4 +1,4 @@
-<title>ScreenMind Capture Map</title>
+<title>Evolve Capture Capture Map</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
@@ -131,8 +131,8 @@ td.gid, th.gid { font-family: var(--font-mono); white-space: nowrap; font-varian
 
 <main>
 <header class="top">
-  <div class="eyebrow">ScreenMind · docs/architecture/capture.md</div>
-  <h1>What ScreenMind captures on macOS and Windows</h1>
+  <div class="eyebrow">Evolve Capture · docs/architecture/capture.md</div>
+  <h1>What Evolve Capture captures on macOS and Windows</h1>
   <p class="lede">Each data point: the event or data, the library and OS API that reads it, where it is stored, and the gaps. Linux is a side column. Written from the code. Where the code and a backlog file disagree, this page follows the code.</p>
   <div class="meta">
     <span>Code: <b><code>custom</code> @ <code>482c275</code></b></span>
@@ -187,7 +187,7 @@ flowchart TB
 
   subgraph STORE["Storage (data_dir)"]
     JPG[("screenshots/YYYY-MM-DD/*.jpg")]
-    DB[("screenmind.db (SQLite, WAL, FTS5)")]
+    DB[("evolve-capture.db (SQLite, WAL, FTS5)")]
   end
 
   GRAB --&gt; TICK
@@ -423,7 +423,7 @@ flowchart TB
     <li><code>OCR_LANGUAGES</code> picks the recognizer in <code>_rec_model()</code>. Mixed scripts: a Cyrillic model wins. So one script per frame (G14).</li>
     <li>Default <code>en,es,de,fr,ru</code> on every machine, not taken from the OS languages, so the Mac and Windows read the same text without a <code>.env</code>. It gives the East Slavic model (<code>eslav</code>): the English model's characters (é, ü, ñ, ç included) plus Cyrillic, at the same cost per frame as <code>en</code>.</li>
     <li>Readings under 0.5 confidence are dropped. <code>_fix_lookalikes()</code> makes mixed Cyrillic/Latin words one script.</li>
-    <li>Models (~15 MB) in <code>~/.screenmind/models/ocr</code>.</li>
+    <li>Models (~15 MB) in <code>~/.evolve-capture/models/ocr</code>.</li>
     <li>onnxruntime: memory pattern and arena off, <code>OCR_THREADS</code> threads (default 2). Less memory, about 40% less CPU per frame.</li>
     <li>Runs in the analysis worker. Skipped when a11y text is real content, and on "identical" cache hits.</li>
     <li>Output: text and boxes (<code>ocr_boxes</code> JSON). <code>cluster_ocr_layout()</code> clusters the boxes into regions by position, and <code>organize_ocr_text()</code> writes the text per region (<code>organized_text</code>).</li>
@@ -463,7 +463,7 @@ flowchart TB
     <li>Nothing is recorded while capture is paused or in <code>BLOCKED_APPS</code>. Skips are counted (<code>status()["skipped"]</code>).</li>
     <li>Console logs make silent failures visible: "UI events are off" at startup, the enabled types on start, missing Accessibility or Input Monitoring, the first input event, a warning if no click or key arrives in 2 min, events lost in the hook, a stopped hook, and a 10-minute summary of input, stored rows and skips.</li>
     <li>Every text field (names, values, typed text, clipboard up to 1,000 chars, window titles) goes through the sensitive-data filter before it is queued. A label typed before a pause ("pwd -") is checked with the next chunk. URLs through <code>sanitize_url()</code>.</li>
-    <li>The watchdog (<code>screenmind/watchdog.py</code>) restarts the recorder when the enricher has not ticked for 2 min, at most 3 times an hour, with a new lock.</li>
+    <li>The watchdog (<code>evolve_capture/watchdog.py</code>) restarts the recorder when the enricher has not ticked for 2 min, at most 3 times an hour, with a new lock.</li>
     <li>Backend calls run without the recorder lock; <code>flush_for_capture()</code> waits at most 2 s. Rows written in batches every 2 s. At each saved frame, <code>attach_ui_events()</code> links unlinked events to the new row: those since the previous frame saved on that display, of the frame's app only (<code>app_key()</code>: case, spaces, <code>.exe</code> don't matter), and clicks only inside the display's rect. So an event goes to the first frame saved after it on a display, if that frame shows its app. Otherwise it stays unlinked with its own timestamp, for later analysis to match by time. Typing in Notepad++ followed by a switch to Claude stays unlinked: the app that was left can't be grabbed after the switch, so no extra capture is requested. Events from before the current run are never linked. No extra OS calls, one indexed query per frame.</li>
     <li><code>format_user_actions()</code> makes at most 10 lines (1,200 chars) in <code>activities.user_actions</code>. The export lists unlinked events between the frames in the session files; the dashboard timeline shows only <code>user_actions</code>, and <code>GET /api/ui-events</code> lists all events by time. With the same app on several displays, events without a point go to the first of its frames in the tick (G21).</li>
   </ul>
@@ -511,20 +511,20 @@ flowchart TB
 <!-- 5 -->
 <section id="storage">
   <h2><span class="n">5</span>Storage</h2>
-  <p>Everything lives under <code>DATA_DIR</code> (default <code>~/.screenmind</code>). Dev instances use <code>~/.screenmind-dev/&lt;worktree&gt;</code>.</p>
+  <p>Everything lives under <code>DATA_DIR</code> (default <code>~/.evolve-capture</code>). Dev instances use <code>~/.evolve-capture-dev/&lt;worktree&gt;</code>.</p>
   <div class="scroll"><table>
     <thead><tr><th>Path</th><th>What</th></tr></thead>
     <tbody>
-      <tr><td><code>screenmind.db</code></td><td>SQLite, WAL mode, FTS5</td></tr>
+      <tr><td><code>evolve-capture.db</code></td><td>SQLite, WAL mode, FTS5</td></tr>
       <tr><td><code>screenshots/YYYY-MM-DD/HH-MM-SS_mmm[_mN].jpg</code></td><td>JPEG frames. <code>_mN</code> is the mss monitor index when all displays are grabbed</td></tr>
       <tr><td><code>settings.json</code></td><td>Runtime overrides from the dashboard. Only values that differ from the default (or <code>.env</code>) are stored, so the rest follow later default changes. A file written before <code>c377a8c</code> can still hold defaults; they shrink on the next save.</td></tr>
-      <tr><td><code>screenmind.log</code>, <code>.1</code>-<code>.3</code></td><td>Log of every app start, console or not (<code>main.run()</code>), rotating at 1 MB, INFO. Starts with "ScreenMind &lt;version&gt; starting" and "Settings that differ from the defaults: ..." with each value's source. <code>SCREENMIND_LOG_FILE</code> moves it.</td></tr>
+      <tr><td><code>evolve-capture.log</code>, <code>.1</code>-<code>.3</code></td><td>Log of every app start, console or not (<code>main.run()</code>), rotating at 1 MB, INFO. Starts with "Evolve Capture &lt;version&gt; starting" and "Settings that differ from the defaults: ..." with each value's source. <code>EVOLVE_CAPTURE_LOG_FILE</code> moves it.</td></tr>
       <tr><td><code>crash.log</code></td><td>Traceback of an error before logging starts, only for a start without stderr (<code>pythonw</code>, a detached <code>python.exe</code>)</td></tr>
       <tr><td><code>models/</code></td><td><code>ocr/</code> (RapidOCR). Old folders are no longer used and can be deleted by hand: <code>gemma-4-e2b/</code> (Gemma GGUF files, about 3.2 GB, unused since 2026-10-08) and <code>embedder/</code>.</td></tr>
       <tr><td><code>.encryption_key</code></td><td>Fernet key backup (also in the OS keyring)</td></tr>
     </tbody>
   </table></div>
-  <h3>Tables in <code>screenmind.db</code></h3>
+  <h3>Tables in <code>evolve-capture.db</code></h3>
   <p>Migrations are a list in <code>Database._init_db()</code>. Version = list index + 1. The latest is <b>v11</b>. It dropped <code>activities.embedding</code>, <code>activities.bookmarked</code>, <code>dev_contexts</code> and <code>daily_summaries</code>, which only removed features used.</p>
   <div class="scroll"><table>
     <thead><tr><th>Table</th><th>Written by</th><th>Columns (migration)</th></tr></thead>
@@ -570,7 +570,7 @@ flowchart TB
     <li><b>Terminal.app</b> (the user's main instance): Terminal gets Screen Recording, Accessibility and Input Monitoring. Every script run from Terminal gets them too.</li>
     <li><b>A Claude session:</b> Claude.app starts children through a <code>disclaimer</code> helper, so Python is its own responsible process. <code>CGPreflightScreenCaptureAccess()</code> says True, but SCK never answers and mss hangs 30 s. Only the first SCK call of the process answers (the display list); later ones hang too. Only <code>screencapture</code> works (G1).</li>
     <li><b>The venv's Python directly</b> (LaunchAgent, IDE): the prompt names "Python" or the IDE.</li>
-    <li><b>A future signed <code>ScreenMind.app</code></b> would show "ScreenMind" (G22).</li>
+    <li><b>A future signed <code>EvolveCapture.app</code></b> would show "Evolve Capture" (G22).</li>
   </ul>
   <p>Accessibility and Input Monitoring are requested only from the UI events settings (<code>POST /api/ui-events/permissions</code>). Screen Recording is never requested explicitly; macOS asks on the first grab.</p>
   <p><span class="chip win">Windows</span> No prompts. Elevated (admin) windows are likely out of reach because of UIPI. Not tested (G25).</p>
@@ -621,7 +621,7 @@ flowchart TB
       <tr data-s="win" data-new="1"><td class="gid">G16</td><td>No <code>get_window_url()</code> on Windows, so <code>meetings.url</code> is always NULL there.</td><td><span class="chip win">Windows</span></td><td><span class="chip new">new</span></td></tr>
       <tr data-s="win" data-new="1"><td class="gid">G17</td><td>No mic-in-use signal on Windows. Discord calls are never detected (Discord is out of scope for now, 2026-10-08). Slack needs "huddle" in the title. A hidden call window ends the call after <code>CALL_END_GRACE_S</code> (120 s).</td><td><span class="chip win">Windows</span></td><td><span class="chip new">new</span></td></tr>
       <tr data-s="both"><td class="gid">G21</td><td>With the same app on several displays, UI events without a point (typing, app switches, clipboard) go to the first frame of that app saved in the tick. Clicks go by position, other apps by name.</td><td><span class="chip both">both</span></td><td>ui-events.md "Same app on two displays"</td></tr>
-      <tr data-s="mac"><td class="gid">G22</td><td>Permission prompts name Terminal or Python, not ScreenMind.</td><td><span class="chip mac">macOS</span></td><td>ui-events.md "macOS permission prompts name Terminal or Python"</td></tr>
+      <tr data-s="mac"><td class="gid">G22</td><td>Permission prompts name Terminal or Python, not Evolve Capture.</td><td><span class="chip mac">macOS</span></td><td>ui-events.md "macOS permission prompts name Terminal or Python"</td></tr>
       <tr data-s="both"><td class="gid">G23</td><td>The DB is plain text. Only screenshots can be encrypted, and that is off by default.</td><td><span class="chip both">both</span></td><td>ui-events.md "Encrypt the whole DB"</td></tr>
       <tr data-s="win" data-new="1"><td class="gid">G25</td><td>Elevated (admin) windows are probably not readable by UIA or the LL hooks from a normal process (UIPI). Not tested. Not a priority (2026-10-08).</td><td><span class="chip win">Windows</span></td><td><span class="chip new">new</span></td></tr>
       <tr data-s="mac"><td class="gid">G26</td><td><code>enable_full_a11y_tree()</code> sets <code>AXManualAccessibility</code> on every Electron and Chromium app. It may cost CPU in those apps.</td><td><span class="chip mac">macOS</span></td><td>ui-events.md "Electron full accessibility tree"</td></tr>
@@ -636,7 +636,7 @@ flowchart TB
       <tr data-s="both" data-new="1"><td class="gid">G41</td><td>One row across a restart only if the restart takes less than <code>CALL_END_GRACE_S</code> and the old row has no transcript. Two Meet rooms back to back within the grace stay one row: the room URL is read once.</td><td><span class="chip both">both</span></td><td><span class="chip new">new</span></td></tr>
     </tbody>
   </table></div>
-  <p class="count">Closed while this map was written: G10 and G11 by <code>fa80d39</code> (Windows a11y reads the page, not the browser UI), G13 by <code>81277a8</code> (capture-time data kept on backlog skips), G20 by <code>399a565</code> (UI events on by default, live on the main instance since 2026-10-07). G2 (one SCK timeout disabled SCK until restart) by the SCK retry change on 2026-10-08. G38 (no log file without a console) and G39 (machines on different settings) by <code>c377a8c</code>: every start writes <code>screenmind.log</code>, the code defaults are the shared settings, the startup log and the e2e status header list what differs, and <code>.env</code> is read from the checkout root. Behaviour change: a dashboard value left at the default is no longer stored, so it follows later default changes. Each machine's existing <code>settings.json</code> needs a one-time cleanup (windows.md "Settings cleanup"). G32 (OCR read Latin only on Windows) by <code>a48f41c</code>: <code>OCR_LANGUAGES</code> defaults to <code>en,es,de,fr,ru</code> on every machine. G19 (no global hotkeys on macOS) went away with the hotkeys themselves in <code>57cf0dd</code>. G15 (Gemma got a bag of words), G18 (no system audio for transcripts) and G33 (<code>-ngl 15</code> on the Windows laptop) are obsolete: Gemma removed 2026-10-08 (<code>069c137</code>). Their ids stay reserved.</p>
+  <p class="count">Closed while this map was written: G10 and G11 by <code>fa80d39</code> (Windows a11y reads the page, not the browser UI), G13 by <code>81277a8</code> (capture-time data kept on backlog skips), G20 by <code>399a565</code> (UI events on by default, live on the main instance since 2026-10-07). G2 (one SCK timeout disabled SCK until restart) by the SCK retry change on 2026-10-08. G38 (no log file without a console) and G39 (machines on different settings) by <code>c377a8c</code>: every start writes <code>evolve-capture.log</code>, the code defaults are the shared settings, the startup log and the e2e status header list what differs, and <code>.env</code> is read from the checkout root. Behaviour change: a dashboard value left at the default is no longer stored, so it follows later default changes. Each machine's existing <code>settings.json</code> needs a one-time cleanup (windows.md "Settings cleanup"). G32 (OCR read Latin only on Windows) by <code>a48f41c</code>: <code>OCR_LANGUAGES</code> defaults to <code>en,es,de,fr,ru</code> on every machine. G19 (no global hotkeys on macOS) went away with the hotkeys themselves in <code>57cf0dd</code>. G15 (Gemma got a bag of words), G18 (no system audio for transcripts) and G33 (<code>-ngl 15</code> on the Windows laptop) are obsolete: Gemma removed 2026-10-08 (<code>069c137</code>). Their ids stay reserved.</p>
 </section>
 
 <!-- 9 -->
@@ -657,7 +657,7 @@ flowchart TB
 <section id="update">
   <h2><span class="n">10</span>How to update</h2>
   <ul>
-    <li><b>Same-commit rule.</b> A change to capture code (<code>screenmind/capture/</code>, <code>capture_worker.py</code>, <code>audio_worker.py</code>, <code>call_detection.py</code>, <code>a11y_extractor.py</code>, <code>ocr.py</code>, <code>labels.py</code>), a platform adapter (<code>screenmind/platform_support/</code>), a privacy filter or a DB migration updates <code>docs/architecture/capture.md</code> in the same commit.</li>
+    <li><b>Same-commit rule.</b> A change to capture code (<code>evolve_capture/capture/</code>, <code>capture_worker.py</code>, <code>audio_worker.py</code>, <code>call_detection.py</code>, <code>a11y_extractor.py</code>, <code>ocr.py</code>, <code>labels.py</code>), a platform adapter (<code>evolve_capture/platform_support/</code>), a privacy filter or a DB migration updates <code>docs/architecture/capture.md</code> in the same commit.</li>
     <li>Update the matrix row, the detail section and the gap table. Close a gap by deleting its row and naming the commit. Keep gap ids stable; don't reuse a deleted id.</li>
     <li>A new migration: add its columns to section 5 with <code>(vN)</code> and update "the latest is vN".</li>
     <li>Mermaid: keep labels in double quotes and check the diagram renders.</li>

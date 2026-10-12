@@ -1,6 +1,6 @@
 """OCR memory and CPU benchmark for the packaging plan (docs/plans/packaging.md).
 
-Runs ScreenMind's OCR on saved screenshots in this process and prints memory
+Runs Evolve Capture's OCR on saved screenshots in this process and prints memory
 and CPU per frame. It grabs nothing from the screen and writes nothing to the
 DB. Memory is what the OS task monitor shows: phys_footprint on macOS, private
 working set (USS) on Windows.
@@ -12,7 +12,7 @@ working set (USS) on Windows.
 onnxruntime's defaults as before 2026-10-07: all cores, memory pattern on.
 
 Options: --frames N (default 20), --dir PATH (default: the newest day folder in
-~/.screenmind/screenshots), --dump FILE (write text and boxes per frame as JSON,
+~/.evolve-capture/screenshots), --dump FILE (write text and boxes per frame as JSON,
 to check that both modes read the same text).
 """
 import argparse
@@ -44,7 +44,7 @@ def main() -> None:
     ap.add_argument("--dump", type=Path)
     args = ap.parse_args()
 
-    shots = args.dir or sorted((Path.home() / ".screenmind" / "screenshots").iterdir())[-1]
+    shots = args.dir or sorted((Path.home() / ".evolve-capture" / "screenshots").iterdir())[-1]
     files = sorted(shots.glob("*.jpg"))
     step = max(1, len(files) // args.frames)
     files = files[::step][: args.frames]
@@ -53,9 +53,9 @@ def main() -> None:
 
     from PIL import Image
 
-    from screenmind.config import settings
-    from screenmind.engine import ocr as ocr_mod
-    from screenmind.engine.ocr import OCRExtractor
+    from evolve_capture.config import settings
+    from evolve_capture.engine import ocr as ocr_mod
+    from evolve_capture.engine.ocr import OCRExtractor
 
     if args.mode == "default":
         tuned = ocr_mod._session_options

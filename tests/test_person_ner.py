@@ -1,8 +1,8 @@
 """Person-name filter (privacy/person_ner.py).
 
 Rule tests use a fake detector, so they need no model. The model tests run
-only when the model is on disk (SCREENMIND_NER_MODEL_DIR, or the default
-~/.screenmind/models/ner/...); they never download it.
+only when the model is on disk (EVOLVE_CAPTURE_NER_MODEL_DIR, or the default
+~/.evolve-capture/models/ner/...); they never download it.
 """
 
 import os
@@ -14,11 +14,11 @@ from unittest.mock import patch
 
 import pytest
 
-from screenmind.config import settings
-from screenmind.privacy import person_ner
-from screenmind.privacy.data_filter import filter_ocr_boxes, filter_sensitive_text
-from screenmind.storage.database import Database
-from screenmind.workers import audio_worker as aw
+from evolve_capture.config import settings
+from evolve_capture.privacy import person_ner
+from evolve_capture.privacy.data_filter import filter_ocr_boxes, filter_sensitive_text
+from evolve_capture.storage.database import Database
+from evolve_capture.workers import audio_worker as aw
 
 
 class FakeDetector:
@@ -86,7 +86,7 @@ def test_ocr_boxes(detector):
 
 
 def test_export_manifest_lists_person_only_with_model(detector, monkeypatch):
-    from screenmind.export.archive import filter_types
+    from evolve_capture.export.archive import filter_types
     person_ner.set_detector(None, enabled=False)
     assert "person" not in filter_types()
     detector("x")
@@ -98,7 +98,7 @@ def test_meeting_title_filtered(detector, tmp_path, monkeypatch):
     db = Database(db_path=tmp_path / "test.db")
     monkeypatch.setattr(settings, "meeting_apps", "meet")
     meet = {"owner": "Google Chrome", "title": "Meet - 1:1 Ivan Petrov", "pid": 20, "bounds": (0, 0, 800, 600)}
-    with patch("screenmind.capture.window.get_window_url", return_value=None):
+    with patch("evolve_capture.capture.window.get_window_url", return_value=None):
         worker = aw.AudioWorker(database=db)
         worker.update([meet], None, now=1000.0)
         worker.update([meet], None, now=1005.0)
@@ -216,7 +216,7 @@ def test_cache_skips_the_model_for_seen_lines():
 # ── The real model, when it is on disk ───────────────────────────────
 
 def _model_dir():
-    d = os.environ.get("SCREENMIND_NER_MODEL_DIR")
+    d = os.environ.get("EVOLVE_CAPTURE_NER_MODEL_DIR")
     return Path(d) if d else person_ner.models_dir()
 
 

@@ -1,10 +1,10 @@
 """Tests for config.py — settings parsing and properties."""
 
-from screenmind.config import Settings
+from evolve_capture.config import Settings
 
 
 def test_default_settings():
-    s = Settings(data_dir="/tmp/screenmind_test")
+    s = Settings(data_dir="/tmp/evolve_capture_test")
     assert s.capture_interval == 10
     assert s.screenshot_quality == 70
     assert s.api_port == 7777
@@ -45,7 +45,7 @@ def test_meeting_apps_list():
 
 
 def test_data_path_resolution():
-    s = Settings(data_dir="~/.screenmind")
+    s = Settings(data_dir="~/.evolve-capture")
     assert s.data_path.is_absolute()
     assert "~" not in str(s.data_path)
 
@@ -65,7 +65,7 @@ def test_settings_json_keys_of_removed_settings_are_ignored(tmp_path, caplog):
         "performance_mode": "maximum", "analysis_mode": "merged", "active_model": "gemma-4-e2b",
         "context_window": 6144, "defer_analysis": False, "meeting_transcription": True,
     }))
-    with caplog.at_level(logging.INFO, logger="screenmind.config"):
+    with caplog.at_level(logging.INFO, logger="evolve_capture.config"):
         s.load_runtime_overrides()
     assert s.capture_interval == 25
     assert not hasattr(s, "bookmark_hotkey")
@@ -155,7 +155,7 @@ def test_describe_non_defaults_none_and_long_values(monkeypatch):
 def _drop_file_handlers():
     import logging
     from logging.handlers import RotatingFileHandler
-    root = logging.getLogger("screenmind")
+    root = logging.getLogger("evolve_capture")
     for h in [h for h in root.handlers if isinstance(h, RotatingFileHandler)]:
         root.removeHandler(h)
         h.close()
@@ -164,17 +164,17 @@ def _drop_file_handlers():
 def test_file_log_in_the_data_dir_once(tmp_path, monkeypatch):
     import logging
     from logging.handlers import RotatingFileHandler
-    from screenmind.config import LOG_MAX_BYTES, setup_file_log
-    monkeypatch.delenv("SCREENMIND_LOG_FILE", raising=False)
+    from evolve_capture.config import LOG_MAX_BYTES, setup_file_log
+    monkeypatch.delenv("EVOLVE_CAPTURE_LOG_FILE", raising=False)
     try:
         path = setup_file_log(tmp_path / "data")
-        assert path == tmp_path / "data" / "screenmind.log"
+        assert path == tmp_path / "data" / "evolve-capture.log"
         assert setup_file_log(tmp_path / "data") == path
-        handlers = [h for h in logging.getLogger("screenmind").handlers
+        handlers = [h for h in logging.getLogger("evolve_capture").handlers
                     if isinstance(h, RotatingFileHandler)]
         assert len(handlers) == 1
         assert handlers[0].maxBytes == LOG_MAX_BYTES <= 2 * 1024 * 1024
-        logging.getLogger("screenmind.test").info("hello log file")
+        logging.getLogger("evolve_capture.test").info("hello log file")
         handlers[0].flush()
         assert "hello log file" in path.read_text(encoding="utf-8")
     finally:
@@ -182,8 +182,8 @@ def test_file_log_in_the_data_dir_once(tmp_path, monkeypatch):
 
 
 def test_file_log_env_var_moves_the_file(tmp_path, monkeypatch):
-    from screenmind.config import setup_file_log
-    monkeypatch.setenv("SCREENMIND_LOG_FILE", str(tmp_path / "elsewhere.log"))
+    from evolve_capture.config import setup_file_log
+    monkeypatch.setenv("EVOLVE_CAPTURE_LOG_FILE", str(tmp_path / "elsewhere.log"))
     try:
         assert setup_file_log(tmp_path / "data") == tmp_path / "elsewhere.log"
         assert (tmp_path / "elsewhere.log").exists()
@@ -192,10 +192,10 @@ def test_file_log_env_var_moves_the_file(tmp_path, monkeypatch):
 
 
 def test_importing_config_writes_no_log_file():
-    """Tests and scripts import screenmind; only an app start opens the file."""
+    """Tests and scripts import evolve_capture; only an app start opens the file."""
     import logging
     from logging.handlers import RotatingFileHandler
-    assert not [h for h in logging.getLogger("screenmind").handlers
+    assert not [h for h in logging.getLogger("evolve_capture").handlers
                 if isinstance(h, RotatingFileHandler)]
 
 
@@ -203,6 +203,6 @@ def test_onnxruntime_telemetry_is_off():
     """onnxruntime's built-in Microsoft telemetry stays off (set in config.py)."""
     import os
 
-    import screenmind.config  # noqa: F401
+    import evolve_capture.config  # noqa: F401
 
     assert os.environ.get("ORT_DISABLE_TELEMETRY") == "1"

@@ -1,1 +1,0 @@
-# ScreenMind - storage module

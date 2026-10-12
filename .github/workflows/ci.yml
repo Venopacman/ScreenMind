@@ -29,7 +29,7 @@ jobs:
       - name: Lint JavaScript (syntax check)
         run: |
           $failed = $false
-          Get-ChildItem screenmind/api/static/js/*.js | ForEach-Object {
+          Get-ChildItem evolve_capture/api/static/js/*.js | ForEach-Object {
             Write-Host "Checking $($_.Name)..."
             node --check $_.FullName 2>&1
             if ($LASTEXITCODE -ne 0) { $failed = $true }
@@ -38,11 +38,11 @@ jobs:
 
       - name: Lint — no bare print() in source
         run: |
-          uv run --locked flake8 --select=T201 --exclude=.venv,tests/,screenmind/setup_llama.py,screenmind/setup_wizard.py .
+          uv run --locked flake8 --select=T201 --exclude=.venv,tests/,evolve_capture/setup_llama.py,evolve_capture/setup_wizard.py .
 
       - name: Run tests with coverage
         run: |
-          uv run --locked pytest --cov=screenmind --cov-report=term-missing --cov-report=xml -q
+          uv run --locked pytest --cov=evolve-capture --cov-report=term-missing --cov-report=xml -q
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5

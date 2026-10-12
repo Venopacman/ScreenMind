@@ -2,14 +2,14 @@
 
 ## Principle: lowest resource use
 
-ScreenMind runs all day on the user's machines (a Mac and a Windows laptop). Aim for the lowest CPU, RAM, GPU and battery use in the long term. Prefer changes that make it lighter. Don't make it heavier for better per-frame analysis (for example a local model per frame; Gemma was removed for this reason); park such ideas in the backlog instead. The budget is in `docs/plans/packaging.md` ("Resource budget").
+Evolve Capture runs all day on the user's machines (a Mac and a Windows laptop). Aim for the lowest CPU, RAM, GPU and battery use in the long term. Prefer changes that make it lighter. Don't make it heavier for better per-frame analysis (for example a local model per frame; Gemma was removed for this reason); park such ideas in the backlog instead. The budget is in `docs/plans/packaging.md` ("Resource budget").
 
 ## Main instance vs worktrees
 
-The user's everyday ScreenMind runs from the main checkout (`/Users/pavel/projects/ScreenMind`, branch `custom`):
+The user's everyday Evolve Capture runs from the main checkout (`/Users/pavel/projects/ScreenMind`, branch `custom`):
 
 - dashboard on port 7777
-- data in `~/.screenmind` (DB, screenshots, `settings.json`)
+- data in `~/.evolve-capture` (DB, screenshots, `settings.json`). The app was called ScreenMind before 0.3.0. Its first start moves `~/.screenmind` here (`evolve_capture/legacy.py`).
 
 Do not stop, restart or reconfigure it unless the user asks. That includes `POST /api/settings` on port 7777.
 
@@ -20,7 +20,7 @@ Feature work happens in git worktrees under `.claude/worktrees/`.
 
 ## Running your branch
 
-Never run `python -m screenmind` or `.venv/bin/screenmind` directly in a worktree. Without its own config it uses `~/.screenmind` and writes into the user's real DB.
+Never run `python -m evolve_capture` or `.venv/bin/evolve-capture` directly in a worktree. Without its own config it uses `~/.evolve-capture` and writes into the user's real DB.
 
 Use the launcher from the worktree root instead. Start it in the background:
 
@@ -28,7 +28,7 @@ Use the launcher from the worktree root instead. Start it in the background:
 scripts/dev-instance.sh
 ```
 
-It gives the worktree its own data dir (`~/.screenmind-dev/<worktree>`) and a fixed port in 7800-7899. It loads the main `.env` (OCR languages, capture on start), then overrides only the isolation settings.
+It gives the worktree its own data dir (`~/.evolve-capture-dev/<worktree>`) and a fixed port in 7800-7899. It loads the main `.env` (OCR languages, capture on start), then overrides only the isolation settings.
 It uses the worktree's `.venv` if there is one, else the main checkout's.
 
 - `scripts/dev-instance.sh info` prints the port and data dir.
@@ -40,7 +40,7 @@ It uses the worktree's `.venv` if there is one, else the main checkout's.
 
 - The main checkout's `.venv` is the main instance's environment. Never run `uv sync`, `uv pip` or `pip` against it.
 - To add a dependency, run `uv add <package>` in your worktree. It updates `pyproject.toml`, `uv.lock` and your worktree's own `.venv`. Commit both files. Tell the user when a lock change is merged, because the main `.venv` then needs a `uv sync` and a restart.
-- OCR models in `~/.screenmind/models/ocr`.
+- OCR models in `~/.evolve-capture/models/ocr`.
 
 ## Tests
 

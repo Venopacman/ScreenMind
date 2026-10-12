@@ -14,9 +14,9 @@ import types
 
 import pytest
 
-from screenmind import watchdog as wd
+from evolve_capture import watchdog as wd
 
-pw = pytest.importorskip("screenmind.platform_support.windows")
+pw = pytest.importorskip("evolve_capture.platform_support.windows")
 
 
 @pytest.fixture
@@ -174,7 +174,7 @@ class TestCallers:
         assert pw.run_uia("recorder", "lookup", lambda: "ok", 0.5) == "ok"
 
     def test_backend_lookups_of_a_hung_app(self, release):
-        win = pytest.importorskip("screenmind.capture.ui_events.windows")
+        win = pytest.importorskip("evolve_capture.capture.ui_events.windows")
         backend = win.WindowsUiEventBackend()
         backend._auto = types.SimpleNamespace(
             ControlFromPoint=lambda x, y: release.wait(),
@@ -183,14 +183,14 @@ class TestCallers:
         assert clicked is None and took < 1.0
 
     def test_backend_focus_of_a_hung_app(self, release):
-        win = pytest.importorskip("screenmind.capture.ui_events.windows")
+        win = pytest.importorskip("evolve_capture.capture.ui_events.windows")
         backend = win.WindowsUiEventBackend()
         backend._auto = types.SimpleNamespace(GetFocusedControl=lambda: release.wait())
         focused, took = elapsed(backend.focused_element)
         assert focused is None and took < 1.0
 
     def test_clipboard_read_of_a_hung_owner(self, monkeypatch, release):
-        win = pytest.importorskip("screenmind.capture.ui_events.windows")
+        win = pytest.importorskip("evolve_capture.capture.ui_events.windows")
         backend = win.WindowsUiEventBackend()
         monkeypatch.setattr(backend, "_read_clipboard", release.wait)
         text, took = elapsed(backend.read_clipboard)
@@ -250,7 +250,7 @@ class TestWatchdog:
         clock.now += wd.CAPTURE_STUCK_S - 1
         assert dog.check() == []
         clock.now += 2
-        with caplog.at_level("WARNING", logger="screenmind.watchdog"):
+        with caplog.at_level("WARNING", logger="evolve_capture.watchdog"):
             assert dog.check() == ["capture"]
         assert "Thread stacks" in caplog.text and "MainThread" in caplog.text
 
@@ -267,7 +267,7 @@ class TestWatchdog:
         cap = types.SimpleNamespace(last_beat=clock.now)
         dog = wd.Watchdog(capture_worker=cap, clock=clock)
         clock.now += wd.CAPTURE_STUCK_S
-        with caplog.at_level("WARNING", logger="screenmind.watchdog"):
+        with caplog.at_level("WARNING", logger="evolve_capture.watchdog"):
             dog.check()
             clock.now += 60
             dog.check()
@@ -337,7 +337,7 @@ class TestWatchdog:
 
 class TestRecorderRestart:
     def test_restart_with_a_stuck_enricher_gets_a_new_lock(self, monkeypatch, release):
-        from screenmind.capture.ui_events import recorder as rec_mod
+        from evolve_capture.capture.ui_events import recorder as rec_mod
         monkeypatch.setattr(rec_mod, "_STOP_JOIN_S", 0.1)
         monkeypatch.setattr(rec_mod, "_LOCK_TIMEOUT_S", 0.1)
 
@@ -424,7 +424,7 @@ class TestShutdownDeadline:
         """Without the deadline, Python waits for the non-daemon thread forever."""
         code = textwrap.dedent("""
             import threading
-            from screenmind import watchdog
+            from evolve_capture import watchdog
             threading.Thread(target=threading.Event().wait).start()  # never ends
             watchdog.start_shutdown_deadline(seconds=0.5)
         """)
@@ -432,7 +432,7 @@ class TestShutdownDeadline:
         assert proc.returncode == wd.FORCED_EXIT_CODE
 
     def test_normal_exit_is_not_delayed(self):
-        code = "from screenmind import watchdog; watchdog.start_shutdown_deadline(seconds=60)"
+        code = "from evolve_capture import watchdog; watchdog.start_shutdown_deadline(seconds=60)"
         t0 = time.monotonic()
         proc = subprocess.run([sys.executable, "-c", code], timeout=30, capture_output=True)
         assert proc.returncode == 0

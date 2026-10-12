@@ -1,6 +1,6 @@
 """Tests for storage/models.py — Pydantic data models."""
 
-from screenmind.storage.models import ActivityRecord, ScreenshotEntry
+from evolve_capture.storage.models import ActivityRecord, ScreenshotEntry
 
 
 def test_activity_record_defaults():

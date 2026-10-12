@@ -9,7 +9,7 @@ import types
 
 import pytest
 
-from screenmind.platform_support.macos import MacOSAdapter
+from evolve_capture.platform_support.macos import MacOSAdapter
 
 
 def _win(owner, title, pid, layer=0, w=800, h=600):
@@ -95,14 +95,14 @@ def test_window_bounds_none_without_windows(fake_quartz, adapter):
 
 def test_base_adapter_bounds_default_none():
     """Windows/Linux adapters inherit the default and report no bounds."""
-    from screenmind.platform_support.base import PlatformAdapter
+    from evolve_capture.platform_support.base import PlatformAdapter
     assert PlatformAdapter.get_active_window_bounds(object()) is None
 
 
 def test_screen_capture_window_center_uses_adapter(monkeypatch):
     """ScreenCapture picks the monitor from the adapter's frontmost window."""
-    from screenmind.capture.screen import ScreenCapture
-    import screenmind.platform_support as ps
+    from evolve_capture.capture.screen import ScreenCapture
+    import evolve_capture.platform_support as ps
 
     fake = type("A", (), {"get_active_window_bounds": lambda self: (100, 50, 800, 600)})()
     monkeypatch.setattr(ps, "adapter", lambda: fake)
@@ -143,13 +143,13 @@ def test_top_window_title_falls_back_to_owner(fake_quartz, adapter):
 
 
 def test_base_adapter_top_window_default_none():
-    from screenmind.platform_support.base import PlatformAdapter
+    from evolve_capture.platform_support.base import PlatformAdapter
     assert PlatformAdapter.get_top_window_in(object(), 0, 0, 100, 100) is None
 
 
 def test_get_front_window_public_shape():
     from unittest.mock import patch
-    from screenmind.platform_support.macos import MacOSAdapter
+    from evolve_capture.platform_support.macos import MacOSAdapter
     a = MacOSAdapter.__new__(MacOSAdapter)
     front = {"owner": "Slack", "pid": 42, "title": "general", "bounds": (0, 0, 800, 600)}
     with patch.object(MacOSAdapter, "_front_window", return_value=front):
@@ -160,6 +160,6 @@ def test_get_front_window_public_shape():
 
 def test_can_find_top_window_flags(adapter):
     """macOS can tell an empty display from "unknown"; the base adapter can't."""
-    from screenmind.platform_support.base import PlatformAdapter
+    from evolve_capture.platform_support.base import PlatformAdapter
     assert adapter.can_find_top_window is True
     assert PlatformAdapter.can_find_top_window.fget(object()) is False

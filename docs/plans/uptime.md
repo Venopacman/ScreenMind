@@ -1,8 +1,8 @@
-# Uptime: no stuck part stops ScreenMind
+# Uptime: no stuck part stops Evolve Capture
 
 Status: steps 1-3 built on 2026-10-08 for G37 ([windows.md](../backlog/windows.md) "G37"). Steps 4-5 come later.
 
-Goal: ScreenMind runs all day. A hung OS call must not stop capture, analysis or shutdown, and a part that stops anyway is noticed and restarted. All of this must stay cheap (see "lowest resource use" in `CLAUDE.md`): no extra process, no polling faster than every 30 s, and no work when nothing is wrong.
+Goal: Evolve Capture runs all day. A hung OS call must not stop capture, analysis or shutdown, and a part that stops anyway is noticed and restarted. All of this must stay cheap (see "lowest resource use" in `CLAUDE.md`): no extra process, no polling faster than every 30 s, and no work when nothing is wrong.
 
 ## What happened on 2026-10-07
 

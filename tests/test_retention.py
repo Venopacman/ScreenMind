@@ -3,9 +3,9 @@ import asyncio
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock
 
-from screenmind.config import settings
-from screenmind.storage.models import ScreenshotEntry
-from screenmind.workers.retention import Retention
+from evolve_capture.config import settings
+from evolve_capture.storage.models import ScreenshotEntry
+from evolve_capture.workers.retention import Retention
 
 NOTHING = {"activities": 0, "meetings": 0}
 

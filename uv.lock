@@ -359,6 +359,79 @@ wheels = [
 ]
 
 [[package]]
+name = "evolve-capture"
+source = { editable = "." }
+dependencies = [
+    { name = "cryptography" },
+    { name = "fastapi" },
+    { name = "imagehash" },
+    { name = "keyring" },
+    { name = "mss" },
+    { name = "onnxruntime" },
+    { name = "pillow" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-screencapturekit", marker = "sys_platform == 'darwin'" },
+    { name = "python-dotenv" },
+    { name = "rapidocr" },
+    { name = "uiautomation", marker = "sys_platform == 'win32'" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+windows = [
+    { name = "uiautomation", marker = "sys_platform == 'win32'" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "flake8" },
+    { name = "flake8-print" },
+    { name = "httpx" },
+    { name = "numpy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cryptography", specifier = ">=41.0,<50.0" },
+    { name = "fastapi", specifier = ">=0.115.6,<1.0" },
+    { name = "imagehash", specifier = ">=4.3,<5.0" },
+    { name = "keyring", specifier = ">=23.0" },
+    { name = "mss", specifier = ">=9.0,<10.0" },
+    { name = "onnxruntime", specifier = ">=1.18,<2.0" },
+    { name = "pillow", specifier = ">=10.0,<13.0" },
+    { name = "pydantic", specifier = ">=2.7.0,<3.0.0" },
+    { name = "pydantic-settings", specifier = ">=2.0,<3.0" },
+    { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin'", specifier = ">=10.0" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'", specifier = ">=10.0" },
+    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'", specifier = ">=10.0" },
+    { name = "pyobjc-framework-screencapturekit", marker = "sys_platform == 'darwin'", specifier = ">=10.0" },
+    { name = "python-dotenv", specifier = ">=0.21,<2.0" },
+    { name = "rapidocr", specifier = ">=3.9,<4.0" },
+    { name = "uiautomation", marker = "sys_platform == 'win32'", specifier = ">=2.0,<3.0" },
+    { name = "uiautomation", marker = "sys_platform == 'win32' and extra == 'windows'", specifier = ">=2.0,<3.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0,<1.0" },
+]
+provides-extras = ["ai", "windows"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "flake8" },
+    { name = "flake8-print" },
+    { name = "httpx", specifier = ">=0.28.0,<1.0" },
+    { name = "numpy", specifier = ">=1.26,<3.0" },
+    { name = "pytest", specifier = ">=7.0" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+]
+
+[[package]]
 name = "fastapi"
 version = "0.115.6"
 source = { registry = "https://pypi.org/simple" }
@@ -1223,79 +1296,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/cf/d9/135be205d9de8783193aff9cc3bf483a03a38e4b29432c954e8cb66ac14e/scipy-1.18.1-cp315-cp315t-musllinux_1_2_x86_64.whl", hash = "sha256:179ce34a8d0fe273d8883ba59e17e052247d08973dfcb743ca52bb1cce2d60b0", size = 37521946, upload-time = "2026-08-21T23:28:35.245Z" },
     { url = "https://files.pythonhosted.org/packages/5c/a2/5b7d5270621ab7cfa3f7766067bf95dc360b5efb6394694e8143b4156e2b/scipy-1.18.1-cp315-cp315t-win_amd64.whl", hash = "sha256:5632e3ae3d09197c446310cd5187de63e28448ce22f0f67b2b93d97503c0c230", size = 37408295, upload-time = "2026-08-21T23:28:40.724Z" },
     { url = "https://files.pythonhosted.org/packages/63/ad/741c19fcb66755ff953daf9243af8480e4bf3d7fbe57583c178c7d2b6b51/scipy-1.18.1-cp315-cp315t-win_arm64.whl", hash = "sha256:eda632a7981f69730d6281f451db9c1c370993a2c0d7ddb43e2a809a2862b83a", size = 25319710, upload-time = "2026-08-21T23:28:45.713Z" },
-]
-
-[[package]]
-name = "screenmind"
-source = { editable = "." }
-dependencies = [
-    { name = "cryptography" },
-    { name = "fastapi" },
-    { name = "imagehash" },
-    { name = "keyring" },
-    { name = "mss" },
-    { name = "onnxruntime" },
-    { name = "pillow" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-screencapturekit", marker = "sys_platform == 'darwin'" },
-    { name = "python-dotenv" },
-    { name = "rapidocr" },
-    { name = "uiautomation", marker = "sys_platform == 'win32'" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.optional-dependencies]
-windows = [
-    { name = "uiautomation", marker = "sys_platform == 'win32'" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "flake8" },
-    { name = "flake8-print" },
-    { name = "httpx" },
-    { name = "numpy" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "cryptography", specifier = ">=41.0,<50.0" },
-    { name = "fastapi", specifier = ">=0.115.6,<1.0" },
-    { name = "imagehash", specifier = ">=4.3,<5.0" },
-    { name = "keyring", specifier = ">=23.0" },
-    { name = "mss", specifier = ">=9.0,<10.0" },
-    { name = "onnxruntime", specifier = ">=1.18,<2.0" },
-    { name = "pillow", specifier = ">=10.0,<13.0" },
-    { name = "pydantic", specifier = ">=2.7.0,<3.0.0" },
-    { name = "pydantic-settings", specifier = ">=2.0,<3.0" },
-    { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin'", specifier = ">=10.0" },
-    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'", specifier = ">=10.0" },
-    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'", specifier = ">=10.0" },
-    { name = "pyobjc-framework-screencapturekit", marker = "sys_platform == 'darwin'", specifier = ">=10.0" },
-    { name = "python-dotenv", specifier = ">=0.21,<2.0" },
-    { name = "rapidocr", specifier = ">=3.9,<4.0" },
-    { name = "uiautomation", marker = "sys_platform == 'win32'", specifier = ">=2.0,<3.0" },
-    { name = "uiautomation", marker = "sys_platform == 'win32' and extra == 'windows'", specifier = ">=2.0,<3.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0,<1.0" },
-]
-provides-extras = ["ai", "windows"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "flake8" },
-    { name = "flake8-print" },
-    { name = "httpx", specifier = ">=0.28.0,<1.0" },
-    { name = "numpy", specifier = ">=1.26,<3.0" },
-    { name = "pytest", specifier = ">=7.0" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
 ]
 
 [[package]]

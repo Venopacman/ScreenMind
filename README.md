@@ -1,6 +1,6 @@
 <div align="center">
 
-# ScreenMind
+# Evolve Capture
 
 **Local screen activity recorder. It collects what you do on your computer and labels it by rules.**
 
@@ -13,7 +13,7 @@
 
 </div>
 
-ScreenMind records your actions: screenshots, apps and windows, browser URLs, screen text, clicks and app switches, and calls. Near-duplicate frames are dropped by image hash. Rules give each frame a first label: app and category. No model runs. Everything runs on your machine.
+Evolve Capture records your actions: screenshots, apps and windows, browser URLs, screen text, clicks and app switches, and calls. Near-duplicate frames are dropped by image hash. Rules give each frame a first label: app and category. No model runs. Everything runs on your machine.
 
 It is a data source for a workflows app. The per-day export is the hand-off point. See [docs/export-format.md](docs/export-format.md).
 
@@ -26,12 +26,12 @@ Based on [ayushh0110/ScreenMind](https://github.com/ayushh0110/ScreenMind). This
 ### Collection
 
 - **Screenshots.** One JPEG per display. The capture loop grabs on change, on a timer (`CAPTURE_INTERVAL`) and, with UI events on, right after an app switch, click or typing pause.
-- **Dedup.** pHash per display (`screenmind/capture/dedup.py`). A frame that did not change is deleted and not stored.
+- **Dedup.** pHash per display (`evolve_capture/capture/dedup.py`). A frame that did not change is deleted and not stored.
 - **Window and app info.** App name and window title for each display.
 - **Accessibility text.** Text of the focused window, read through the OS accessibility API.
 - **Browser URL.** The URL the browser reports, cleaned by `privacy/url_filter.py` before storage.
 - **OCR.** RapidOCR on ONNX Runtime, CPU only. It runs when the accessibility text is not real content.
-- **UI events (macOS and Windows).** Clicks, app switches, typed text and clipboard by default. Password fields are never recorded; secrets are redacted by the sensitive-data filter, but there is no PII detection yet. Code: `screenmind/capture/ui_events/`.
+- **UI events (macOS and Windows).** Clicks, app switches, typed text and clipboard by default. Password fields are never recorded; secrets are redacted by the sensitive-data filter, but there is no PII detection yet. Code: `evolve_capture/capture/ui_events/`.
 - **Calls.** Zoom, Teams, Meet, Webex, Slack and Discord calls are tracked with start, end, app and room URL. No audio is recorded.
 
 The detailed map of what is collected per OS, and how, is [docs/architecture/capture.md](docs/architecture/capture.md).
@@ -43,7 +43,7 @@ The detailed map of what is collected per OS, and how, is [docs/architecture/cap
 - **Layout-ordered text.** `engine/layout_analyzer.py` groups OCR boxes into screen regions.
 - **Empty screens.** A frame with no app, no title and little text is labelled `idle`.
 
-ScreenMind used to label frames with a local Gemma model. It was removed on 2026-10-08. Old rows keep Gemma's summary and details. New rows leave them empty.
+Evolve Capture used to label frames with a local Gemma model. It was removed on 2026-10-08. Old rows keep Gemma's summary and details. New rows leave them empty.
 
 ### Privacy
 
@@ -68,7 +68,7 @@ At `http://127.0.0.1:7777`:
 
 - **Retention.** Data older than `RETENTION_DAYS` (default 7) is deleted at startup.
 - **Start at login.** Windows Registry, macOS LaunchAgent or Linux XDG autostart (`startup.py`).
-- **Launcher.** `screenmind --launch` shows a splash screen and opens the dashboard.
+- **Launcher.** `evolve-capture --launch` shows a splash screen and opens the dashboard.
 - **Auto-pause for heavy apps.** Games and video editors pause capture.
 
 ---
@@ -80,27 +80,35 @@ At `http://127.0.0.1:7777`:
 ### 1. Install
 
 ```bash
-pip install screenmind
+pip install evolve-capture
 # or, with uv:
-uv tool install screenmind
+uv tool install evolve-capture
 ```
 
 ### 2. Run
 
 ```bash
-screenmind              # Normal start (foreground)
-screenmind --launch     # Splash screen + auto-open dashboard
-screenmind --background # Run silently without console window
+evolve-capture              # Normal start (foreground)
+evolve-capture --launch     # Splash screen + auto-open dashboard
+evolve-capture --background # Run silently without console window
 ```
 
 ### 3. Open http://127.0.0.1:7777
 
-On first run, ScreenMind will:
+On first run, Evolve Capture will:
 
 - Show the welcome screen.
-- Create `~/.screenmind/` for data.
-- Download the OCR models into `~/.screenmind/models/ocr/` on the first OCR run.
+- Create `~/.evolve-capture/` for data.
+- Download the OCR models into `~/.evolve-capture/models/ocr/` on the first OCR run.
 - Create a desktop shortcut.
+
+**Upgrading from ScreenMind (before 0.3.0).** The app was called ScreenMind. The first start of 0.3.0 does this (`evolve_capture/legacy.py`):
+
+- Moves `~/.screenmind` to `~/.evolve-capture`, and leaves a symlink at the old path (macOS and Linux). It renames `screenmind.db` and `screenmind.log`, and rewrites the screenshot paths in the DB. It skips the move when `DATA_DIR` is set, when another instance runs, or when `~/.evolve-capture` already holds data.
+- Copies the encryption key from keyring service `screenmind` to `evolve-capture`. The old entry is deleted on a later start, once the copy is checked.
+- Replaces the old start-at-login entry (`com.screenmind` LaunchAgent, Run value `ScreenMind`, `screenmind.desktop`) with the new one.
+
+Old desktop shortcuts (`ScreenMind.command`, `ScreenMind.lnk`) point at removed files. Delete them and run `evolve-capture --install-shortcut`.
 
 <details>
 <summary><b>More CLI options</b></summary>
@@ -108,11 +116,11 @@ On first run, ScreenMind will:
 <br>
 
 ```bash
-screenmind --install-startup    # Register to start at system login
-screenmind --uninstall-startup  # Remove from system startup
-screenmind --install-shortcut   # Create desktop shortcut
-screenmind --version            # Show version
-screenmind --help               # Show all options
+evolve-capture --install-startup    # Register to start at system login
+evolve-capture --uninstall-startup  # Remove from system startup
+evolve-capture --install-shortcut   # Create desktop shortcut
+evolve-capture --version            # Show version
+evolve-capture --help               # Show all options
 ```
 
 </details>
@@ -128,14 +136,14 @@ cd ScreenMind
 
 # Needs uv: https://docs.astral.sh/uv/getting-started/installation/
 uv sync                      # creates .venv from uv.lock, with dev tools
-uv run screenmind            # or: uv run python -m screenmind
+uv run evolve-capture            # or: uv run python -m evolve_capture
 ```
 
 Dependencies live in `pyproject.toml` and are pinned in `uv.lock`. Add or change one with `uv add <package>` (or edit `pyproject.toml` and run `uv lock`), then commit both files.
 
 **Windows checkouts set up with pip:** since `c68311a` the project needs Python 3.14 and uv. Install uv before the next pull (PowerShell: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`). Then pull and run `uv sync`. uv downloads Python 3.14 and replaces the old `.venv`.
 
-**Second instance from a git worktree:** run `scripts/dev-instance.sh` from the worktree root. It uses its own data dir (`~/.screenmind-dev/<worktree>`) and a port in 7800-7899. It shares the OCR models. `scripts/dev-instance.sh info` prints the port and data dir.
+**Second instance from a git worktree:** run `scripts/dev-instance.sh` from the worktree root. It uses its own data dir (`~/.evolve-capture-dev/<worktree>`) and a port in 7800-7899. It shares the OCR models. `scripts/dev-instance.sh info` prints the port and data dir.
 
 </details>
 
@@ -238,7 +246,7 @@ Full Swagger docs are at `http://127.0.0.1:7777/docs`.
 
 ## Configuration
 
-The defaults below are the settings for every machine. Change one only when a machine needs it: in `.env` (in the checkout root), as an environment variable, or on the **Settings** page (saved to `settings.json` in the data dir; `settings.json` beats `.env`). The Settings page stores only values that differ from the default, so the rest follow later default changes. At startup ScreenMind logs every setting that differs from its default, and where it comes from.
+The defaults below are the settings for every machine. Change one only when a machine needs it: in `.env` (in the checkout root), as an environment variable, or on the **Settings** page (saved to `settings.json` in the data dir; `settings.json` beats `.env`). The Settings page stores only values that differ from the default, so the rest follow later default changes. At startup Evolve Capture logs every setting that differs from its default, and where it comes from.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -252,8 +260,8 @@ The defaults below are the settings for every machine. Change one only when a ma
 | `UI_EVENTS_ENABLED` | `true` | Record the UI event types listed in `UI_EVENTS_TYPES` (macOS, Windows) |
 | `UI_EVENTS_TYPES` | `click,app_switch,text,clipboard` | Which UI event types to record (`window_focus` also available) |
 | `EVENT_TRIGGERED_CAPTURE` | `true` | Capture right after app switches, clicks and typing pauses |
-| `SCREENMIND_LOG_LEVEL` | `INFO` | Log verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` (environment variable only, not `.env`) |
-| `SCREENMIND_LOG_FILE` | `<data dir>/screenmind.log` | Log file, written on every start (rotating, 1 MB × 3 backups; environment variable only) |
+| `EVOLVE_CAPTURE_LOG_LEVEL` | `INFO` | Log verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` (environment variable only, not `.env`) |
+| `EVOLVE_CAPTURE_LOG_FILE` | `<data dir>/evolve-capture.log` | Log file, written on every start (rotating, 1 MB × 3 backups; environment variable only) |
 
 See `.env.example` for the full list.
 
@@ -276,7 +284,7 @@ See `.env.example` for the full list.
 
 ## Wayland Support
 
-ScreenMind detects Wayland sessions and uses compositor-native capture:
+Evolve Capture detects Wayland sessions and uses compositor-native capture:
 
 | Compositor | Capture | Window Detection | Notes |
 |---|---|---|---|
@@ -313,7 +321,7 @@ sudo dnf install grim
 
 ```
 ScreenMind/
-├── screenmind/
+├── evolve_capture/
 │   ├── main.py                  # Entry point, starts all services
 │   ├── config.py                # Pydantic settings (env + runtime overrides)
 │   ├── launcher.py              # Splash screen launcher (tkinter)
@@ -382,7 +390,7 @@ Run the test suite:
 
 ```bash
 uv run pytest tests -q
-uv run pytest --cov=screenmind --cov-report=term-missing -q   # with coverage
+uv run pytest --cov=evolve-capture --cov-report=term-missing -q   # with coverage
 ```
 
 `uv run` installs the locked dependencies first if needed. CI runs the same locked install on push/PR via GitHub Actions (Windows, Python 3.14).

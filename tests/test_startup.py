@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from screenmind.startup import (
+from evolve_capture.startup import (
     _get_startup_command,
     install_startup,
     uninstall_startup,
@@ -22,8 +22,8 @@ from screenmind.startup import (
 class TestGetStartupCommand:
     """Tests for _get_startup_command() platform-specific logic."""
 
-    @patch("screenmind.startup.sys")
-    @patch("screenmind.startup.Path")
+    @patch("evolve_capture.startup.sys")
+    @patch("evolve_capture.startup.Path")
     def test_windows_uses_pythonw(self, mock_path_cls, mock_sys):
         """On Windows, should prefer pythonw.exe to avoid console flash."""
         mock_sys.platform = "win32"
@@ -34,11 +34,11 @@ class TestGetStartupCommand:
         cmd = _get_startup_command()
 
         assert "pythonw.exe" in cmd
-        assert "-m screenmind" in cmd
+        assert "-m evolve_capture" in cmd
         assert "--background" not in cmd  # pythonw doesn't need --background
 
-    @patch("screenmind.startup.sys")
-    @patch("screenmind.startup.Path")
+    @patch("evolve_capture.startup.sys")
+    @patch("evolve_capture.startup.Path")
     def test_windows_fallback_no_pythonw(self, mock_path_cls, mock_sys):
         """On Windows without pythonw, should use --background flag."""
         mock_sys.platform = "win32"
@@ -50,20 +50,20 @@ class TestGetStartupCommand:
         assert "python.exe" in cmd
         assert "--background" in cmd
 
-    @patch("screenmind.startup.shutil")
-    @patch("screenmind.startup.sys")
+    @patch("evolve_capture.startup.shutil")
+    @patch("evolve_capture.startup.sys")
     def test_unix_prefers_console_script(self, mock_sys, mock_shutil):
         """On macOS/Linux, should prefer pip-installed console script."""
         mock_sys.platform = "linux"
-        mock_shutil.which.return_value = "/usr/local/bin/screenmind"
+        mock_shutil.which.return_value = "/usr/local/bin/evolve-capture"
 
         cmd = _get_startup_command()
 
-        assert "/usr/local/bin/screenmind" in cmd
+        assert "/usr/local/bin/evolve-capture" in cmd
         assert "--background" in cmd
 
-    @patch("screenmind.startup.shutil")
-    @patch("screenmind.startup.sys")
+    @patch("evolve_capture.startup.shutil")
+    @patch("evolve_capture.startup.sys")
     def test_unix_fallback_no_console_script(self, mock_sys, mock_shutil):
         """On macOS/Linux without console script, uses sys.executable."""
         mock_sys.platform = "linux"
@@ -73,7 +73,7 @@ class TestGetStartupCommand:
         cmd = _get_startup_command()
 
         assert "/usr/bin/python3" in cmd
-        assert "-m screenmind --background" in cmd
+        assert "-m evolve_capture --background" in cmd
 
 
 # ── Windows Startup Registration ─────────────────────────────────────────────
@@ -82,8 +82,8 @@ class TestGetStartupCommand:
 class TestWindowsStartup:
     """Tests for Windows registry startup registration."""
 
-    @patch("screenmind.startup.sys")
-    @patch("screenmind.startup._get_startup_command", return_value='"C:\\pythonw.exe" -m screenmind')
+    @patch("evolve_capture.startup.sys")
+    @patch("evolve_capture.startup._get_startup_command", return_value='"C:\\pythonw.exe" -m evolve_capture')
     def test_install_windows(self, mock_cmd, mock_sys):
         mock_sys.platform = "win32"
         mock_winreg = MagicMock()
@@ -94,16 +94,16 @@ class TestWindowsStartup:
         mock_winreg.REG_SZ = 1
 
         with patch.dict("sys.modules", {"winreg": mock_winreg}):
-            from screenmind.startup import _install_windows
+            from evolve_capture.startup import _install_windows
             result = _install_windows()
 
         assert result is True
         mock_winreg.SetValueEx.assert_called_once_with(
-            mock_key, "ScreenMind", 0, 1, '"C:\\pythonw.exe" -m screenmind'
+            mock_key, "Evolve Capture", 0, 1, '"C:\\pythonw.exe" -m evolve_capture'
         )
         mock_winreg.CloseKey.assert_called_once_with(mock_key)
 
-    @patch("screenmind.startup.sys")
+    @patch("evolve_capture.startup.sys")
     def test_uninstall_windows(self, mock_sys):
         mock_sys.platform = "win32"
         mock_winreg = MagicMock()
@@ -113,29 +113,29 @@ class TestWindowsStartup:
         mock_winreg.KEY_SET_VALUE = 0x0002
 
         with patch.dict("sys.modules", {"winreg": mock_winreg}):
-            from screenmind.startup import _uninstall_windows
+            from evolve_capture.startup import _uninstall_windows
             result = _uninstall_windows()
 
         assert result is True
-        mock_winreg.DeleteValue.assert_called_once_with(mock_key, "ScreenMind")
+        mock_winreg.DeleteValue.assert_called_once_with(mock_key, "Evolve Capture")
 
-    @patch("screenmind.startup.sys")
+    @patch("evolve_capture.startup.sys")
     def test_is_installed_windows_true(self, mock_sys):
         mock_sys.platform = "win32"
         mock_winreg = MagicMock()
         mock_key = MagicMock()
         mock_winreg.OpenKey.return_value = mock_key
-        mock_winreg.QueryValueEx.return_value = ('"C:\\pythonw.exe" -m screenmind', 1)
+        mock_winreg.QueryValueEx.return_value = ('"C:\\pythonw.exe" -m evolve_capture', 1)
         mock_winreg.HKEY_CURRENT_USER = 0x80000001
         mock_winreg.KEY_READ = 0x20019
 
         with patch.dict("sys.modules", {"winreg": mock_winreg}):
-            from screenmind.startup import _is_installed_windows
+            from evolve_capture.startup import _is_installed_windows
             result = _is_installed_windows()
 
         assert result is True
 
-    @patch("screenmind.startup.sys")
+    @patch("evolve_capture.startup.sys")
     def test_is_installed_windows_false(self, mock_sys):
         mock_sys.platform = "win32"
         mock_winreg = MagicMock()
@@ -146,7 +146,7 @@ class TestWindowsStartup:
         mock_winreg.KEY_READ = 0x20019
 
         with patch.dict("sys.modules", {"winreg": mock_winreg}):
-            from screenmind.startup import _is_installed_windows
+            from evolve_capture.startup import _is_installed_windows
             result = _is_installed_windows()
 
         assert result is False
@@ -158,43 +158,43 @@ class TestWindowsStartup:
 class TestLinuxStartup:
     """Tests for Linux XDG autostart."""
 
-    @patch("screenmind.startup._linux_desktop_file")
-    @patch("screenmind.startup._linux_autostart_dir")
-    @patch("screenmind.startup._get_startup_command", return_value='"/usr/bin/screenmind" --background')
+    @patch("evolve_capture.startup._linux_desktop_file")
+    @patch("evolve_capture.startup._linux_autostart_dir")
+    @patch("evolve_capture.startup._get_startup_command", return_value='"/usr/bin/evolve-capture" --background')
     def test_install_linux(self, mock_cmd, mock_dir, mock_file):
         mock_dir_path = MagicMock()
         mock_dir.return_value = mock_dir_path
         mock_file_path = MagicMock()
         mock_file.return_value = mock_file_path
 
-        from screenmind.startup import _install_linux
+        from evolve_capture.startup import _install_linux
         result = _install_linux()
 
         assert result is True
         mock_dir_path.mkdir.assert_called_once_with(parents=True, exist_ok=True)
         mock_file_path.write_text.assert_called_once()
         written = mock_file_path.write_text.call_args[0][0]
-        assert "ScreenMind" in written
-        assert '"/usr/bin/screenmind" --background' in written
+        assert "Evolve Capture" in written
+        assert '"/usr/bin/evolve-capture" --background' in written
         assert "Terminal=false" in written
 
-    @patch("screenmind.startup._linux_desktop_file")
+    @patch("evolve_capture.startup._linux_desktop_file")
     def test_uninstall_linux_exists(self, mock_file):
         mock_path = MagicMock()
         mock_path.exists.return_value = True
         mock_file.return_value = mock_path
-        from screenmind.startup import _uninstall_linux
+        from evolve_capture.startup import _uninstall_linux
         result = _uninstall_linux()
 
         assert result is True
         mock_path.unlink.assert_called_once()
 
-    @patch("screenmind.startup._linux_desktop_file")
+    @patch("evolve_capture.startup._linux_desktop_file")
     def test_is_installed_linux(self, mock_file):
         mock_path = MagicMock()
         mock_path.exists.return_value = True
         mock_file.return_value = mock_path
-        from screenmind.startup import _is_installed_linux
+        from evolve_capture.startup import _is_installed_linux
         assert _is_installed_linux() is True
 
         mock_path.exists.return_value = False
@@ -207,34 +207,34 @@ class TestLinuxStartup:
 class TestMacOSStartup:
     """Tests for macOS LaunchAgent."""
 
-    @patch("screenmind.startup._macos_plist_file")
-    @patch("screenmind.startup._macos_plist_dir")
-    @patch("screenmind.startup._get_startup_command", return_value='"/usr/bin/screenmind" --background')
+    @patch("evolve_capture.startup._macos_plist_file")
+    @patch("evolve_capture.startup._macos_plist_dir")
+    @patch("evolve_capture.startup._get_startup_command", return_value='"/usr/bin/evolve-capture" --background')
     def test_install_macos(self, mock_cmd, mock_dir, mock_file):
         mock_dir_path = MagicMock()
         mock_dir.return_value = mock_dir_path
         mock_file_path = MagicMock()
         mock_file.return_value = mock_file_path
 
-        from screenmind.startup import _install_macos
-        with patch("screenmind.startup.settings") as mock_settings:
-            mock_settings.data_path = Path("/tmp/screenmind")
+        from evolve_capture.startup import _install_macos
+        with patch("evolve_capture.startup.settings") as mock_settings:
+            mock_settings.data_path = Path("/tmp/evolve_capture")
             result = _install_macos()
 
         assert result is True
         mock_dir_path.mkdir.assert_called_once_with(parents=True, exist_ok=True)
         mock_file_path.write_text.assert_called_once()
         written = mock_file_path.write_text.call_args[0][0]
-        assert "com.screenmind" in written
+        assert "com.nebius.evolve.work.capture" in written
         assert "RunAtLoad" in written
         assert "<true/>" in written
 
-    @patch("screenmind.startup._macos_plist_file")
+    @patch("evolve_capture.startup._macos_plist_file")
     def test_is_installed_macos(self, mock_file):
         mock_path = MagicMock()
         mock_path.exists.return_value = True
         mock_file.return_value = mock_path
-        from screenmind.startup import _is_installed_macos
+        from evolve_capture.startup import _is_installed_macos
         assert _is_installed_macos() is True
 
 
@@ -246,14 +246,14 @@ class TestPersistentCaptureState:
 
     def test_pause_persists_state(self):
         """Pausing should save capture_paused=True to settings."""
-        from screenmind.workers.capture_worker import CaptureWorker
+        from evolve_capture.workers.capture_worker import CaptureWorker
         queue = asyncio.Queue(maxsize=100)
         worker = CaptureWorker(queue=queue)
 
         # Start in running state
         worker._paused = False
 
-        with patch("screenmind.workers.capture_worker.settings") as mock_settings:
+        with patch("evolve_capture.workers.capture_worker.settings") as mock_settings:
             worker.pause(source="test")
 
         assert worker.is_paused is True
@@ -261,14 +261,14 @@ class TestPersistentCaptureState:
 
     def test_resume_persists_state(self):
         """Resuming should save capture_paused=False to settings."""
-        from screenmind.workers.capture_worker import CaptureWorker
+        from evolve_capture.workers.capture_worker import CaptureWorker
         queue = asyncio.Queue(maxsize=100)
         worker = CaptureWorker(queue=queue)
 
         # Start in paused state (default)
         assert worker.is_paused is True
 
-        with patch("screenmind.workers.capture_worker.settings") as mock_settings:
+        with patch("evolve_capture.workers.capture_worker.settings") as mock_settings:
             worker.resume(source="test")
 
         assert worker.is_paused is False
@@ -276,14 +276,14 @@ class TestPersistentCaptureState:
 
     def test_pause_idempotent(self):
         """Pausing when already paused should not persist or log."""
-        from screenmind.workers.capture_worker import CaptureWorker
+        from evolve_capture.workers.capture_worker import CaptureWorker
         queue = asyncio.Queue(maxsize=100)
         worker = CaptureWorker(queue=queue)
 
         # Already paused (default)
         assert worker.is_paused is True
 
-        with patch("screenmind.workers.capture_worker.settings") as mock_settings:
+        with patch("evolve_capture.workers.capture_worker.settings") as mock_settings:
             worker.pause(source="test")
 
         # Should not have called save since state didn't change
@@ -291,24 +291,24 @@ class TestPersistentCaptureState:
 
     def test_resume_idempotent(self):
         """Resuming when already running should not persist or log."""
-        from screenmind.workers.capture_worker import CaptureWorker
+        from evolve_capture.workers.capture_worker import CaptureWorker
         queue = asyncio.Queue(maxsize=100)
         worker = CaptureWorker(queue=queue)
         worker._paused = False  # Already running
 
-        with patch("screenmind.workers.capture_worker.settings") as mock_settings:
+        with patch("evolve_capture.workers.capture_worker.settings") as mock_settings:
             worker.resume(source="test")
 
         mock_settings.save_runtime_overrides.assert_not_called()
 
     def test_persist_failure_does_not_crash(self):
         """Settings write failure should not prevent pause/resume."""
-        from screenmind.workers.capture_worker import CaptureWorker
+        from evolve_capture.workers.capture_worker import CaptureWorker
         queue = asyncio.Queue(maxsize=100)
         worker = CaptureWorker(queue=queue)
         worker._paused = False
 
-        with patch("screenmind.workers.capture_worker.settings") as mock_settings:
+        with patch("evolve_capture.workers.capture_worker.settings") as mock_settings:
             mock_settings.save_runtime_overrides.side_effect = OSError("disk full")
             worker.pause(source="test")
 
@@ -324,7 +324,7 @@ class TestPortCheck:
 
     def test_port_in_use_detection(self):
         """Should detect when a port is already bound."""
-        from screenmind.main import _is_port_in_use
+        from evolve_capture.main import _is_port_in_use
 
         # Bind a port
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -335,7 +335,7 @@ class TestPortCheck:
 
     def test_port_not_in_use(self):
         """Should return False for an unbound port."""
-        from screenmind.main import _is_port_in_use
+        from evolve_capture.main import _is_port_in_use
 
         # Find a free port
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -353,14 +353,14 @@ class TestBackgroundMode:
 
     def test_background_does_not_pass_flag_to_child(self):
         """Child process should NOT receive --background flag (prevents re-exec loop)."""
-        with patch("screenmind.main.subprocess.Popen") as mock_popen, \
-             patch("screenmind.main.sys") as mock_sys, \
-             patch("screenmind.main.settings") as mock_settings, \
-             patch("screenmind.main.Path") as mock_path:
-            mock_sys.argv = ["screenmind", "--background"]
+        with patch("evolve_capture.main.subprocess.Popen") as mock_popen, \
+             patch("evolve_capture.main.sys") as mock_sys, \
+             patch("evolve_capture.main.settings") as mock_settings, \
+             patch("evolve_capture.main.Path") as mock_path:
+            mock_sys.argv = ["evolve_capture", "--background"]
             mock_sys.platform = "win32"
             mock_sys.executable = r"C:\Python312\python.exe"
-            mock_settings.data_path = Path("/tmp/screenmind")
+            mock_settings.data_path = Path("/tmp/evolve_capture")
             mock_settings.api_host = "127.0.0.1"
             mock_settings.api_port = 7777
             mock_path.return_value.exists.return_value = True
@@ -368,6 +368,6 @@ class TestBackgroundMode:
             # The run() function should spawn child without --background
             # We can't easily call run() since it also checks other flags,
             # but we can verify the core logic pattern:
-            # subprocess.Popen([pythonw, "-m", "screenmind"]) — no --background
-            cmd = [r"C:\Python312\pythonw.exe", "-m", "screenmind"]
+            # subprocess.Popen([pythonw, "-m", "evolve_capture"]) — no --background
+            cmd = [r"C:\Python312\pythonw.exe", "-m", "evolve_capture"]
             assert "--background" not in cmd

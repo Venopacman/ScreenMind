@@ -8,9 +8,9 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from screenmind.config import Settings
-from screenmind.engine import ocr
-from screenmind.engine.ocr import OCRExtractor, _fix_lookalikes, _rec_model
+from evolve_capture.config import Settings
+from evolve_capture.engine import ocr
+from evolve_capture.engine.ocr import OCRExtractor, _fix_lookalikes, _rec_model
 
 BOX = [[0.0, 0.0], [10.5, 0.0], [10.5, 10.0], [0.0, 10.0]]
 
@@ -64,10 +64,10 @@ class TestRecModel:
         assert _rec_model(["en", "ja", "ko"]) == "ch"
 
     def test_warns_only_when_a_script_is_dropped(self, caplog):
-        with caplog.at_level("WARNING", logger="screenmind.engine.ocr"):
+        with caplog.at_level("WARNING", logger="evolve_capture.engine.ocr"):
             _rec_model(["en", "es", "de", "fr", "ru"])  # Latin is read by eslav
         assert not caplog.records
-        with caplog.at_level("WARNING", logger="screenmind.engine.ocr"):
+        with caplog.at_level("WARNING", logger="evolve_capture.engine.ocr"):
             _rec_model(["en", "ru", "ja"])
         assert "one script at a time" in caplog.text
 
@@ -279,18 +279,18 @@ def test_app_uses_bundled_models(app_bundle, rec):
 
 def test_app_falls_back_when_a_bundled_model_is_missing(app_bundle, tmp_path):
     (app_bundle / "eslav_PP-OCRv5_rec_mobile.onnx").unlink()
-    assert ocr._ocr_models_dir("eslav") == tmp_path / "home" / ".screenmind" / "models" / "ocr"
+    assert ocr._ocr_models_dir("eslav") == tmp_path / "home" / ".evolve-capture" / "models" / "ocr"
     assert ocr._ocr_models_dir("en") == app_bundle
 
 
 def test_app_downloads_other_languages_to_home(app_bundle, tmp_path):
     # Korean is not bundled: RapidOCR downloads it, never into the bundle
-    assert ocr._ocr_models_dir("korean") == tmp_path / "home" / ".screenmind" / "models" / "ocr"
+    assert ocr._ocr_models_dir("korean") == tmp_path / "home" / ".evolve-capture" / "models" / "ocr"
 
 
 def test_source_run_ignores_a_bundle(app_bundle, monkeypatch, tmp_path):
     monkeypatch.delattr(sys, "frozen", raising=False)
-    assert ocr._ocr_models_dir("en") == tmp_path / "home" / ".screenmind" / "models" / "ocr"
+    assert ocr._ocr_models_dir("en") == tmp_path / "home" / ".evolve-capture" / "models" / "ocr"
 
 
 def test_bundled_file_names_are_rapidocrs():

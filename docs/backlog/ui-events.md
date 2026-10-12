@@ -90,10 +90,10 @@ Status: idea
 
 `MacOSAdapter.enable_full_a11y_tree()` sets `AXManualAccessibility` once per process on Electron and Chromium apps (Claude, Slack, VS Code). This made titles and text much better. It may cost some CPU in those apps. If they get slower, limit it to an allowlist of apps.
 
-### macOS permission prompts name Terminal or Python, not ScreenMind
+### macOS permission prompts name Terminal or Python, not Evolve Capture
 Status: idea
 
-Input Monitoring and Accessibility are granted to whatever launched ScreenMind. A small signed helper `.app` would show "ScreenMind" in the prompts. It only matters for an upstream release.
+Input Monitoring and Accessibility are granted to whatever launched Evolve Capture. A small signed helper `.app` would show "Evolve Capture" in the prompts. It only matters for an upstream release.
 
 Refs: plan section "macOS permission problem".
 

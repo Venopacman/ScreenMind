@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 @pytest.fixture
 def client():
     """Create a test client with mocked dependencies."""
-    from screenmind.api.server import create_app
-    from screenmind.storage.database import Database
+    from evolve_capture.api.server import create_app
+    from evolve_capture.storage.database import Database
     from fastapi.testclient import TestClient
 
     db = MagicMock(spec=Database)
@@ -22,7 +22,7 @@ def test_root_returns_html(client):
     """Dashboard HTML loads."""
     r = client.get("/")
     assert r.status_code == 200
-    assert "ScreenMind" in r.text
+    assert "Evolve Capture" in r.text
 
 
 def test_status_endpoint(client):

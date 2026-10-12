@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for ScreenMind tests."""
+"""Shared pytest fixtures for Evolve Capture tests."""
 
 import tempfile
 from unittest.mock import MagicMock, patch
@@ -7,19 +7,19 @@ import pytest
 
 
 
-from screenmind.config import settings
+from evolve_capture.config import settings
 
 
 @pytest.fixture(autouse=True, scope="session")
 def _isolate_data_dir(tmp_path_factory):
-    """Keep every test out of the real data dir (~/.screenmind by default).
+    """Keep every test out of the real data dir (~/.evolve-capture by default).
 
     Without this, tests write into the user's live data: CaptureWorker.pause()
     persists capture_paused=true to settings.json (so the next app start is
     paused).
     Session-scoped because some modules cache connections to files there.
     """
-    data_dir = tmp_path_factory.mktemp("screenmind-data")
+    data_dir = tmp_path_factory.mktemp("evolve-capture-data")
     mp = pytest.MonkeyPatch()
     mp.setattr(settings, "data_dir", str(data_dir))
     yield data_dir
@@ -30,7 +30,7 @@ def _isolate_data_dir(tmp_path_factory):
 def _no_person_model():
     """Never download or load the person-name model in tests. Tests of the
     name filter pass in their own detector."""
-    from screenmind.privacy import person_ner
+    from evolve_capture.privacy import person_ner
     person_ner.set_detector(None, enabled=False)
     yield
 
@@ -39,14 +39,14 @@ def _no_person_model():
 def _screen_unlocked(monkeypatch):
     """Capture tests must not depend on whether this machine's screen is
     locked. Tests of the lock check itself patch it back."""
-    monkeypatch.setattr("screenmind.workers.capture_worker.is_screen_locked", lambda: False)
+    monkeypatch.setattr("evolve_capture.workers.capture_worker.is_screen_locked", lambda: False)
 
 
 @pytest.fixture(autouse=True)
 def _no_screen_recording_prompt(monkeypatch):
     """A capture tick asks macOS for Screen Recording. Tests must never show
     that prompt. Tests of the check itself patch it back."""
-    monkeypatch.setattr("screenmind.workers.capture_worker.screen_recording_access",
+    monkeypatch.setattr("evolve_capture.workers.capture_worker.screen_recording_access",
                         lambda request=False: None)
 
 
@@ -59,7 +59,7 @@ def tmp_data_dir(tmp_path):
 @pytest.fixture
 def mock_settings(tmp_path):
     """Patch settings to use temp directories."""
-    with patch("screenmind.config.settings") as mock:
+    with patch("evolve_capture.config.settings") as mock:
         mock.data_path = tmp_path
         mock.screenshots_dir = tmp_path / "screenshots"
         mock.db_path = tmp_path / "test.db"
@@ -80,7 +80,7 @@ def mock_settings(tmp_path):
 @pytest.fixture
 def db(tmp_path):
     """Create a fresh test database."""
-    from screenmind.storage.database import Database
+    from evolve_capture.storage.database import Database
     test_db = Database(db_path=tmp_path / "test.db")
     yield test_db
     test_db.close()
@@ -97,19 +97,19 @@ def sample_image():
 @pytest.fixture
 def app(db):
     """Create a test FastAPI app."""
-    import screenmind.api.dependencies as deps
-    from screenmind.api.server import create_app
+    import evolve_capture.api.dependencies as deps
+    from evolve_capture.api.server import create_app
 
     application = create_app(database=db)
 
     # Also patch the module-level db references in route modules
     # since they may have been imported with a previous db value
-    import screenmind.api.routes.timeline as _tl
-    import screenmind.api.routes.stats as _st
-    import screenmind.api.routes.data as _dt
-    import screenmind.api.routes.screenshots as _ss
-    import screenmind.api.routes.meetings as _mt
-    import screenmind.api.routes.search as _sr
+    import evolve_capture.api.routes.timeline as _tl
+    import evolve_capture.api.routes.stats as _st
+    import evolve_capture.api.routes.data as _dt
+    import evolve_capture.api.routes.screenshots as _ss
+    import evolve_capture.api.routes.meetings as _mt
+    import evolve_capture.api.routes.search as _sr
 
     for mod in [_tl, _st, _dt, _ss, _mt, _sr]:
         mod.db = db

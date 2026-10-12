@@ -7,10 +7,10 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
-from screenmind.config import settings
-from screenmind.export import archive
-from screenmind.export.archive import write_export
-from screenmind.export.sessions import IdleGapSplitter, build_sessions
+from evolve_capture.config import settings
+from evolve_capture.export import archive
+from evolve_capture.export.archive import write_export
+from evolve_capture.export.sessions import IdleGapSplitter, build_sessions
 
 DAY = date(2026, 10, 6)
 JWT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
@@ -116,7 +116,7 @@ def test_export_layout_and_manifest(db):
 
     names = set(zf.namelist())
     day = f"{root}/2026-10-06"
-    assert root == "screenmind-export_pavel@example.com_2026-10-06"
+    assert root == "evolve-capture-export_pavel@example.com_2026-10-06"
     assert {f"{root}/manifest.json", f"{root}/README.md", f"{day}/sessions.json",
             f"{day}/activities.jsonl", f"{day}/ui_events.jsonl", f"{day}/meetings.jsonl",
             f"{day}/sessions/01_0900-0905.md", f"{day}/sessions/02_1000-1000.md"} <= names
@@ -280,9 +280,9 @@ async def test_api_export_zip(client, db):
     resp = await client.get("/api/export", params={"date": "2026-10-06", "user": "Pavel S.", "screenshots": "false"})
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/zip"
-    assert 'filename="screenmind-export_Pavel_S._2026-10-06.zip"' in resp.headers["content-disposition"]
+    assert 'filename="evolve-capture-export_Pavel_S._2026-10-06.zip"' in resp.headers["content-disposition"]
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
-    manifest = json.loads(zf.read("screenmind-export_Pavel_S._2026-10-06/manifest.json"))
+    manifest = json.loads(zf.read("evolve-capture-export_Pavel_S._2026-10-06/manifest.json"))
     assert manifest["user"] == "Pavel S."
     assert manifest["totals"]["activities"] == 1
 
@@ -295,7 +295,7 @@ async def test_api_export_range_and_gap(client, db):
     })
     assert resp.status_code == 200
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
-    manifest = json.loads(zf.read("screenmind-export_u_2026-10-05_2026-10-06/manifest.json"))
+    manifest = json.loads(zf.read("evolve-capture-export_u_2026-10-05_2026-10-06/manifest.json"))
     assert manifest["totals"]["sessions"] == 1
     assert manifest["session_rule"]["params"] == {"gap_minutes": 30}
 
@@ -339,4 +339,4 @@ async def test_api_export_deletes_temp_file(client, db, tmp_path, monkeypatch):
     _add_activity(db, _ts(9, 0))
     resp = await client.get("/api/export", params={"date": "2026-10-06", "user": "u", "screenshots": "false"})
     assert resp.status_code == 200
-    assert not list(tmp_path.glob("screenmind-export-*"))
+    assert not list(tmp_path.glob("evolve-capture-export-*"))

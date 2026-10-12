@@ -6,9 +6,9 @@ from unittest.mock import patch
 
 import pytest
 
-from screenmind.platform_support.macos import MacOSAdapter
-from screenmind.workers import analysis_worker as aw
-from screenmind.workers.analysis_worker import _a11y_is_content, _screen_text_len
+from evolve_capture.platform_support.macos import MacOSAdapter
+from evolve_capture.workers import analysis_worker as aw
+from evolve_capture.workers.analysis_worker import _a11y_is_content, _screen_text_len
 
 
 # ── Content detection ───────────────────────────────────────────────

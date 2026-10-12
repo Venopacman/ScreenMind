@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-End-to-end check of ScreenMind data collection on this machine.
+End-to-end check of Evolve Capture data collection on this machine.
 
-It starts ScreenMind with a throwaway data dir and its own port, runs a short
-scripted scenario on the real desktop, stops ScreenMind and then reads the DB.
+It starts Evolve Capture with a throwaway data dir and its own port, runs a short
+scripted scenario on the real desktop, stops Evolve Capture and then reads the DB.
 For each data point from docs/architecture/capture.md it prints PASS, FAIL or
 SKIP with evidence.
 
@@ -19,13 +19,13 @@ Run it from the repo root:
 See docs/status/README.md for the rules.
 
 Safety:
-- Never uses ~/.screenmind or port 7777. Data goes to a temp dir that is
+- Never uses ~/.evolve-capture or port 7777. Data goes to a temp dir that is
   deleted at the end (--keep-data keeps it).
 - Types only into a scratch file it opens itself (TextEdit / Notepad) and
   into a password box it opens itself. Before every injected key or click it
   checks that the scratch editor is in front, and stops input if it is not.
 - Clicks only inside the scratch editor window.
-- Windows: ScreenMind ignores injected input there, so the click and typing
+- Windows: Evolve Capture ignores injected input there, so the click and typing
   steps ask you to do them by hand.
 - Evidence in the report shows only test data (the scratch file, example.com,
   the markers). Secrets typed by the test are masked in the report.
@@ -130,7 +130,7 @@ class Report:
         return [r for r in self.rows if r["result"] == FAIL]
 
 
-# ── ScreenMind instance ──────────────────────────────────────────────────────
+# ── Evolve Capture instance ──────────────────────────────────────────────────────
 
 def _port_free(port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -195,7 +195,7 @@ class Instance:
     def __init__(self, data_dir: Path, port: int):
         self.data_dir = data_dir
         self.port = port
-        self.log_path = data_dir / "e2e-screenmind.log"
+        self.log_path = data_dir / "e2e-evolve-capture.log"
         self.proc = None
         self._log_file = None
 
@@ -207,23 +207,23 @@ class Instance:
         env.update({
             # Isolation
             "DATA_DIR": str(self.data_dir),
-            "SCREENMIND_DATA_DIR": str(self.data_dir),
+            "EVOLVE_CAPTURE_DATA_DIR": str(self.data_dir),
             "API_HOST": "127.0.0.1",
             "API_PORT": str(self.port),
             "SETUP_COMPLETE": "true",
             **TEST_ENV,
-            "SCREENMIND_LOG_LEVEL": "INFO",
+            "EVOLVE_CAPTURE_LOG_LEVEL": "INFO",
             "PYTHONUNBUFFERED": "1",
             "PYTHONUTF8": "1",
             "PYTHONIOENCODING": "utf-8",
         })
-        env.pop("SCREENMIND_LOG_FILE", None)
+        env.pop("EVOLVE_CAPTURE_LOG_FILE", None)
         return env
 
     def start(self):
         self._log_file = open(self.log_path, "w", encoding="utf-8")
         self.proc = subprocess.Popen(
-            [sys.executable, "-m", "screenmind"],
+            [sys.executable, "-m", "evolve_capture"],
             cwd=REPO, env=self.env(),
             stdin=subprocess.DEVNULL, stdout=self._log_file, stderr=subprocess.STDOUT,
         )
@@ -238,14 +238,14 @@ class Instance:
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self.proc.poll() is not None:
-                raise RuntimeError(f"ScreenMind exited with code {self.proc.returncode}. "
+                raise RuntimeError(f"Evolve Capture exited with code {self.proc.returncode}. "
                                    f"See {self.log_path}")
             try:
                 self.api("/api/status")
                 return
             except (urllib.error.URLError, OSError, ValueError):
                 time.sleep(1)
-        raise RuntimeError(f"ScreenMind did not answer on port {self.port} in {timeout}s")
+        raise RuntimeError(f"Evolve Capture did not answer on port {self.port} in {timeout}s")
 
     def stop(self, timeout=90):
         if not self.proc or self.proc.poll() is not None:
@@ -257,7 +257,7 @@ class Instance:
         try:
             self.proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            log("ScreenMind did not stop in time; killing it.")
+            log("Evolve Capture did not stop in time; killing it.")
             self.proc.kill()
             self.proc.wait(timeout=10)
         if self._log_file:
@@ -278,7 +278,7 @@ class Driver:
 
     def front(self):
         """(app_name, title) of the front window, lowercased app."""
-        from screenmind.platform_support import adapter
+        from evolve_capture.platform_support import adapter
         try:
             w = adapter().get_front_window() or {}
         except Exception:
@@ -299,9 +299,9 @@ class Driver:
     def browser_names(self):
         """Lowercased app names the adapter treats as browsers."""
         if OS_KEY == "macos":
-            from screenmind.platform_support.macos import BROWSER_APPS
+            from evolve_capture.platform_support.macos import BROWSER_APPS
             return set(BROWSER_APPS)
-        from screenmind.platform_support.windows import _BROWSER_EXES
+        from evolve_capture.platform_support.windows import _BROWSER_EXES
         return set(_BROWSER_EXES)
 
     def display_count(self):
@@ -398,7 +398,7 @@ class MacDriver(Driver):
         """A dialog with a secure text field, owned by our own osascript process."""
         script = (
             'activate\n'
-            'display dialog "ScreenMind e2e check: password field test. '
+            'display dialog "Evolve Capture e2e check: password field test. '
             'Type the test secret and press Return." default answer "" '
             'with hidden answer giving up after 60'
         )
@@ -470,7 +470,7 @@ class WinDriver(Driver):
         ps = (
             "Add-Type -AssemblyName System.Windows.Forms;"
             "$f = New-Object Windows.Forms.Form;"
-            "$f.Text = 'ScreenMind e2e password test';"
+            "$f.Text = 'Evolve Capture e2e password test';"
             "$f.Width = 460; $f.Height = 130; $f.TopMost = $true;"
             "$t = New-Object Windows.Forms.TextBox;"
             "$t.UseSystemPasswordChar = $true; $t.Left = 20; $t.Top = 20; $t.Width = 400;"
@@ -512,7 +512,7 @@ class Scenario:
         self.typed_secret = f"Zq{rid}x9!"
         self.field_secret = f"Pw{rid}k7#"
         self.clip_marker = f"e2e clipboard {rid}"
-        self.file = work_dir / f"screenmind-e2e-{rid}.txt"
+        self.file = work_dir / f"evolve-capture-e2e-{rid}.txt"
         self.notes = []          # what happened, for the report
         self.input_mode = "none"  # injected / manual / none
         self.input_done = False
@@ -523,11 +523,11 @@ class Scenario:
 
     def write_scratch_file(self):
         para = (
-            f"ScreenMind end-to-end check, run {self.run_id}. "
+            f"Evolve Capture end-to-end check, run {self.run_id}. "
             f"Marker for the accessibility check: {self.a11y_marker}. "
             "This scratch file was written by scripts/e2e_collect.py and can be deleted. "
             "The check opens it, clicks inside it and types a few test lines, so that "
-            "ScreenMind has known text, a known window title and known UI events to find "
+            "Evolve Capture has known text, a known window title and known UI events to find "
             "in its database afterwards. Nothing here is real data. "
             "The quick brown fox jumps over the lazy dog, again and again, so there is "
             "enough text on screen for the accessibility reader to count it as content."
@@ -707,8 +707,8 @@ SEED_APP = "e2e-retention-seed"
 
 def seed_old_rows(data_dir: Path):
     """Rows 30 days old, which startup retention (7 days) must delete."""
-    from screenmind.storage.database import Database
-    db_path = data_dir / "screenmind.db"
+    from evolve_capture.storage.database import Database
+    db_path = data_dir / "evolve-capture.db"
     db = Database(db_path=db_path)  # creates the schema
     db.close()
     old = datetime.now() - timedelta(days=30)
@@ -823,7 +823,7 @@ def wait_for_analysis(db_path, timeout):
 
 
 def run_checks(rep: Report, sc: Scenario, inst: Instance, ui_status: dict, displays: int, seed_shot: Path):
-    db_path = inst.data_dir / "screenmind.db"
+    db_path = inst.data_dir / "evolve-capture.db"
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     log_text = inst.log_text()
@@ -1126,7 +1126,7 @@ def _gap_cell(gaps):
 
 def write_status(path: Path, meta: dict, rows: list, notes: list):
     lines = [
-        f"# ScreenMind collection status: {meta['os_label']}",
+        f"# Evolve Capture collection status: {meta['os_label']}",
         "",
         "Generated by `scripts/e2e_collect.py --write-status`. Don't edit by hand; run the check again.",
         "How to read it: [README.md](README.md).",
@@ -1188,7 +1188,7 @@ def write_summary():
         labels = dict(CHECK_LABELS)
 
     lines = [
-        "# ScreenMind collection status: all machines",
+        "# Evolve Capture collection status: all machines",
         "",
         "Generated from the other files in this folder by `scripts/e2e_collect.py --summary`",
         "(also run by `--write-status`). Don't edit by hand. On a merge conflict, run",
@@ -1278,7 +1278,7 @@ def main():
         return 2
 
     started = time.time()
-    data_dir = Path(tempfile.mkdtemp(prefix="screenmind-e2e-"))
+    data_dir = Path(tempfile.mkdtemp(prefix="evolve-capture-e2e-"))
     try:
         return _run(args, started, data_dir)
     finally:
@@ -1289,15 +1289,15 @@ def main():
 
 
 def _run(args, started, data_dir):
-    work_dir = Path(tempfile.mkdtemp(prefix="screenmind-e2e-work-"))
-    home_data = Path.home() / ".screenmind"
+    work_dir = Path(tempfile.mkdtemp(prefix="evolve-capture-e2e-work-"))
+    home_data = Path.home() / ".evolve-capture"
     assert data_dir.resolve() != home_data.resolve()
     port = pick_port()
 
-    # Point this process at the temp dir too, before anything imports screenmind
+    # Point this process at the temp dir too, before anything imports evolve_capture
     os.environ["DATA_DIR"] = str(data_dir)
-    os.environ["SCREENMIND_DATA_DIR"] = str(data_dir)
-    os.environ.setdefault("SCREENMIND_LOG_LEVEL", "WARNING")
+    os.environ["EVOLVE_CAPTURE_DATA_DIR"] = str(data_dir)
+    os.environ.setdefault("EVOLVE_CAPTURE_LOG_LEVEL", "WARNING")
     sys.path.insert(0, str(REPO))
 
     driver = MacDriver() if OS_KEY == "macos" else WinDriver()
@@ -1310,7 +1310,7 @@ def _run(args, started, data_dir):
         sc.notes.append("Started from a Claude Code session. On macOS such a process can't use "
                         "ScreenCaptureKit (gap G1), so the grab backend row is not valid. "
                         "Run it from Terminal.app for the real result.")
-    log("ScreenMind e2e collection check")
+    log("Evolve Capture e2e collection check")
     log(f"  data dir: {data_dir} (temporary)")
     log(f"  port:     {port}")
     log(f"  run id:   {sc.run_id}")
@@ -1322,13 +1322,13 @@ def _run(args, started, data_dir):
     ui_status = {}
     try:
         seed_shot = seed_old_rows(data_dir)
-        step("Starting ScreenMind")
+        step("Starting Evolve Capture")
         inst.start()
         inst.wait_ready()
-        step("ScreenMind is up; waiting for its first frame")
+        step("Evolve Capture is up; waiting for its first frame")
         # Startup grabs (and a possible SCK timeout) must finish first, or the
         # browser's app switch is merged into them and never gets its own frame
-        if not wait_for_rows(data_dir / "screenmind.db", "SELECT COUNT(*) FROM activities "
+        if not wait_for_rows(data_dir / "evolve-capture.db", "SELECT COUNT(*) FROM activities "
                              "WHERE detected_app IS NOT ?", (SEED_APP,), 45):
             log("  No frame after 45s. Screen capture may be broken; going on anyway.")
         time.sleep(4)
@@ -1341,12 +1341,12 @@ def _run(args, started, data_dir):
 
         sc.run()
 
-        if not wait_for_editor_frame(data_dir / "screenmind.db", driver.editor_app, 45):
+        if not wait_for_editor_frame(data_dir / "evolve-capture.db", driver.editor_app, 45):
             # Bring it to the front once more; a frame with it must exist for most checks
             step(f"No {driver.editor_app} frame yet; showing it again for 30s")
             if OS_KEY == "macos":
                 driver.open_editor(sc.file)
-            if not wait_for_editor_frame(data_dir / "screenmind.db", driver.editor_app, 30):
+            if not wait_for_editor_frame(data_dir / "evolve-capture.db", driver.editor_app, 30):
                 sc.notes.append(f"No {driver.editor_app} frame was saved in 75s after the scenario.")
         # Stop collecting before the person takes the computer back. Otherwise
         # their own windows keep adding frames, analysis never catches up, and
@@ -1358,7 +1358,7 @@ def _run(args, started, data_dir):
         log("You can use the computer again. The rest is waiting for analysis.")
 
         step("Waiting for analysis")
-        waited = wait_for_analysis(data_dir / "screenmind.db", args.analysis_timeout)
+        waited = wait_for_analysis(data_dir / "evolve-capture.db", args.analysis_timeout)
         step(f"Analysis wait done after {waited:.0f}s")
         try:
             ui_status = {**ui_status, **inst.api("/api/ui-events/status")}
@@ -1373,7 +1373,7 @@ def _run(args, started, data_dir):
         inst.stop()
         tail = inst.log_text()[-3000:]
         if tail:
-            log("Last lines of the ScreenMind log:")
+            log("Last lines of the Evolve Capture log:")
             log(tail)
         return 2
     finally:
@@ -1383,7 +1383,7 @@ def _run(args, started, data_dir):
             pass
         shutil.rmtree(work_dir, ignore_errors=True)
 
-    step("Stopping ScreenMind")
+    step("Stopping Evolve Capture")
     inst.stop()
     if sc.saved_clipboard:
         driver.set_clipboard(sc.saved_clipboard)  # text only; images are not saved
@@ -1399,7 +1399,7 @@ def _run(args, started, data_dir):
         perm_txt = ", ".join(f"{k}={'yes' if v else 'no' if v is not None else '?'}"
                              for k, v in perms.items())
         if ui_status.get("permissions"):
-            perm_txt += "; ScreenMind sees: " + ", ".join(
+            perm_txt += "; Evolve Capture sees: " + ", ".join(
                 f"{k}={'yes' if v else 'no'}" for k, v in ui_status["permissions"].items() if k != "all_granted")
         meta = {
             "os_label": {"macos": "macOS", "windows": "Windows"}[OS_KEY] +

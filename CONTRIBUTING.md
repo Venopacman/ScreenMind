@@ -1,8 +1,8 @@
-# Contributing to ScreenMind
+# Contributing to Evolve Capture
 
 Contributions are welcome: bug fixes, features, docs and tests.
 
-ScreenMind collects actions and labels them for a workflows app. New features should collect, dedup, unify, label or export actions. See [docs/plans/strip-to-actions.md](docs/plans/strip-to-actions.md).
+Evolve Capture collects actions and labels them for a workflows app. New features should collect, dedup, unify, label or export actions. See [docs/plans/strip-to-actions.md](docs/plans/strip-to-actions.md).
 
 ## Setup
 
@@ -24,7 +24,7 @@ ScreenMind collects actions and labels them for a workflows app. New features sh
    uv run pytest tests -q
    ```
 
-4. Run your branch from a git worktree with `scripts/dev-instance.sh` (from the worktree root). It uses its own data dir (`~/.screenmind-dev/<worktree>`) and a port in 7800-7899, so it does not touch the main instance's data. `scripts/dev-instance.sh info` prints the port and data dir. Stop it with Ctrl+C when you are done, because it captures the screen.
+4. Run your branch from a git worktree with `scripts/dev-instance.sh` (from the worktree root). It uses its own data dir (`~/.evolve-capture-dev/<worktree>`) and a port in 7800-7899, so it does not touch the main instance's data. `scripts/dev-instance.sh info` prints the port and data dir. Stop it with Ctrl+C when you are done, because it captures the screen.
 
 ## Reporting Bugs
 
@@ -54,8 +54,8 @@ All output goes through Python's `logging` module. **Never use bare `print()`** 
 ```python
 import logging
 
-logger = logging.getLogger("screenmind.<module_path>")
-# e.g. "screenmind.workers.analysis_worker"
+logger = logging.getLogger("evolve_capture.<module_path>")
+# e.g. "evolve_capture.workers.analysis_worker"
 
 logger.info("Normal operation")
 logger.warning("Something unexpected but recoverable")
@@ -65,27 +65,27 @@ logger.debug("Verbose detail for troubleshooting")
 
 **Rules:**
 - Declare `logger` at **module level**, after all imports
-- Use the `screenmind.<dotted.module.path>` naming convention
+- Use the `evolve_capture.<dotted.module.path>` naming convention
 - Pick the right level: `info` for milestones, `warning` for degraded state, `error` for failures, `debug` for verbose detail
 - **No emoji in logger messages.** They crash on Windows cp1252 terminals. Emoji in UI strings (dashboard, DB text) are fine
 - If you genuinely need a `print(file=sys.stderr)` (e.g. startup banners), add `# noqa: T201`
 
 ### Why?
 
-Logging goes to `stderr` and, once the app starts (`main.run()`), to a rotating `screenmind.log` in the data dir. `SCREENMIND_LOG_LEVEL` sets the level and `SCREENMIND_LOG_FILE` moves the file. A bare `print()` skips both.
+Logging goes to `stderr` and, once the app starts (`main.run()`), to a rotating `evolve-capture.log` in the data dir. `EVOLVE_CAPTURE_LOG_LEVEL` sets the level and `EVOLVE_CAPTURE_LOG_FILE` moves the file. A bare `print()` skips both.
 
 ## Where Help is Needed
 
 - **Capture gaps.** The open gaps per OS are listed in [docs/architecture/capture.md, section 8](docs/architecture/capture.md#8-gaps).
 - **Wayland testing.** Wayland capture works but needs more real-world testing across distros.
-- **Label rules.** Add apps and sites to `KNOWN_APP_CATEGORIES` and `SITE_CATEGORIES` in `screenmind/engine/labels.py`.
+- **Label rules.** Add apps and sites to `KNOWN_APP_CATEGORIES` and `SITE_CATEGORIES` in `evolve_capture/engine/labels.py`.
 - **Docs.** Setup guides for specific hardware.
 
 ## Project Structure
 
 ```
 ScreenMind/
-├── screenmind/               # Main package
+├── evolve_capture/               # Main package
 │   ├── main.py               # Entry point, starts all services
 │   ├── config.py             # Pydantic settings (env + runtime overrides)
 │   ├── launcher.py           # Splash screen launcher (tkinter)

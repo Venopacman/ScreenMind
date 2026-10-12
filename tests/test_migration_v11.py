@@ -6,7 +6,7 @@ daily_summaries), then opens it with the current code.
 
 import sqlite3
 
-from screenmind.storage.database import Database
+from evolve_capture.storage.database import Database
 
 
 def _make_v10_db(path):
@@ -31,7 +31,7 @@ def _make_v10_db(path):
                                 embedding, bookmarked)
         VALUES ('2026-10-06T10:00:00', '/tmp/a.jpg', 'Slack', 'zebrafish standup', 'ok',
                 X'00000000', 1);
-        INSERT INTO dev_contexts (activity_id, repo_name) VALUES (1, 'ScreenMind');
+        INSERT INTO dev_contexts (activity_id, repo_name) VALUES (1, 'Evolve Capture');
         INSERT INTO daily_summaries (date, summary) VALUES ('2026-10-06', 'a day');
         DELETE FROM schema_version WHERE version > 10;
     """)

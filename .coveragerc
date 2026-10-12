@@ -1,6 +1,6 @@
 [run]
 omit =
-    screenmind/platform_support/linux.py
-    screenmind/platform_support/macos.py
-    screenmind/main.py
-    screenmind/workers/audio_worker.py
+    evolve_capture/platform_support/linux.py
+    evolve_capture/platform_support/macos.py
+    evolve_capture/main.py
+    evolve_capture/workers/audio_worker.py

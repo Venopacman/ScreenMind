@@ -4,10 +4,10 @@ Each scenario is a frozen frame (screenshot + what the capture side saw:
 app, window title, a11y text, browser URL, user actions) plus expectations
 on what analysis should store. `run` feeds every frame through
 AnalysisWorker._process against a throwaway data dir, reads the row back
-and checks it. Nothing is written to ~/.screenmind.
+and checks it. Nothing is written to ~/.evolve-capture.
 
 Fixtures hold real screen content, so they live outside the repo, in
-~/.screenmind-bench (override with SCREENMIND_BENCH_DIR):
+~/.screenmind-bench (override with EVOLVE_CAPTURE_BENCH_DIR):
 
     fixtures/<name>/screenshot.jpg
     fixtures/<name>/capture.json
@@ -38,8 +38,8 @@ import yaml
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-BENCH = Path(os.environ.get("SCREENMIND_BENCH_DIR", "~/.screenmind-bench")).expanduser()
-SOURCE_DATA = Path("~/.screenmind").expanduser()
+BENCH = Path(os.environ.get("EVOLVE_CAPTURE_BENCH_DIR", "~/.screenmind-bench")).expanduser()
+SOURCE_DATA = Path("~/.evolve-capture").expanduser()
 
 BROWSER_WORDS = {"chrome", "chromium", "safari", "firefox", "edge", "brave", "arc", "opera", "vivaldi"}
 
@@ -66,7 +66,7 @@ def freeze(activity_id: int, name: str, source_db: Path, force: bool):
     src = Path(row["screenshot_path"])
     if not src.is_absolute():
         src = SOURCE_DATA / src
-    from screenmind.privacy.encryption import open_image
+    from evolve_capture.privacy.encryption import open_image
     open_image(src).convert("RGB").save(out / "screenshot.jpg", quality=92)
 
     # The capture-side app (detected_app). app_name is what analysis wrote, so it
@@ -112,7 +112,7 @@ def _main_env_file():
 def _isolate_settings(tmp: Path):
     """Run like the main instance (its .env and settings.json), but with a
     throwaway data dir."""
-    from screenmind.config import settings
+    from evolve_capture.config import settings
     env = _main_env_file()
     if env:
         for line in env.read_text().splitlines():
@@ -143,7 +143,7 @@ def _git_head() -> str:
 
 async def _replay_one(worker, db, name: str):
     from PIL import Image
-    from screenmind.workers.capture_worker import CaptureResult
+    from evolve_capture.workers.capture_worker import CaptureResult
 
     fx = BENCH / "fixtures" / name
     cap = json.loads((fx / "capture.json").read_text())
@@ -242,12 +242,12 @@ def check(row, expect: dict, elapsed: float) -> list:
 
 
 async def _run(scenarios: dict, only: list, repeat: int):
-    tmp = Path(tempfile.mkdtemp(prefix="screenmind-bench-"))
+    tmp = Path(tempfile.mkdtemp(prefix="evolve-capture-bench-"))
     _isolate_settings(tmp)
-    from screenmind.storage.database import Database
-    from screenmind.workers.analysis_worker import AnalysisWorker
+    from evolve_capture.storage.database import Database
+    from evolve_capture.workers.analysis_worker import AnalysisWorker
 
-    db = Database(tmp / "screenmind.db")
+    db = Database(tmp / "evolve-capture.db")
     worker = AnalysisWorker(asyncio.Queue(), db)
 
     results = []
@@ -328,7 +328,7 @@ def main():
     f = sub.add_parser("freeze", help="copy a stored frame into a fixture")
     f.add_argument("activity_id", type=int)
     f.add_argument("--name", required=True)
-    f.add_argument("--db", type=Path, default=SOURCE_DATA / "screenmind.db")
+    f.add_argument("--db", type=Path, default=SOURCE_DATA / "evolve-capture.db")
     f.add_argument("--force", action="store_true")
     r = sub.add_parser("run", help="replay all scenarios and check expectations")
     r.add_argument("--only", nargs="*", default=[])

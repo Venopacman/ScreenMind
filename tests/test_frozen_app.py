@@ -12,10 +12,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from screenmind import config, startup
+from evolve_capture import config, startup
 
-APP_EXE = r"C:\Program Files\ScreenMind\ScreenMind.exe" if sys.platform == "win32" \
-    else "/Applications/ScreenMind.app/Contents/MacOS/ScreenMind"
+APP_EXE = r"C:\Program Files\Evolve Capture\EvolveCapture.exe" if sys.platform == "win32" \
+    else "/Applications/EvolveCapture.app/Contents/MacOS/EvolveCapture"
 
 
 @pytest.fixture
@@ -57,7 +57,7 @@ class TestEnvFile:
         cwd.mkdir()
         (cwd / ".env").write_text("CAPTURE_INTERVAL=99\n")
         monkeypatch.chdir(cwd)
-        assert config._env_file() == home / ".screenmind" / ".env"
+        assert config._env_file() == home / ".evolve-capture" / ".env"
 
     def test_app_env_follows_data_dir(self, frozen, monkeypatch, tmp_path):
         monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
@@ -79,31 +79,31 @@ class TestStartCommand:
         assert startup._get_startup_command() == f'"{APP_EXE}"'
 
     def test_app_run_key_matches_the_installer(self, frozen, monkeypatch):
-        """The installer writes Run\\ScreenMind = "{app}\\ScreenMind.exe"; so must the app."""
-        monkeypatch.setattr(sys, "executable", r"C:\Users\me\AppData\Local\Programs\ScreenMind\ScreenMind.exe")
+        """The installer writes Run\\Evolve Capture = "{app}\\EvolveCapture.exe"; so must the app."""
+        monkeypatch.setattr(sys, "executable", r"C:\Users\me\AppData\Local\Programs\Evolve Capture\EvolveCapture.exe")
         mock_winreg = MagicMock()
         mock_winreg.REG_SZ = 1
         with patch.dict("sys.modules", {"winreg": mock_winreg}):
             assert startup._install_windows() is True
         key, name, _, kind, value = mock_winreg.SetValueEx.call_args[0]
-        assert name == "ScreenMind"
+        assert name == "Evolve Capture"
         assert mock_winreg.OpenKey.call_args[0][1] == r"Software\Microsoft\Windows\CurrentVersion\Run"
-        assert value == r'"C:\Users\me\AppData\Local\Programs\ScreenMind\ScreenMind.exe"'
+        assert value == r'"C:\Users\me\AppData\Local\Programs\Evolve Capture\EvolveCapture.exe"'
 
     def test_app_launch_agent_runs_the_app_binary(self, frozen, monkeypatch, tmp_path):
-        monkeypatch.setattr(sys, "executable", "/Applications/Screen Mind.app/Contents/MacOS/ScreenMind")
+        monkeypatch.setattr(sys, "executable", "/Applications/Screen Mind.app/Contents/MacOS/EvolveCapture")
         monkeypatch.setattr(startup, "_macos_plist_dir", lambda: tmp_path)
-        monkeypatch.setattr(startup, "_macos_plist_file", lambda: tmp_path / "com.screenmind.plist")
+        monkeypatch.setattr(startup, "_macos_plist_file", lambda: tmp_path / "com.nebius.evolve.work.capture.plist")
         assert startup._install_macos() is True
-        plist = (tmp_path / "com.screenmind.plist").read_text()
-        assert ("<array>\n        <string>/Applications/Screen Mind.app/Contents/MacOS/ScreenMind</string>\n"
+        plist = (tmp_path / "com.nebius.evolve.work.capture.plist").read_text()
+        assert ("<array>\n        <string>/Applications/Screen Mind.app/Contents/MacOS/EvolveCapture</string>\n"
                 "\n    </array>") in plist
         assert "launchd.log" in plist
 
 
 class TestNoCheckoutFiles:
     def test_app_writes_no_shortcut_or_vbs(self, frozen, home, monkeypatch, tmp_path):
-        from screenmind import main
+        from evolve_capture import main
         data = tmp_path / "data"
         monkeypatch.setattr(main.settings, "data_dir", str(data))
         (home / "Desktop").mkdir()
@@ -115,29 +115,29 @@ class TestNoCheckoutFiles:
         assert list((home / "Desktop").iterdir()) == []
 
     def test_app_background_starts_the_exe(self, frozen, monkeypatch):
-        from screenmind import main
+        from evolve_capture import main
         monkeypatch.setattr(sys, "argv", [APP_EXE, "--background"])
         with patch("subprocess.Popen") as popen:
             main.run()
         assert popen.call_args[0][0] == [APP_EXE]
 
     def test_source_background_still_uses_python(self, monkeypatch):
-        from screenmind import main
-        monkeypatch.setattr(sys, "argv", ["screenmind", "--background"])
+        from evolve_capture import main
+        monkeypatch.setattr(sys, "argv", ["evolve_capture", "--background"])
         with patch("subprocess.Popen") as popen:
             main.run()
         cmd = popen.call_args[0][0]
-        assert cmd[1:] == ["-m", "screenmind"]
+        assert cmd[1:] == ["-m", "evolve_capture"]
         assert "python" in Path(cmd[0]).name.lower()
 
     def test_app_launcher_starts_the_exe(self, frozen):
-        from screenmind import launcher
+        from evolve_capture import launcher
         with patch("subprocess.Popen") as popen:
-            launcher.start_screenmind()
+            launcher.start_evolve_capture()
         assert popen.call_args[0][0] == [APP_EXE]
 
     def test_source_launcher_still_uses_python(self):
-        from screenmind import launcher
+        from evolve_capture import launcher
         with patch("subprocess.Popen") as popen:
-            launcher.start_screenmind()
-        assert popen.call_args[0][0][1:] == ["-m", "screenmind"]
+            launcher.start_evolve_capture()
+        assert popen.call_args[0][0][1:] == ["-m", "evolve_capture"]

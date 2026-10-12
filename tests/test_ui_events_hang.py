@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from screenmind.capture.ui_events import recorder as recorder_mod
-from screenmind.capture.ui_events.models import RawEvent
-from screenmind.capture.ui_events.recorder import UiEventRecorder
+from evolve_capture.capture.ui_events import recorder as recorder_mod
+from evolve_capture.capture.ui_events.models import RawEvent
+from evolve_capture.capture.ui_events.recorder import UiEventRecorder
 
 from test_ui_events import FakeBackend, stored, type_text, ui_settings  # noqa: F401
 

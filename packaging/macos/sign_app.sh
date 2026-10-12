@@ -1,8 +1,8 @@
 #!/bin/bash
-# Signs a built ScreenMind.app with the tester certificate (self-signed).
+# Signs a built EvolveCapture.app with the tester certificate (self-signed).
 #
 #   MACOS_TESTER_P12=<file.p12> MACOS_TESTER_P12_PASSWORD=<pw> \
-#       packaging/macos/sign_app.sh [path/to/ScreenMind.app]
+#       packaging/macos/sign_app.sh [path/to/EvolveCapture.app]
 #
 # Every tester build signed with the same certificate gets the same
 # designated requirement (bundle id + this certificate), so macOS keeps the
@@ -18,7 +18,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-APP="${1:-$REPO/packaging/dist/ScreenMind.app}"
+APP="${1:-$REPO/packaging/dist/EvolveCapture.app}"
 P12="${MACOS_TESTER_P12:?set MACOS_TESTER_P12 to the .p12 file}"
 PW="${MACOS_TESTER_P12_PASSWORD:?set MACOS_TESTER_P12_PASSWORD}"
 [ -d "$APP" ] || { echo "No app at $APP" >&2; exit 1; }

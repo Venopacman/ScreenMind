@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from screenmind.api import dependencies
-from screenmind.api.routes.settings import shutdown_server
+from evolve_capture.api import dependencies
+from evolve_capture.api.routes.settings import shutdown_server
 
 
 def _request(host="127.0.0.1"):

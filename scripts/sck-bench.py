@@ -18,8 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import mss  # noqa: E402
 from PIL import ImageChops, ImageStat  # noqa: E402
 
-from screenmind.capture import sck  # noqa: E402
-from screenmind.capture.screen import _grab_screencapture  # noqa: E402
+from evolve_capture.capture import sck  # noqa: E402
+from evolve_capture.capture.screen import _grab_screencapture  # noqa: E402
 
 
 def say(text):

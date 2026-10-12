@@ -30,14 +30,14 @@ Status: open
 
 `_rec_model()` picks one recognizer. With `OCR_LANGUAGES=en,es,de,fr,ru` the Cyrillic model reads all Latin text. Check accented Latin (é, ü, ñ) on a live frame. If it is poor, run a second recognizer on the same boxes for Latin-heavy lines.
 
-Refs: `screenmind/engine/ocr.py` (`_rec_model`, `_fix_lookalikes`).
+Refs: `evolve_capture/engine/ocr.py` (`_rec_model`, `_fix_lookalikes`).
 
 ### G16: No call room URL on Windows
 Status: open
 
 `WindowsAdapter` has no `get_window_url()`, so `meetings.url` is NULL for browser calls (Meet). Implement it with `_window_documents(hwnd)` + `pick_page_document()` for the HWND that matches the window bounds.
 
-Refs: `screenmind/platform_support/windows.py`, `base.PlatformAdapter.get_window_url()`, `AudioWorker._read_url()`.
+Refs: `evolve_capture/platform_support/windows.py`, `base.PlatformAdapter.get_window_url()`, `AudioWorker._read_url()`.
 
 ### G17: No mic-in-use signal on Windows
 Status: open
@@ -58,14 +58,14 @@ Status: idea (not tested)
 
 A non-elevated process can't read UIA from, or get low-level input for, windows of elevated processes (UIPI). Admin consoles and installers are then missing a11y text and UI events. Check what is stored for an elevated PowerShell window.
 
-Refs: `screenmind/platform_support/windows.py`, `capture/ui_events/windows.py`.
+Refs: `evolve_capture/platform_support/windows.py`, `capture/ui_events/windows.py`.
 
 ### G27: Linux has no UI events, browser URL or mic info
 Status: idea
 
 `create_backend()` returns `None` on Linux, and `LinuxAdapter` has no `get_browser_url()`, `list_visible_windows()` or `mic_apps()`. AT-SPI can give the URL (document attribute) and events. Low priority: nobody runs Linux here.
 
-Refs: `screenmind/platform_support/linux.py`, `capture/ui_events/recorder.py` (`create_backend`).
+Refs: `evolve_capture/platform_support/linux.py`, `capture/ui_events/recorder.py` (`create_backend`).
 
 ### G40: Call title is the front window, not the call window
 Status: open

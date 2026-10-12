@@ -1,6 +1,6 @@
 # Collection status per machine
 
-What ScreenMind really collects on each machine, proven by an end-to-end run.
+What Evolve Capture really collects on each machine, proven by an end-to-end run.
 
 [`docs/architecture/capture.md`](../architecture/capture.md) says what the code is meant to collect. The files here say what a real run on a real machine collected. When they disagree, this folder shows the bug.
 
@@ -40,18 +40,18 @@ A run takes about 3 to 5 minutes. Most of it is the scripted steps and waiting f
 
 **macOS: why Terminal.app.** macOS gives permissions to the app that started the process. A process started from a Claude session can't grab the screen reliably (gap G1), and the results would be wrong. Terminal.app needs Screen Recording, Accessibility and Input Monitoring, the same as for the main instance.
 
-**Windows: you type by hand.** ScreenMind ignores injected (programmatic) input on Windows. So the script stops twice and tells you what to click and type: once in Notepad, once in a small password box. Read the instructions, press Enter, then do it.
+**Windows: you type by hand.** Evolve Capture ignores injected (programmatic) input on Windows. So the script stops twice and tells you what to click and type: once in Notepad, once in a small password box. Read the instructions, press Enter, then do it.
 
 ## What a run does
 
-1. Starts ScreenMind with a temp data dir and a free port in 7900-7999. It never uses `~/.screenmind` or port 7777, so the main instance is not touched. For this run only, it turns on all UI event types, `window_focus` included.
+1. Starts Evolve Capture with a temp data dir and a free port in 7900-7999. It never uses `~/.evolve-capture` or port 7777, so the main instance is not touched. For this run only, it turns on all UI event types, `window_focus` included.
 2. Before startup, puts 30-day-old rows into the temp DB, to test retention.
 3. Opens `https://example.com/` in the default browser (and in `--browsers`, if given).
 4. Opens a scratch text file in TextEdit or Notepad.
 5. Clicks inside it and types two lines: a marker and `password: <test secret>`.
 6. Opens a password box (its own dialog) and types a second test secret.
 7. Puts a marker on the clipboard. On macOS the old clipboard text is put back at the end. Images on the clipboard are lost.
-8. Waits for analysis (up to 4 minutes), stops ScreenMind and reads the DB.
+8. Waits for analysis (up to 4 minutes), stops Evolve Capture and reads the DB.
 9. Deletes the temp data dir (`--keep-data` keeps it).
 
 Safety rules in the script:

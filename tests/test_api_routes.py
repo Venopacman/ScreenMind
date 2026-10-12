@@ -3,8 +3,8 @@
 import pytest
 from datetime import date, datetime, time, timedelta
 
-from screenmind.storage.models import ScreenshotEntry, ActivityRecord
-import screenmind.api.dependencies as deps
+from evolve_capture.storage.models import ScreenshotEntry, ActivityRecord
+import evolve_capture.api.dependencies as deps
 
 
 @pytest.mark.asyncio

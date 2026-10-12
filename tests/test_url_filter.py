@@ -2,7 +2,7 @@
 
 import pytest
 
-from screenmind.privacy.url_filter import sanitize_url
+from evolve_capture.privacy.url_filter import sanitize_url
 
 FAKE_JWT = "eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6ImFAYi5jIn0.c2lnbmF0dXJlLXRlc3Q"
 

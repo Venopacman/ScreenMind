@@ -1,10 +1,10 @@
 #!/bin/bash
 # Builds the unsigned macOS app and DMG:
-#   packaging/dist/ScreenMind.app
-#   packaging/dist/ScreenMind-<version>-macos-arm64.dmg
+#   packaging/dist/EvolveCapture.app
+#   packaging/dist/EvolveCapture-<version>-macos-arm64.dmg
 #
 # 1. uv sync --frozen
-# 2. PyInstaller with packaging/screenmind.spec (it also fetches the OCR models, F6)
+# 2. PyInstaller with packaging/evolve-capture.spec (it also fetches the OCR models, F6)
 # 3. With MACOS_TESTER_P12 and MACOS_TESTER_P12_PASSWORD set: signs the app
 #    with the tester certificate (sign_app.sh), so testers keep their
 #    permission grants across builds. Without them the app stays ad-hoc signed.
@@ -15,14 +15,14 @@
 # In CI: .github/workflows/package-macos.yml. Smoke test: packaging/macos/smoke_test.sh.
 #
 # Options:
-#   --skip-pyinstaller   reuse packaging/dist/ScreenMind.app from an earlier run
+#   --skip-pyinstaller   reuse packaging/dist/EvolveCapture.app from an earlier run
 #   --skip-dmg           stop after the app (for example to sign it first)
 set -euo pipefail
 
 PYINSTALLER_VERSION="6.22.3"
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 DIST="$REPO/packaging/dist"
-APP="$DIST/ScreenMind.app"
+APP="$DIST/EvolveCapture.app"
 
 skip_pyinstaller=0
 skip_dmg=0
@@ -34,19 +34,19 @@ for arg in "$@"; do
     esac
 done
 
-# Version: screenmind/__init__.py is the one source (pyproject reads it too).
-version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' "$REPO/screenmind/__init__.py")"
+# Version: evolve_capture/__init__.py is the one source (pyproject reads it too).
+version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' "$REPO/evolve_capture/__init__.py")"
 if [ -z "$version" ]; then
-    echo "No __version__ in screenmind/__init__.py" >&2
+    echo "No __version__ in evolve_capture/__init__.py" >&2
     exit 1
 fi
-echo "ScreenMind $version"
+echo "Evolve Capture $version"
 
 cd "$REPO"
 if [ "$skip_pyinstaller" -eq 0 ]; then
     uv sync --frozen
     uv run --frozen --with "pyinstaller==$PYINSTALLER_VERSION" \
-        pyinstaller packaging/screenmind.spec --noconfirm \
+        pyinstaller packaging/evolve-capture.spec --noconfirm \
         --distpath packaging/dist --workpath packaging/build
 fi
 [ -d "$APP" ] || { echo "Missing $APP" >&2; exit 1; }
@@ -60,15 +60,15 @@ codesign --verify --deep "$APP"
 echo "App: $(du -sm "$APP" | cut -f1) MB"
 
 if [ "$skip_dmg" -eq 0 ]; then
-    dmg="$DIST/ScreenMind-$version-macos-arm64.dmg"
+    dmg="$DIST/EvolveCapture-$version-macos-arm64.dmg"
     stage="$(mktemp -d)"
     trap 'rm -rf "$stage"' EXIT
-    ditto "$APP" "$stage/ScreenMind.app"
+    ditto "$APP" "$stage/EvolveCapture.app"
     ln -s /Applications "$stage/Applications"
     # hdiutil sometimes fails on CI runners ("Resource busy"), so retry.
     made=0
     for attempt in 1 2 3; do
-        if hdiutil create -volname ScreenMind -srcfolder "$stage" -format ULMO -ov "$dmg"; then
+        if hdiutil create -volname Evolve Capture -srcfolder "$stage" -format ULMO -ov "$dmg"; then
             made=1
             break
         fi

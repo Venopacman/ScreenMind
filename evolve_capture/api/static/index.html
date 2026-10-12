@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evolve Capture — Local Activity Recorder</title>
+    <meta name="description" content="Records apps, windows, pages, screen text and calls. All data stays on your machine.">
+    <link rel="stylesheet" href="/css/styles.css?v=19">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+<!-- Welcome / First-Run Setup -->
+<div id="welcome-screen" style="display:none;position:fixed;inset:0;z-index:9998;background:#0a0e1a;align-items:center;justify-content:center">
+  <div style="text-align:center;max-width:420px;padding:40px">
+    <div style="font-size:3.5rem;margin-bottom:12px">🧠</div>
+    <div style="font-size:1.6rem;font-weight:700;color:var(--text);margin-bottom:4px">Welcome to Evolve Capture</div>
+    <div style="color:var(--text-muted);font-size:0.9rem;margin-bottom:24px">A local recorder of what you do on screen.</div>
+
+    <div style="color:var(--text-muted);font-size:0.85rem;line-height:1.6;margin-bottom:24px;text-align:left">
+      Evolve Capture records which apps, windows and pages you use, the text on screen, and your calls. Nothing leaves this machine unless you export it.
+    </div>
+
+    <button class="btn btn-primary" style="padding:12px 32px;font-size:0.95rem;border-radius:12px" onclick="completeSetup()">Get Started</button>
+  </div>
+</div>
+
+<div class="app" id="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo">Evolve Capture</div>
+            <div class="sidebar-tagline">Local activity recorder</div>
+        </div>
+        <nav class="sidebar-nav" id="sidebar-nav">
+            <div class="nav-indicator" id="nav-indicator"></div>
+            <button class="nav-item active" data-view="timeline">
+                <span class="nav-icon">📋</span><span>Timeline</span>
+            </button>
+            <button class="nav-item" data-view="search">
+                <span class="nav-icon">🔍</span><span>Search</span>
+            </button>
+            <button class="nav-item" data-view="analytics">
+                <span class="nav-icon">📊</span><span>Analytics</span>
+            </button>
+            <button class="nav-item" data-view="meetings">
+                <span class="nav-icon">🎙️</span><span>Meetings</span>
+            </button>
+            <button class="nav-item" data-view="settings">
+                <span class="nav-icon">⚙️</span><span>Settings</span>
+            </button>
+        </nav>
+        <div class="sidebar-footer">
+            <button class="pause-btn" id="shutdown-btn" onclick="shutdownEvolveCapture()" title="Stop Evolve Capture server" style="width:100%;font-size:0.78rem;padding:6px 0;color:#ef4444;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.15);margin-bottom:6px">
+                ⏻ Stop Server
+            </button>
+            <div style="display:flex;gap:6px">
+              <button class="pause-btn paused" id="pause-btn" onclick="toggleCapture()" title="Start/Stop capture" style="flex:1">
+                  <span id="pause-icon">&#9654;</span> <span id="pause-label">Start Capturing</span>
+              </button>
+              <button class="pause-btn" id="incognito-btn" onclick="toggleIncognito()" title="Incognito Mode" style="width:42px;padding:0;font-size:1.1rem">🕶️</button>
+            </div>
+            <div class="status-badge" id="status-badge">
+                <span class="status-dot paused" id="status-dot"></span>
+                <span id="status-text">Ready</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+        <header class="header">
+            <h1 class="header-title" id="page-title">Timeline</h1>
+            <div class="header-actions" id="header-actions"></div>
+        </header>
+        <section class="content" id="content">
+            <div class="spinner"></div>
+        </section>
+    </main>
+</div>
+
+<!-- Enhanced Screenshot Modal -->
+<div class="modal-overlay" id="modal" onclick="closeModal(event)">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="modal-split" onclick="event.stopPropagation()">
+        <img id="modal-img" src="" alt="Screenshot">
+        <div class="modal-details" id="modal-details">
+            <div class="meta" id="modal-meta"></div>
+            <div>
+                <div class="section-title">Window</div>
+                <div class="summary-text" id="modal-summary">Loading...</div>
+            </div>
+            <div>
+                <div class="section-title">Screen Text</div>
+                <div class="modal-ocr" id="modal-ocr">No screen text</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast Notifications -->
+<div class="toast-container" id="toast-container"></div>
+
+<script src="/js/core.js?v=31"></script>
+<script src="/js/timeline.js?v=33"></script>
+<script src="/js/search.js?v=32"></script>
+<script src="/js/analytics.js?v=31"></script>
+<script src="/js/meetings.js?v=31"></script>
+<script src="/js/export.js?v=1"></script>
+<script src="/js/settings.js?v=33"></script>
+</body>
+</html>

@@ -2,7 +2,7 @@
 
 Key translation, role normalization, clipboard secret checks and element
 parsing run against fakes. The live hooks are checked by hand with
-`python -m screenmind.capture.ui_events` (see docs/plans/ui-events.md).
+`python -m evolve_capture.capture.ui_events` (see docs/plans/ui-events.md).
 """
 
 import sys
@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from screenmind.capture.ui_events.models import (
+from evolve_capture.capture.ui_events.models import (
     KEY_ARROW,
     KEY_BACKSPACE,
     KEY_CHAR,
@@ -25,9 +25,9 @@ from screenmind.capture.ui_events.models import (
     normalize_uia_role,
     role_label,
 )
-from screenmind.capture.ui_events.recorder import PASSWORD_PLACEHOLDER, UiEventRecorder
+from evolve_capture.capture.ui_events.recorder import PASSWORD_PLACEHOLDER, UiEventRecorder
 
-win = pytest.importorskip("screenmind.capture.ui_events.windows")
+win = pytest.importorskip("evolve_capture.capture.ui_events.windows")
 
 
 # ── Keys ────────────────────────────────────────────────────────────
@@ -342,7 +342,7 @@ class WinFake:
 
 @pytest.fixture
 def ui_settings(monkeypatch):
-    from screenmind.config import settings
+    from evolve_capture.config import settings
     monkeypatch.setattr(settings, "ui_events_enabled", True)
     monkeypatch.setattr(settings, "ui_events_types", "click,app_switch,text,clipboard")
     monkeypatch.setattr(settings, "event_triggered_capture", False)
@@ -407,13 +407,13 @@ class TestRecorderWithUiaRoles:
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
 def test_create_backend_on_windows():
     pytest.importorskip("uiautomation")
-    from screenmind.capture.ui_events.recorder import create_backend
+    from evolve_capture.capture.ui_events.recorder import create_backend
     assert isinstance(create_backend(), win.WindowsUiEventBackend)
 
 
 def test_create_backend_without_uiautomation(monkeypatch):
     import importlib.util
-    from screenmind.capture.ui_events import recorder
+    from evolve_capture.capture.ui_events import recorder
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
     assert recorder.create_backend() is None

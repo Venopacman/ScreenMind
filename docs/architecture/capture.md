@@ -1,6 +1,6 @@
 # Capture architecture
 
-What ScreenMind captures on macOS and Windows, how, and where it ends up. Linux gets a short side column.
+What Evolve Capture captures on macOS and Windows, how, and where it ends up. Linux gets a short side column.
 
 This file is the source of truth. It was written from the code on `custom` at `482c275` (2026-10-07) and updated for the strip-down to action collection ([plan](../plans/strip-to-actions.md)), DB schema v11, and for the removal of Gemma and llama-server on 2026-10-08 (`069c137`). Where the code and a backlog file disagree, this file follows the code. See [Code vs backlog](#9-code-vs-backlog).
 
@@ -60,7 +60,7 @@ flowchart TB
 
   subgraph STORE["Storage (data_dir)"]
     JPG[("screenshots/YYYY-MM-DD/*.jpg")]
-    DB[("screenmind.db (SQLite, WAL, FTS5)")]
+    DB[("evolve-capture.db (SQLite, WAL, FTS5)")]
   end
 
   GRAB --> TICK
@@ -280,14 +280,14 @@ Known holes: Chrome ignores `AXManualAccessibility`. After a reboot, with no oth
 - `OCR_LANGUAGES` picks the recognizer with `_rec_model()`. English only: `en`. Any other code: its script model. Mixed scripts: a Cyrillic model wins, because it also reads Latin. So one script per frame (G14).
 - The default is `en,es,de,fr,ru` on every machine, so the Mac and Windows read the same text without a `.env`. It is not taken from the OS languages, because those differ between machines and say little about the text on screen. It gives the East Slavic model (`eslav`): the English model's characters (accented Latin such as é, ü, ñ, ç included) plus Cyrillic, at the same cost per frame as `en`.
 - Readings under 0.5 confidence are dropped. With a Cyrillic model, `_fix_lookalikes()` makes each mixed word one script.
-- Models (~15 MB) download to `~/.screenmind/models/ocr` on first use.
+- Models (~15 MB) download to `~/.evolve-capture/models/ocr` on first use.
 - onnxruntime options (`_session_options()`): memory pattern and memory arena off, `OCR_THREADS` threads (default 2). RapidOCR has no setting for the memory pattern, so `_tune_sessions()` loads its models again with these options. Same text as the defaults, with less memory and about 40% less CPU per frame. Each frame takes about 45% longer.
 - Runs in the analysis worker, not at grab time. Skipped when a11y text is real content, and on "identical" cache hits.
 - Output: text, plus boxes as JSON (`ocr_boxes`). `layout_analyzer.cluster_ocr_layout()` clusters the boxes into regions by position, and `organize_ocr_text()` writes the text per region (`organized_text`).
 
 ### 4.7 UI events
 
-`screenmind/capture/ui_events/`. On by default (`UI_EVENTS_ENABLED=true`) with `UI_EVENTS_TYPES=click,app_switch,text,clipboard` (typed text and clipboard since 2026-10-08, the user's call). `window_focus` is opt-in. Text and clipboard can hold private content: the sensitive-data filter and the password-field rules apply, but there is no PII detection (G31). A `settings.json` that lists its own types keeps them.
+`evolve_capture/capture/ui_events/`. On by default (`UI_EVENTS_ENABLED=true`) with `UI_EVENTS_TYPES=click,app_switch,text,clipboard` (typed text and clipboard since 2026-10-08, the user's call). `window_focus` is opt-in. Text and clipboard can hold private content: the sensitive-data filter and the password-field rules apply, but there is no PII detection (G31). A `settings.json` that lists its own types keeps them.
 
 ```
 OS hook thread -> queue.SimpleQueue -> enricher thread -> ui_events table
@@ -320,7 +320,7 @@ OS hook thread -> queue.SimpleQueue -> enricher thread -> ui_events table
 - Console logs, so a silent failure is visible: "UI events are off" at startup when disabled; the enabled types on start; a missing Accessibility or Input Monitoring grant; "first input event received"; a warning if no click or key arrives in the first 2 min; events lost in the hook callback; a hook that stopped; and every 10 min a summary of input, stored rows per type and skips.
 - Every text field (names, values, typed text, clipboard up to 1,000 chars, window titles) goes through the sensitive-data filter in one place before it is queued for the DB. A label typed before a pause ("pwd -") is checked together with the next chunk. URLs go through `sanitize_url()`.
 - Rows are written in batches every 2 s. Backend calls run without the recorder lock, so a hung UIA or clipboard call cannot block capture. `flush_for_capture()` waits at most 2 s for the lock.
-- The watchdog (`screenmind/watchdog.py`) restarts the recorder when the enricher has not ticked for 2 min, at most 3 times an hour. The new enricher gets a new lock, so one stuck while holding the old lock blocks nothing.
+- The watchdog (`evolve_capture/watchdog.py`) restarts the recorder when the enricher has not ticked for 2 min, at most 3 times an hour. The new enricher gets a new lock, so one stuck while holding the old lock blocks nothing.
 - At each saved frame, `attach_ui_events()` links events to the new row: the unlinked ones since the previous frame saved on that display, and only those of the frame's app (`app_key()`: case, spaces and `.exe` don't matter). A click must also be inside the display's rect. So an event goes to the first frame saved after it on a display, and only if that frame shows its app. Otherwise it stays unlinked (`activity_id` NULL) with its own timestamp, for later analysis to match by time. Example: typing in Notepad++, then a switch to Claude before any Notepad++ frame, leaves the typing unlinked. Capture can't grab the app being left after the switch, so no extra capture is requested. Events from before the current run are never linked. No extra OS calls: one indexed query per frame. `format_user_actions()` turns the linked events into at most 10 bullet lines (1,200 chars) in `activities.user_actions`. The export lists unlinked events between the frames in the session files ([export-format.md](../export-format.md)). The dashboard timeline shows only `user_actions`; `GET /api/ui-events` lists all events by time. With the same app on several displays, events without a point go to the first of its frames in the tick (G21).
 
 ### 4.8 Calls and meetings
@@ -369,19 +369,19 @@ Then the row is updated (`status='ok'`). Nothing else runs. Embeddings, git cont
 
 ## 5. Storage
 
-Everything lives under `DATA_DIR` (default `~/.screenmind`). Dev instances use `~/.screenmind-dev/<worktree>`.
+Everything lives under `DATA_DIR` (default `~/.evolve-capture`). Dev instances use `~/.evolve-capture-dev/<worktree>`.
 
 | Path | What |
 |---|---|
-| `screenmind.db` | SQLite, WAL mode, FTS5 |
+| `evolve-capture.db` | SQLite, WAL mode, FTS5 |
 | `screenshots/YYYY-MM-DD/HH-MM-SS_mmm[_mN].jpg` | JPEG frames. `_mN` is the mss monitor index when all displays are grabbed. |
 | `settings.json` | Runtime overrides from the dashboard. Only values that differ from the default (or `.env`) are stored, so the rest follow later default changes. A file written before `c377a8c` can still hold defaults; they shrink on the next save. |
-| `screenmind.log`, `.1`-`.3` | Log of every app start, console or not (`main.run()`), rotating at 1 MB, INFO. Starts with "ScreenMind <version> starting" and "Settings that differ from the defaults: ..." with each value's source. `SCREENMIND_LOG_FILE` moves it. |
+| `evolve-capture.log`, `.1`-`.3` | Log of every app start, console or not (`main.run()`), rotating at 1 MB, INFO. Starts with "Evolve Capture <version> starting" and "Settings that differ from the defaults: ..." with each value's source. `EVOLVE_CAPTURE_LOG_FILE` moves it. |
 | `crash.log` | Traceback of an error before logging starts, only for a start without stderr (`pythonw`, a detached `python.exe`) |
 | `models/` | `ocr/` (RapidOCR). Old folders are no longer used and can be deleted by hand: `gemma-4-e2b/` (Gemma GGUF files, about 3.2 GB, unused since 2026-10-08) and `embedder/`. |
 | `.encryption_key` | Fernet key backup (also in the OS keyring) |
 
-### Tables in `screenmind.db`
+### Tables in `evolve-capture.db`
 
 Migrations live in `Database._init_db()` as a list. Version = list index + 1. The latest is **v11**. It dropped `activities.embedding`, `activities.bookmarked`, `dev_contexts` and `daily_summaries`, which only removed features used.
 
@@ -421,7 +421,7 @@ Migrations live in `Database._init_db()` as a list. Version = list index + 1. Th
 - Started from Terminal.app (the user's main instance): Terminal gets Screen Recording, Accessibility and Input Monitoring. Every other script run from Terminal gets them too.
 - Started from a Claude session: Claude.app starts children through a `disclaimer` helper, so the Python binary is its own responsible process. `CGPreflightScreenCaptureAccess()` says True, but SCK's handler never fires and mss hangs 30 s. Only the first SCK call of the process answers (the display list); later display-list calls hang too (2026-10-08). Only the `screencapture` tool works (G1).
 - Started as the venv's Python directly (LaunchAgent, IDE): the prompt names "Python" or the IDE.
-- A future signed `ScreenMind.app` would show "ScreenMind" in the prompts (G22).
+- A future signed `EvolveCapture.app` would show "Evolve Capture" in the prompts (G22).
 
 The app requests Accessibility and Input Monitoring only from the UI events settings (`POST /api/ui-events/permissions` → `AXIsProcessTrustedWithOptions`, `CGRequestListenEventAccess`). Screen Recording is never requested explicitly; macOS asks on the first grab.
 
@@ -435,7 +435,7 @@ The app requests Accessibility and Input Monitoring only from the UI events sett
 | Password fields | a11y walkers, UI event backends | Never read; typing stores `[password field]` |
 | Clipboard secret markers | UI event backends | Password-manager clipboard data is not read |
 | `sanitize_url()` | `privacy/url_filter.py`, before every stored URL | Keeps scheme, host, path. Drops query and fragment except `tab`, `view`, `page`, `sort`, `lang`, `hl`. Sign-in hosts and auth/token paths keep only scheme and host. Token-like path parts become `<token>`. Non-http(s) URLs (including `file://`) become `None` |
-| Sensitive-data filter | `privacy/data_filter.py` (`SENSITIVE_FILTER_ENABLED`, default on), `capture_worker.filter_sensitive()` | Redacts credit cards, SSNs, API keys, JWTs, passwords, emails, phone numbers, IBANs and person names before storage: in a11y/OCR text, OCR boxes, window titles, all UI event text, and call titles (`meetings.window_title`). Passwords also match "pwd - value" and a value on the next line; the label stays ("pwd - [REDACTED:password]"). Emails keep a real-looking domain ("[REDACTED:email@example.com]"). Phones need a "+" code, brackets or separators; IBANs must pass the mod-97 check. Person names come from a small local NER model (`privacy/person_ner.py`, multilingual DistilBERT, int8 ONNX, 138 MB, shipped inside the app; a dev checkout downloads it once into `~/.screenmind/models/ner`; about +120 MB memory at load and +165-200 MB in use, 27-46 ms CPU per frame with its line cache; the tokenizer is plain Python, `privacy/wordpiece.py`). Product names ("Claude", "Slack") are kept by a stoplist; unknown products ("Truto") are taken for names. Without the model (dev checkout before the download, or an app built without it), names are not filtered. Addresses and message content are not detected. The image is not redacted |
+| Sensitive-data filter | `privacy/data_filter.py` (`SENSITIVE_FILTER_ENABLED`, default on), `capture_worker.filter_sensitive()` | Redacts credit cards, SSNs, API keys, JWTs, passwords, emails, phone numbers, IBANs and person names before storage: in a11y/OCR text, OCR boxes, window titles, all UI event text, and call titles (`meetings.window_title`). Passwords also match "pwd - value" and a value on the next line; the label stays ("pwd - [REDACTED:password]"). Emails keep a real-looking domain ("[REDACTED:email@example.com]"). Phones need a "+" code, brackets or separators; IBANs must pass the mod-97 check. Person names come from a small local NER model (`privacy/person_ner.py`, multilingual DistilBERT, int8 ONNX, 138 MB, shipped inside the app; a dev checkout downloads it once into `~/.evolve-capture/models/ner`; about +120 MB memory at load and +165-200 MB in use, 27-46 ms CPU per frame with its line cache; the tokenizer is plain Python, `privacy/wordpiece.py`). Product names ("Claude", "Slack") are kept by a stoplist; unknown products ("Truto") are taken for names. Without the model (dev checkout before the download, or an app built without it), names are not filtered. Addresses and message content are not detected. The image is not redacted |
 | Encryption | `privacy/encryption.py` | Screenshots only, off by default |
 
 ## 8. Gaps
@@ -457,7 +457,7 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G16 | No `get_window_url()` on Windows, so `meetings.url` is always NULL there. | Windows | new |
 | G17 | No mic-in-use signal on Windows. Discord calls are never detected (Discord is out of scope for now, 2026-10-08). Slack needs "huddle" in the title. A call whose window is hidden ends after `CALL_END_GRACE_S` (120 s). | Windows | new |
 | G21 | With the same app on several displays, UI events without a point (typing, app switches, clipboard) go to the first frame of that app saved in the tick. Clicks go by position, other apps by name. | both | [ui-events.md](../backlog/ui-events.md) "Same app on two displays" |
-| G22 | Permission prompts name Terminal or Python, not ScreenMind. | macOS | [ui-events.md](../backlog/ui-events.md) "macOS permission prompts name Terminal or Python" |
+| G22 | Permission prompts name Terminal or Python, not Evolve Capture. | macOS | [ui-events.md](../backlog/ui-events.md) "macOS permission prompts name Terminal or Python" |
 | G23 | The DB is plain text. Only screenshots can be encrypted, and that is off by default. | both | [ui-events.md](../backlog/ui-events.md) "Encrypt the whole DB" |
 | G25 | Elevated (admin) windows are probably not readable by UIA or the LL hooks from a normal process (UIPI). Not tested. Not a priority (2026-10-08). | Windows | new |
 | G26 | `enable_full_a11y_tree()` sets `AXManualAccessibility` on every Electron and Chromium app. It may cost CPU in those apps. | macOS | [ui-events.md](../backlog/ui-events.md) "Electron full accessibility tree" |
@@ -472,7 +472,7 @@ Scope: **macOS**, **Windows**, **both**, or **Linux**. "New" items are in [`docs
 | G42 | No locked-screen or screensaver check on Windows and Linux. A screensaver that changes the picture gets saved and analyzed as the last app. | Windows, Linux | new |
 | G41 | A call is kept as one row across a restart only if the restart takes less than `CALL_END_GRACE_S` and the old row has no transcript. Inside one process, two Meet rooms back to back within the grace stay one row, because the room URL is read only once. | both | new |
 
-Closed while this map was written: G10 and G11 by `fa80d39` (Windows a11y reads the page, not the browser UI), G13 by `81277a8` (capture-time data kept on backlog skips), G20 by `399a565` (UI events on by default, live on the main instance since 2026-10-07). G2 (one SCK timeout disabled SCK until restart) by the SCK retry change on 2026-10-08. G38 (no log file without a console) and G39 (machines on different settings) by `c377a8c`: every start writes `screenmind.log`, the code defaults are the shared settings, the startup log and the e2e status header list what differs, and `.env` is read from the checkout root. Behaviour change: a dashboard value left at the default is no longer stored, so it follows later default changes. Each machine's existing `settings.json` needs a one-time cleanup ([windows.md](../backlog/windows.md) "Settings cleanup"). G32 (OCR read Latin only on Windows) by `a48f41c`: `OCR_LANGUAGES` defaults to `en,es,de,fr,ru` on every machine. G19 (no global hotkeys on macOS) went away with the hotkeys themselves in `57cf0dd`. G15 (Gemma got a bag of words), G18 (no system audio for transcripts) and G33 (`-ngl 15` on the Windows laptop) are obsolete: Gemma removed 2026-10-08 (`069c137`). Their ids stay reserved.
+Closed while this map was written: G10 and G11 by `fa80d39` (Windows a11y reads the page, not the browser UI), G13 by `81277a8` (capture-time data kept on backlog skips), G20 by `399a565` (UI events on by default, live on the main instance since 2026-10-07). G2 (one SCK timeout disabled SCK until restart) by the SCK retry change on 2026-10-08. G38 (no log file without a console) and G39 (machines on different settings) by `c377a8c`: every start writes `evolve-capture.log`, the code defaults are the shared settings, the startup log and the e2e status header list what differs, and `.env` is read from the checkout root. Behaviour change: a dashboard value left at the default is no longer stored, so it follows later default changes. Each machine's existing `settings.json` needs a one-time cleanup ([windows.md](../backlog/windows.md) "Settings cleanup"). G32 (OCR read Latin only on Windows) by `a48f41c`: `OCR_LANGUAGES` defaults to `en,es,de,fr,ru` on every machine. G19 (no global hotkeys on macOS) went away with the hotkeys themselves in `57cf0dd`. G15 (Gemma got a bag of words), G18 (no system audio for transcripts) and G33 (`-ngl 15` on the Windows laptop) are obsolete: Gemma removed 2026-10-08 (`069c137`). Their ids stay reserved.
 
 ## 9. Code vs backlog
 
@@ -486,7 +486,7 @@ The code wins in each case below. Backlog files belong to other sessions, so the
 
 ## 10. How to update
 
-- **Same-commit rule.** A change to capture code (`screenmind/capture/`, `workers/capture_worker.py`, `workers/audio_worker.py`, `workers/call_detection.py`, `engine/a11y_extractor.py`, `engine/ocr.py`, `engine/labels.py`), a platform adapter (`screenmind/platform_support/`), a privacy filter or a DB migration updates this file in the same commit.
+- **Same-commit rule.** A change to capture code (`evolve_capture/capture/`, `workers/capture_worker.py`, `workers/audio_worker.py`, `workers/call_detection.py`, `engine/a11y_extractor.py`, `engine/ocr.py`, `engine/labels.py`), a platform adapter (`evolve_capture/platform_support/`), a privacy filter or a DB migration updates this file in the same commit.
 - Update the matrix row, the detail section and the gap table. Close a gap by deleting its row and naming the commit in the commit message. Keep gap ids stable; don't reuse a deleted id.
 - A new migration: add its columns to the table in section 5 with `(vN)`, and update "the latest is vN".
 - Mermaid: keep labels in double quotes. Check the diagram renders (GitHub preview or the Artifact).

@@ -11,8 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from screenmind import config
-from screenmind.tray import ICON_OFF, ICON_ON, TOOLTIP_MAX, TrayController
+from evolve_capture import config
+from evolve_capture.tray import ICON_OFF, ICON_ON, TOOLTIP_MAX, TrayController
 
 
 class FakeCapture:
@@ -47,11 +47,11 @@ def _item(menu, label):
 
 
 @pytest.mark.parametrize("cap, state, tip", [
-    (FakeCapture(), "recording", "ScreenMind — recording"),
-    (FakeCapture(paused=True), "paused", "ScreenMind — paused"),
-    (FakeCapture(paused=True, incognito=True), "incognito", "ScreenMind — incognito"),
-    (FakeCapture(heavy="game.exe"), "auto_paused", "ScreenMind — paused while game.exe runs"),
-    (None, "stopped", "ScreenMind — not running"),
+    (FakeCapture(), "recording", "Evolve Capture — recording"),
+    (FakeCapture(paused=True), "paused", "Evolve Capture — paused"),
+    (FakeCapture(paused=True, incognito=True), "incognito", "Evolve Capture — incognito"),
+    (FakeCapture(heavy="game.exe"), "auto_paused", "Evolve Capture — paused while game.exe runs"),
+    (None, "stopped", "Evolve Capture — not running"),
 ])
 def test_status_and_tooltip(cap, state, tip):
     c = TrayController(cap, request_shutdown=None)
@@ -81,14 +81,14 @@ def test_menu_while_recording():
     c = TrayController(FakeCapture(), MagicMock(), dashboard_url="http://127.0.0.1:7792")
     menu = c.menu()
     assert _labels(menu) == ["Recording", None, "Pause capture", "Open dashboard", None,
-                             "Quit ScreenMind"]
+                             "Quit Evolve Capture"]
     status = menu[0]
     assert status.enabled is False and status.action is None
 
 
 def test_menu_without_dashboard_url_has_no_open_item():
     c = TrayController(FakeCapture(paused=True), MagicMock())
-    assert _labels(c.menu()) == ["Paused", None, "Resume capture", None, "Quit ScreenMind"]
+    assert _labels(c.menu()) == ["Paused", None, "Resume capture", None, "Quit Evolve Capture"]
 
 
 def test_pause_and_resume_call_the_worker():
@@ -119,10 +119,10 @@ def test_open_dashboard_opens_the_url():
 def test_quit_uses_the_shutdown_path_once():
     shutdown = MagicMock()
     c = TrayController(FakeCapture(), shutdown)
-    _item(c.menu(), "Quit ScreenMind").action()
+    _item(c.menu(), "Quit Evolve Capture").action()
     c.quit()
     shutdown.assert_called_once_with()
-    assert _item(c.menu(), "Quit ScreenMind").enabled is False
+    assert _item(c.menu(), "Quit Evolve Capture").enabled is False
 
 
 def test_icons_ship_in_the_package():
@@ -153,14 +153,14 @@ def test_env_overrides_both_ways(monkeypatch):
 
 def test_main_does_not_import_the_tray_at_module_level():
     import subprocess
-    code = ("import sys, screenmind.main; "
-            "print(any(m in sys.modules for m in ('screenmind.tray', "
-            "'screenmind.platform_support.win_tray')))")
+    code = ("import sys, evolve_capture.main; "
+            "print(any(m in sys.modules for m in ('evolve_capture.tray', "
+            "'evolve_capture.platform_support.win_tray')))")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
     assert out.stdout.strip() == "False", out.stderr
     # The only import sits behind the Windows check
-    import screenmind.main
-    source = open(screenmind.main.__file__, encoding="utf-8").read()
+    import evolve_capture.main
+    source = open(evolve_capture.main.__file__, encoding="utf-8").read()
     assert 'sys.platform == "win32" and settings.tray_icon_on' in source
 
 
@@ -168,7 +168,7 @@ def test_main_does_not_import_the_tray_at_module_level():
 
 
 def test_auto_paused_for(monkeypatch):
-    from screenmind.workers.capture_worker import CaptureWorker
+    from evolve_capture.workers.capture_worker import CaptureWorker
     w = CaptureWorker.__new__(CaptureWorker)
     w._paused = False
     w._heavy_app_logged = "game.exe"
@@ -203,13 +203,13 @@ def _find_tray_window():
     find = ctypes.WinDLL("user32").FindWindowW
     find.restype = W.HWND
     find.argtypes = [W.LPCWSTR, W.LPCWSTR]
-    from screenmind.platform_support.win_tray import WINDOW_CLASS
+    from evolve_capture.platform_support.win_tray import WINDOW_CLASS
     return find(WINDOW_CLASS, None)
 
 
 @win_only
 def test_win32_icon_shows_follows_status_and_goes_away():
-    from screenmind.platform_support import win_tray
+    from evolve_capture.platform_support import win_tray
 
     cap = FakeCapture()
     tray = win_tray.Win32Tray(TrayController(cap, MagicMock()), ICON_ON, ICON_OFF)
@@ -217,12 +217,12 @@ def test_win32_icon_shows_follows_status_and_goes_away():
     try:
         assert all(tray._icons), "both .ico files load"
         assert _wait(lambda: tray._added)
-        assert tray._shown == ("ScreenMind — recording", True)
+        assert tray._shown == ("Evolve Capture — recording", True)
         assert _find_tray_window() == tray._hwnd
 
         cap.pause(source="dashboard")
         tray.refresh()
-        assert _wait(lambda: tray._shown == ("ScreenMind — paused", False))
+        assert _wait(lambda: tray._shown == ("Evolve Capture — paused", False))
     finally:
         tray.stop()
     assert not tray._thread.is_alive()
@@ -234,7 +234,7 @@ def test_win32_icon_shows_follows_status_and_goes_away():
 def test_win32_menu_runs_the_chosen_action(monkeypatch):
     """Builds the real menu, but a fake TrackPopupMenu picks the item, so no
     menu appears on screen."""
-    from screenmind.platform_support import win_tray
+    from evolve_capture.platform_support import win_tray
 
     cap = FakeCapture()
     controller = TrayController(cap, MagicMock())
@@ -249,14 +249,14 @@ def test_win32_menu_runs_the_chosen_action(monkeypatch):
         assert _wait(lambda: tray._added)
         win_tray._PostMessageW(tray._hwnd, win_tray.WM_TRAY, win_tray.ICON_ID, win_tray.WM_RBUTTONUP)
         assert _wait(lambda: cap.calls == [("pause", "tray")])
-        assert _wait(lambda: tray._shown == ("ScreenMind — paused", False))
+        assert _wait(lambda: tray._shown == ("Evolve Capture — paused", False))
     finally:
         tray.stop()
 
 
 @win_only
 def test_win32_start_reports_a_window_failure(monkeypatch):
-    from screenmind.platform_support import win_tray
+    from evolve_capture.platform_support import win_tray
 
     monkeypatch.setattr(win_tray, "_CreateWindowExW", lambda *a: None)
     tray = win_tray.Win32Tray(TrayController(FakeCapture(), MagicMock()), ICON_ON, ICON_OFF)

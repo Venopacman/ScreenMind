@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from screenmind.workers.daemon_executor import DaemonExecutor
+from evolve_capture.workers.daemon_executor import DaemonExecutor
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -71,7 +71,7 @@ class TestDaemonExecutor:
         """The real case: asyncio.run() ends while a call still runs."""
         code = textwrap.dedent("""
             import asyncio, time
-            from screenmind.workers.daemon_executor import DaemonExecutor
+            from evolve_capture.workers.daemon_executor import DaemonExecutor
             ex = DaemonExecutor("analysis")
             async def main():
                 loop = asyncio.get_running_loop()
@@ -93,9 +93,9 @@ class TestStopDuringAnalysis:
 
     async def test_stop_abandons_the_call_and_the_frame_stays_pending(self, db, tmp_path, monkeypatch):
         from PIL import Image
-        from screenmind.storage.models import ScreenshotEntry
-        from screenmind.workers.analysis_worker import AnalysisWorker
-        from screenmind.workers.capture_worker import CaptureResult
+        from evolve_capture.storage.models import ScreenshotEntry
+        from evolve_capture.workers.analysis_worker import AnalysisWorker
+        from evolve_capture.workers.capture_worker import CaptureResult
 
         shot = tmp_path / "shot.jpg"
         Image.new("RGB", (64, 64), "teal").save(shot)

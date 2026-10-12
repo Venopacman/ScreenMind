@@ -1,7 +1,7 @@
 name: Package (macOS)
 
 # Builds the unsigned macOS app and DMG (Apple Silicon, macOS 14+):
-# ScreenMind-<version>-macos-arm64.dmg. See packaging/macos/ and
+# EvolveCapture-<version>-macos-arm64.dmg. See packaging/macos/ and
 # docs/plans/packaging-spikes.md ("macOS build").
 #
 # Runs on a push to custom that changes packaging or app code, by hand from
@@ -14,10 +14,10 @@ on:
   push:
     branches: [custom]
     paths:
-      - "packaging/screenmind.spec"
+      - "packaging/evolve-capture.spec"
       - "packaging/entry.py"
       - "packaging/macos/**"
-      - "screenmind/**"
+      - "evolve_capture/**"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/package-macos.yml"
@@ -46,14 +46,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: packaging/build/ocr_models
-          key: ocr-models-${{ hashFiles('uv.lock', 'screenmind/engine/ocr.py') }}
+          key: ocr-models-${{ hashFiles('uv.lock', 'evolve_capture/engine/ocr.py') }}
 
       # The person-name model (privacy/person_ner.py pins its revision).
       - name: Cache person-name model
         uses: actions/cache@v4
         with:
           path: packaging/build/ner-model
-          key: ner-model-${{ hashFiles('screenmind/privacy/person_ner.py') }}
+          key: ner-model-${{ hashFiles('evolve_capture/privacy/person_ner.py') }}
 
       # One self-signed certificate for every tester build, so macOS keeps
       # testers' permission grants across builds. Optional: without the
@@ -92,8 +92,8 @@ jobs:
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: ScreenMind-macos-arm64-dmg
-          path: packaging/dist/ScreenMind-*-macos-arm64.dmg
+          name: EvolveCapture-macos-arm64-dmg
+          path: packaging/dist/EvolveCapture-*-macos-arm64.dmg
           if-no-files-found: error
           compression-level: 0  # already LZMA-compressed
           retention-days: 30

@@ -6,11 +6,11 @@ from unittest.mock import patch
 
 import pytest
 
-from screenmind.config import settings
-from screenmind.platform_support.macos_audio import app_name_from_path
-from screenmind.storage.database import Database
-from screenmind.workers import audio_worker as aw
-from screenmind.workers.call_detection import match_call, normalize_title, same_call
+from evolve_capture.config import settings
+from evolve_capture.platform_support.macos_audio import app_name_from_path
+from evolve_capture.storage.database import Database
+from evolve_capture.workers import audio_worker as aw
+from evolve_capture.workers.call_detection import match_call, normalize_title, same_call
 
 KEYWORDS = ["zoom", "teams", "meet", "webex", "slack", "discord"]
 
@@ -115,7 +115,7 @@ def db(tmp_path):
 def worker(db, monkeypatch):
     monkeypatch.setattr(settings, "meeting_apps", ",".join(KEYWORDS))
     monkeypatch.setattr(settings, "call_end_grace_s", GRACE)
-    with patch("screenmind.capture.window.get_window_url",
+    with patch("evolve_capture.capture.window.get_window_url",
                   return_value="https://meet.google.com/dsv-einb-rbg?authuser=0&pli=1"):
         yield aw.AudioWorker(database=db)
 
@@ -318,7 +318,7 @@ class TestOneCallOneRow:
         tick(worker, 5, [MEET_DAILY])
         worker.force_stop()
         restarted = aw.AudioWorker(database=db)
-        with patch("screenmind.capture.window.get_window_url",
+        with patch("evolve_capture.capture.window.get_window_url",
                    return_value="https://meet.google.com/abc-defg-hij"):
             tick(restarted, 20, [MEET_DAILY])
             tick(restarted, 25, [MEET_DAILY])
@@ -381,7 +381,7 @@ class TestAxPageUrl:
 
     @staticmethod
     def adapter():
-        from screenmind.platform_support.macos import MacOSAdapter
+        from evolve_capture.platform_support.macos import MacOSAdapter
         a = MacOSAdapter.__new__(MacOSAdapter)
         a._ax_attr = lambda el, attr: el.get(attr)
         return a

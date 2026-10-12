@@ -5,8 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from screenmind.workers.capture_worker import CaptureWorker, CaptureResult
-import screenmind.config as settings_mod
+from evolve_capture.workers.capture_worker import CaptureWorker, CaptureResult
+import evolve_capture.config as settings_mod
 
 
 class TestCaptureWorker:
@@ -59,7 +59,7 @@ class TestCaptureWorker:
         worker._paused = paused
         worker._capture_tick = AsyncMock()
         worker._take_due_trigger = lambda: worker.stop()  # one pass only
-        with caplog.at_level(logging.INFO, logger="screenmind.workers.capture_worker"):
+        with caplog.at_level(logging.INFO, logger="evolve_capture.workers.capture_worker"):
             asyncio.run(worker.run())
         msgs = [r.getMessage() for r in caplog.records]
         assert any(m.startswith(f"Ready ({state}).") for m in msgs)
@@ -92,7 +92,7 @@ class TestAnalysisWorkerStats:
 
     def test_flush_queue(self):
         """flush_queue drains all items."""
-        from screenmind.workers.analysis_worker import AnalysisWorker
+        from evolve_capture.workers.analysis_worker import AnalysisWorker
 
         queue = asyncio.Queue(maxsize=100)
         db = MagicMock()
@@ -107,7 +107,7 @@ class TestAnalysisWorkerStats:
         assert queue.qsize() == 0
 
     def test_stats_keys(self):
-        from screenmind.workers.analysis_worker import AnalysisWorker
+        from evolve_capture.workers.analysis_worker import AnalysisWorker
 
         queue = asyncio.Queue(maxsize=100)
         db = MagicMock()
@@ -122,7 +122,7 @@ class TestAnalysisWorkerStats:
         assert "cache_size" in stats
 
     def test_initial_state(self):
-        from screenmind.workers.analysis_worker import AnalysisWorker
+        from evolve_capture.workers.analysis_worker import AnalysisWorker
 
         queue = asyncio.Queue(maxsize=100)
         db = MagicMock()
@@ -134,7 +134,7 @@ class TestAnalysisWorkerStats:
         assert len(worker._app_cache) == 0
 
     def test_stop(self):
-        from screenmind.workers.analysis_worker import AnalysisWorker
+        from evolve_capture.workers.analysis_worker import AnalysisWorker
 
         queue = asyncio.Queue(maxsize=100)
         db = MagicMock()
@@ -150,8 +150,8 @@ class TestAnalysisWorkerBackfill:
     async def test_backfill_passes_detected_app_as_hint(self, db, tmp_path):
         """Unanalyzed rows have app_name NULL; the OS-detected app must be used."""
         from PIL import Image
-        from screenmind.storage.models import ScreenshotEntry
-        from screenmind.workers.analysis_worker import AnalysisWorker
+        from evolve_capture.storage.models import ScreenshotEntry
+        from evolve_capture.workers.analysis_worker import AnalysisWorker
 
         shot = tmp_path / "shot.jpg"
         Image.new("RGB", (64, 64), "white").save(shot)
@@ -179,8 +179,8 @@ class TestFailedAnalysis:
 
     def _setup(self, db, tmp_path):
         from PIL import Image
-        from screenmind.storage.models import ScreenshotEntry
-        from screenmind.workers.analysis_worker import AnalysisWorker
+        from evolve_capture.storage.models import ScreenshotEntry
+        from evolve_capture.workers.analysis_worker import AnalysisWorker
 
         shot = tmp_path / "shot.jpg"
         Image.new("RGB", (64, 64), "teal").save(shot)
@@ -226,8 +226,8 @@ class TestRuleLabels:
 
     def _setup(self, db, tmp_path, ocr_text, app=None, title=None, url=None, phash=None):
         from PIL import Image
-        from screenmind.storage.models import ScreenshotEntry
-        from screenmind.workers.analysis_worker import AnalysisWorker
+        from evolve_capture.storage.models import ScreenshotEntry
+        from evolve_capture.workers.analysis_worker import AnalysisWorker
 
         shot = tmp_path / "shot.jpg"
         Image.new("RGB", (64, 64), "teal").save(shot)
@@ -279,7 +279,7 @@ class TestRuleLabels:
         worker, capture, first_id = self._setup(
             db, tmp_path, ocr_text="Inbox: 3 unread messages", app="Mail", title="Inbox", phash=1)
         await worker._process(capture)
-        from screenmind.storage.models import ScreenshotEntry
+        from evolve_capture.storage.models import ScreenshotEntry
         second_id = db.insert_activity(ScreenshotEntry(
             timestamp=capture.timestamp, screenshot_path=str(capture.filepath),
             window_title="Inbox", detected_app_name="Mail"))
@@ -326,11 +326,11 @@ class TestCaptureAllMonitors:
         worker._a11y.extract_text.return_value = ("focused window text", "a11y")
 
         patches = [
-            patch("screenmind.workers.capture_worker.get_active_app_name", return_value="Claude"),
-            patch("screenmind.workers.capture_worker.get_active_window_title", return_value="Claude"),
-            patch("screenmind.workers.capture_worker.get_top_window_in",
+            patch("evolve_capture.workers.capture_worker.get_active_app_name", return_value="Claude"),
+            patch("evolve_capture.workers.capture_worker.get_active_window_title", return_value="Claude"),
+            patch("evolve_capture.workers.capture_worker.get_top_window_in",
                   side_effect=lambda m: tops.get(m["left"])),
-            patch("screenmind.workers.capture_worker.can_find_top_window", return_value=can_find),
+            patch("evolve_capture.workers.capture_worker.can_find_top_window", return_value=can_find),
         ]
         for p in patches:
             p.start()
@@ -464,7 +464,7 @@ class TestBacklogSkip:
     def _stale_capture(self, db, tmp_path, **kw):
         from datetime import timedelta
         from PIL import Image
-        from screenmind.storage.models import ScreenshotEntry
+        from evolve_capture.storage.models import ScreenshotEntry
 
         shot = tmp_path / "shot.jpg"
         Image.new("RGB", (64, 64), "white").save(shot)
@@ -481,7 +481,7 @@ class TestBacklogSkip:
         )
 
     async def _run_once(self, db, capture):
-        from screenmind.workers.analysis_worker import AnalysisWorker
+        from evolve_capture.workers.analysis_worker import AnalysisWorker
 
         queue = asyncio.Queue(maxsize=10)
         worker = AnalysisWorker(queue=queue, database=db)
@@ -527,7 +527,7 @@ class TestBacklogSkip:
         assert stats["status_breakdown"] == {"skipped": 1}
 
     async def test_backfill_reuses_kept_text_and_url(self, db, tmp_path):
-        from screenmind.workers.analysis_worker import AnalysisWorker
+        from evolve_capture.workers.analysis_worker import AnalysisWorker
 
         capture = self._stale_capture(
             db, tmp_path, browser_url="https://www.twitch.tv/", a11y_text="Browse channels")
@@ -567,10 +567,10 @@ class TestFocusConsistency:
 
         title_iter = iter(titles)
         patches = [
-            patch("screenmind.workers.capture_worker.get_active_app_name", return_value="chrome"),
-            patch("screenmind.workers.capture_worker.get_active_window_title",
+            patch("evolve_capture.workers.capture_worker.get_active_app_name", return_value="chrome"),
+            patch("evolve_capture.workers.capture_worker.get_active_window_title",
                   side_effect=lambda: next(title_iter)),
-            patch("screenmind.workers.capture_worker._get_browser_url",
+            patch("evolve_capture.workers.capture_worker._get_browser_url",
                   side_effect=lambda: (calls.append("url"), "https://ru.wikipedia.org/wiki/GitHub")[1]),
         ]
         for p in patches:
@@ -594,9 +594,9 @@ class TestFocusConsistency:
     async def test_tab_switch_mid_capture_drops_text_and_url(self, tmp_path):
         """#184: the dashboard's title with the URL of the tab clicked next."""
         worker, patches, _ = self._make_worker(
-            tmp_path, ["ScreenMind — Dashboard", "GitHub — Wikipedia"])
+            tmp_path, ["Evolve Capture — Dashboard", "GitHub — Wikipedia"])
         item = await self._tick(worker, patches)
-        assert item.window_title == "ScreenMind — Dashboard"
+        assert item.window_title == "Evolve Capture — Dashboard"
         assert item.browser_url is None
         assert item.a11y_text is None
 
@@ -648,14 +648,14 @@ class TestUiEventLinking:
 
     async def _frame(self, worker, app, at, monitor=None):
         """Save one frame showing `app` at time `at`; return its user_actions."""
-        with patch("screenmind.workers.capture_worker.datetime") as dt:
+        with patch("evolve_capture.workers.capture_worker.datetime") as dt:
             dt.now.return_value = at
             assert await worker._capture_monitor(monitor, app, app, False, "change", active_title=app)
         return (await worker._queue.get()).user_actions
 
     @staticmethod
     def _events(db, *events):
-        from screenmind.capture.ui_events.models import EventType, UiEvent
+        from evolve_capture.capture.ui_events.models import EventType, UiEvent
         db.insert_ui_events([
             UiEvent(timestamp=datetime(2026, 10, 7, 14, 0, s), type=EventType(t), app_name=app, **kw)
             for s, t, app, kw in events
@@ -712,7 +712,7 @@ class TestUiEventLinkGuard:
 
     async def test_stuck_link_times_out_and_is_skipped_until_it_returns(self, monkeypatch):
         import threading
-        import screenmind.workers.capture_worker as cw
+        import evolve_capture.workers.capture_worker as cw
 
         monkeypatch.setattr(cw, "LINK_UI_EVENTS_TIMEOUT_S", 0.2)
         monkeypatch.setattr(settings_mod.settings, "ui_events_enabled", True)
@@ -749,8 +749,8 @@ class TestOcrBoxRedaction:
     async def test_secrets_redacted_in_boxes_and_organized_text(self, db, tmp_path, monkeypatch):
         import json
         from PIL import Image
-        from screenmind.storage.models import ScreenshotEntry
-        from screenmind.workers.analysis_worker import AnalysisWorker
+        from evolve_capture.storage.models import ScreenshotEntry
+        from evolve_capture.workers.analysis_worker import AnalysisWorker
 
         shot = tmp_path / "shot.jpg"
         Image.new("RGB", (400, 200), "white").save(shot)

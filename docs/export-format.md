@@ -1,14 +1,14 @@
 # Export format
 
-ScreenMind can export captured data as a zip archive. The archive has one folder per day and one text file per work session. It is shaped for the workflows app mapper, which reads text files only (64 KB per read, 1 MB per upload, no images). Screenshots are in the archive too, for people.
+Evolve Capture can export captured data as a zip archive. The archive has one folder per day and one text file per work session. It is shaped for the workflows app mapper, which reads text files only (64 KB per read, 1 MB per upload, no images). Screenshots are in the archive too, for people.
 
-Code: [`screenmind/export/`](../screenmind/export/) and [`screenmind/api/routes/export.py`](../screenmind/api/routes/export.py). Tests: [`tests/test_export.py`](../tests/test_export.py).
+Code: [`evolve_capture/export/`](../evolve_capture/export/) and [`evolve_capture/api/routes/export.py`](../evolve_capture/api/routes/export.py). Tests: [`tests/test_export.py`](../tests/test_export.py).
 
 Format version: **3** (`manifest.json` → `schema_version`). Change `SCHEMA_VERSION` in `archive.py` and this file when a field changes meaning or goes away. Adding a field does not need a new version.
 
 ## Dashboard
 
-Settings → Storage → Data Export: a user field, From and To dates, a screenshots checkbox and an Export button. It shows the counts and the screenshot size before you export ([`static/js/export.js`](../screenmind/api/static/js/export.js)).
+Settings → Storage → Data Export: a user field, From and To dates, a screenshots checkbox and an Export button. It shows the counts and the screenshot size before you export ([`static/js/export.js`](../evolve_capture/api/static/js/export.js)).
 
 ## API
 
@@ -43,7 +43,7 @@ Same `date` / `from` / `to` / `gap_minutes`. Returns counts per day without buil
 ## Archive layout
 
 ```
-screenmind-export_<user>_<from>[_<to>]/
+evolve-capture-export_<user>_<from>[_<to>]/
   manifest.json
   README.md
   2026-10-06/
@@ -68,7 +68,7 @@ Paths inside a day (`files` in `sessions.json`, `screenshot` in `activities.json
 
 ## Sessions
 
-A session is a pluggable rule ([`sessions.py`](../screenmind/export/sessions.py)). The rule and its parameters are in `manifest.json` → `session_rule`, so a reader knows how the sessions were made.
+A session is a pluggable rule ([`sessions.py`](../evolve_capture/export/sessions.py)). The rule and its parameters are in `manifest.json` → `session_rule`, so a reader knows how the sessions were made.
 
 Today there is one rule, `idle_gap`: activities are sorted by time, and a new session starts when the gap to the previous capture is `gap_minutes` or more. Capture runs every few seconds while the user works, so a long gap means the user was away, locked the screen or paused capture. On real data (2026-10-06, 605 activities), 10 minutes gives 7 sessions, 5 gives 13, 30 gives 2.
 
@@ -84,8 +84,8 @@ To add a rule: write a class with `name`, `params()` and `split(activities)`, an
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Format version, `3`. Version 3: `category` comes from rules (app and site), and `summary`, `details`, `scene_description`, `mood`, `confidence`, `visible_text` are empty for frames captured after Gemma was removed. Version 2 dropped `bookmarked` and `dev_context` from `activities.jsonl` and the `Repo:` line (bookmarks and git context were removed from ScreenMind). |
-| `generator`, `app_version`, `git_sha` | `ScreenMind`, the package version, the commit (null for an installed package) |
+| `schema_version` | Format version, `3`. Version 3: `category` comes from rules (app and site), and `summary`, `details`, `scene_description`, `mood`, `confidence`, `visible_text` are empty for frames captured after Gemma was removed. Version 2 dropped `bookmarked` and `dev_context` from `activities.jsonl` and the `Repo:` line (bookmarks and git context were removed from Evolve Capture). |
+| `generator`, `app_version`, `git_sha` | `Evolve Capture`, the package version, the commit (null for an installed package) |
 | `exported_at` | Local time with offset |
 | `user` | As typed |
 | `date_from`, `date_to` | The range, both included |
@@ -145,7 +145,7 @@ One JSON object per line, one line per captured screen, oldest first. Full text,
 | `detected_app` | App name from the OS |
 | `window_title` | |
 | `url` | Sanitized browser URL or null |
-| `category` | From rules: the app (`KNOWN_APP_CATEGORIES`) or, in a browser, the site (`SITE_CATEGORIES`) in `screenmind/engine/labels.py`. `other` when no rule knows the app. Frames from before Gemma was removed keep Gemma's category |
+| `category` | From rules: the app (`KNOWN_APP_CATEGORIES`) or, in a browser, the site (`SITE_CATEGORIES`) in `evolve_capture/engine/labels.py`. `other` when no rule knows the app. Frames from before Gemma was removed keep Gemma's category |
 | `summary`, `details`, `scene_description`, `mood`, `confidence` | From the Gemma analysis, on frames captured before it was removed. Empty or null on newer frames |
 | `screen_text` | `ocr_text`: a11y text or OCR text |
 | `organized_text` | OCR text in layout order, or null |

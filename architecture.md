@@ -1,6 +1,6 @@
-# ScreenMind: System Architecture
+# Evolve Capture: System Architecture
 
-ScreenMind is a local screen activity recorder. It collects actions and does the minimal analysis needed to dedup, unify and label them. It is a data source for a workflows app.
+Evolve Capture is a local screen activity recorder. It collects actions and does the minimal analysis needed to dedup, unify and label them. It is a data source for a workflows app.
 
 Frames are labelled by rules from the OS app name, the window title and the URL. No model runs. A local Gemma model did this until 2026-10-08. It was removed because its notes added nothing to workflow extraction and it was the largest resource cost.
 
@@ -12,7 +12,7 @@ This file gives the overview. The detailed, per-OS map of what is captured, and 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                               ScreenMind                                │
+│                               Evolve Capture                                │
 │                                                                         │
 │  ┌──────────────┐   ┌────────────┐   ┌───────────────────────────────┐  │
 │  │ Capture      │──▶│ asyncio    │──▶│ Analysis Worker               │  │
@@ -95,7 +95,7 @@ One model runs: **RapidOCR**. It reads text from pixels (PP-OCR models on ONNX R
 | **Window info** | App name and window title per display |
 | **A11y text and URL** | Focused display only, read right after the grab. Dropped if the focused window changed in between |
 | **Privacy** | Blocked apps are not grabbed. Heavy apps pause the tick. Window titles go through the sensitive-data filter |
-| **Output** | JPEG (`SCREENSHOT_QUALITY`, default 70) → `~/.screenmind/screenshots/{date}/{time}.jpg`, plus an `activities` row with `status='pending'` |
+| **Output** | JPEG (`SCREENSHOT_QUALITY`, default 70) → `~/.evolve-capture/screenshots/{date}/{time}.jpg`, plus an `activities` row with `status='pending'` |
 | **Encryption** | Optional Fernet encryption in place after save |
 
 ```
@@ -197,7 +197,7 @@ Reading which apps use the mic needs no mic permission. Call transcription and s
 
 ### 3.7 Export
 
-`screenmind/export/` and `api/routes/export.py`. `GET /api/export` builds a zip for a user and a date range: one folder per day, one text file per work session (split by idle gaps), JSONL copies and the screenshots. Only `status='ok'` rows go out. URLs and text are filtered again on the way. The route accepts only local clients. The dashboard has a Data Export card in Settings → Storage.
+`evolve_capture/export/` and `api/routes/export.py`. `GET /api/export` builds a zip for a user and a date range: one folder per day, one text file per work session (split by idle gaps), JSONL copies and the screenshots. Only `status='ok'` rows go out. URLs and text are filtered again on the way. The route accepts only local clients. The dashboard has a Data Export card in Settings → Storage.
 
 Format: [docs/export-format.md](docs/export-format.md).
 
@@ -374,9 +374,9 @@ Wayland: window info comes from compositor IPC (Sway, Hyprland, Niri). Permissio
 
 ## 9. Models
 
-RapidOCR models (~25 MB) download to `~/.screenmind/models/ocr` on first use. No other model is used.
+RapidOCR models (~25 MB) download to `~/.evolve-capture/models/ocr` on first use. No other model is used.
 
-Gemma GGUF files from before 2026-10-08 stay in `~/.screenmind/models/gemma-4-e2b` (about 3.2 GB). ScreenMind does not use or delete them. You can delete that folder by hand.
+Gemma GGUF files from before 2026-10-08 stay in `~/.evolve-capture/models/gemma-4-e2b` (about 3.2 GB). Evolve Capture does not use or delete them. You can delete that folder by hand.
 
 ---
 

@@ -3,7 +3,7 @@ requires = ["setuptools>=64,<75", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "screenmind"
+name = "evolve-capture"
 dynamic = ["version"]
 description = "Privacy-first screen activity journal -- captures screen text, apps and actions and makes them searchable, 100% locally."
 readme = "README.md"
@@ -62,11 +62,11 @@ dependencies = [
 
 [project.optional-dependencies]
 # OCR is a core dependency now (ONNX Runtime, no PyTorch).
-# Kept so `pip install screenmind[ai]` still works.
+# Kept so `pip install evolve-capture[ai]` still works.
 ai = []
 
 # Windows accessibility API. Now a core dependency on Windows; kept so
-# `pip install screenmind[windows]` still works.
+# `pip install evolve-capture[windows]` still works.
 windows = ["uiautomation>=2.0,<3.0 ; sys_platform == 'win32'"]
 
 [dependency-groups]
@@ -83,21 +83,14 @@ dev = [
 
 
 [project.scripts]
-screenmind = "screenmind.main:run"
-
-[project.urls]
-Homepage = "https://screenmind.pages.dev"
-Repository = "https://github.com/ayushh0110/ScreenMind"
-Documentation = "https://github.com/ayushh0110/ScreenMind#readme"
-Changelog = "https://github.com/ayushh0110/ScreenMind/releases"
-Issues = "https://github.com/ayushh0110/ScreenMind/issues"
+evolve-capture = "evolve_capture.main:run"
 
 [tool.setuptools.packages.find]
-include = ["screenmind", "screenmind.*"]
+include = ["evolve_capture", "evolve_capture.*"]
 exclude = ["tests", "tests.*"]
 
 [tool.setuptools.package-data]
-screenmind = [
+evolve_capture = [
     "py.typed",
     "api/static/**/*",
     "api/static/css/*",
@@ -107,7 +100,7 @@ screenmind = [
 ]
 
 [tool.setuptools.dynamic]
-version = {attr = "screenmind.__version__"}
+version = {attr = "evolve_capture.__version__"}
 
 
 

@@ -9,9 +9,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from screenmind.capture import window
-from screenmind.platform_support.base import PlatformAdapter
-from screenmind.workers.capture_worker import CaptureWorker
+from evolve_capture.capture import window
+from evolve_capture.platform_support.base import PlatformAdapter
+from evolve_capture.workers.capture_worker import CaptureWorker
 
 
 def _worker():
@@ -31,7 +31,7 @@ def access(monkeypatch):
         state.calls.append(request)
         return state.value
 
-    monkeypatch.setattr("screenmind.workers.capture_worker.screen_recording_access", fake)
+    monkeypatch.setattr("evolve_capture.workers.capture_worker.screen_recording_access", fake)
     return state
 
 
@@ -46,7 +46,7 @@ class TestCaptureWorker:
     async def test_missing_access_logs_where_to_allow_it(self, access, caplog):
         access.value = False
         worker = _worker()
-        with caplog.at_level(logging.WARNING, logger="screenmind.workers.capture_worker"):
+        with caplog.at_level(logging.WARNING, logger="evolve_capture.workers.capture_worker"):
             await worker._capture_tick()
         assert "Screen & System Audio Recording" in caplog.text
         assert worker.stats["screen_recording"] is False
@@ -54,7 +54,7 @@ class TestCaptureWorker:
         worker._screen.capture.assert_called()
 
     async def test_no_request_on_a_locked_screen(self, access, monkeypatch):
-        monkeypatch.setattr("screenmind.workers.capture_worker.is_screen_locked", lambda: True)
+        monkeypatch.setattr("evolve_capture.workers.capture_worker.is_screen_locked", lambda: True)
         worker = _worker()
         await worker._capture_tick()
         assert access.calls == []
@@ -83,7 +83,7 @@ class TestAdapters:
         q.CGPreflightScreenCaptureAccess = lambda: q.preflight
         q.CGRequestScreenCaptureAccess = lambda: q.requested.append(1) or False
         monkeypatch.setitem(sys.modules, "Quartz", q)
-        from screenmind.platform_support.macos import MacOSAdapter
+        from evolve_capture.platform_support.macos import MacOSAdapter
         return q, MacOSAdapter.__new__(MacOSAdapter)
 
     def test_macos_granted_needs_no_request(self, quartz):

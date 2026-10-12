@@ -47,7 +47,7 @@ def test_different_images_have_high_distance():
 
 def test_deduplicator_skips_identical():
     """ScreenDeduplicator.is_duplicate correctly detects identical frames."""
-    from screenmind.capture.dedup import ScreenDeduplicator
+    from evolve_capture.capture.dedup import ScreenDeduplicator
     dedup = ScreenDeduplicator(threshold=8)
     img = _make_image((100, 100, 100))
     # First image is never a duplicate
@@ -58,7 +58,7 @@ def test_deduplicator_skips_identical():
 
 def test_deduplicator_passes_different():
     """ScreenDeduplicator allows significantly different frames through."""
-    from screenmind.capture.dedup import ScreenDeduplicator
+    from evolve_capture.capture.dedup import ScreenDeduplicator
     dedup = ScreenDeduplicator(threshold=8)
 
     # Horizontal gradient

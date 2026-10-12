@@ -2,13 +2,13 @@
 
 Checks that analysis still does the right thing on real frames. It replays stored frames through `AnalysisWorker._process` and checks the row that analysis writes: app name, category, text source and size, `active_url`, and time per frame.
 
-- It doesn't grab the screen and doesn't write to `~/.screenmind`. Each run uses a throwaway data dir.
+- It doesn't grab the screen and doesn't write to `~/.evolve-capture`. Each run uses a throwaway data dir.
 - It reads the main instance's `.env` and `settings.json`, so OCR languages and the sensitive-data filter match the main instance.
-- No model runs. App name and category come from rules (`screenmind/engine/labels.py`).
+- No model runs. App name and category come from rules (`evolve_capture/engine/labels.py`).
 
 ## Data
 
-Fixtures hold real screen content, so they stay outside the repo, in `~/.screenmind-bench/` (override with `SCREENMIND_BENCH_DIR`):
+Fixtures hold real screen content, so they stay outside the repo, in `~/.screenmind-bench/` (override with `EVOLVE_CAPTURE_BENCH_DIR`):
 
 ```
 fixtures/<name>/screenshot.jpg   the frame
@@ -37,7 +37,7 @@ uv run python bench/replay.py run --only slack_dm meet_call --repeat 3
 uv run python bench/replay.py freeze 918 --name menubar_only_display
 ```
 
-`freeze` copies activity 918 from `~/.screenmind/screenmind.db` into a fixture. Then add an entry for it in `scenarios.yaml`.
+`freeze` copies activity 918 from `~/.evolve-capture/evolve-capture.db` into a fixture. Then add an entry for it in `scenarios.yaml`.
 
 - Frame time is the OCR time, about 1-3 s. Frames where a11y text replaces OCR take well under 1 s. The first frame also loads OCR.
 - Each scenario prints `PASS`, `FAIL` or `GAP`. `GAP` means the scenario failed but has a `known_gap:` reason. Use it for problems that are known and parked, so they don't hide new failures.

@@ -63,8 +63,8 @@ def test_no_emoji_in_logger_calls():
     )
 
 
-def test_logger_uses_screenmind_namespace():
-    """All logger declarations must use screenmind.* namespace."""
+def test_logger_uses_evolve_capture_namespace():
+    """All logger declarations must use evolve_capture.* namespace."""
     bad = []
     for filepath in _source_files():
         with open(filepath, 'r', encoding='utf-8') as f:
@@ -74,11 +74,11 @@ def test_logger_uses_screenmind_namespace():
                     match = re.search(r'getLogger\(["\']([^"\']+)["\']\)', line)
                     if match:
                         name = match.group(1)
-                        if not name.startswith('screenmind'):
+                        if not name.startswith('evolve_capture'):
                             rel = os.path.relpath(filepath, os.path.dirname(os.path.dirname(__file__)))
-                            bad.append(f"{rel}:{lineno}: logger name '{name}' (must start with 'screenmind.')")
+                            bad.append(f"{rel}:{lineno}: logger name '{name}' (must start with 'evolve_capture.')")
 
     assert bad == [], (
-        f"Found {len(bad)} loggers outside screenmind namespace:\n"
+        f"Found {len(bad)} loggers outside evolve_capture namespace:\n"
         + "\n".join(bad)
     )

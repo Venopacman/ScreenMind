@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from screenmind.capture.ui_events.base import FrontWindow, PermissionStatus, UiEventBackend
-from screenmind.capture.ui_events.models import (
+from evolve_capture.capture.ui_events.base import FrontWindow, PermissionStatus, UiEventBackend
+from evolve_capture.capture.ui_events.models import (
     ElementInfo,
     EventType,
     KEY_BACKSPACE,
@@ -18,10 +18,10 @@ from screenmind.capture.ui_events.models import (
     UiEvent,
     format_user_actions,
 )
-from screenmind.capture.ui_events.recorder import PASSWORD_PLACEHOLDER, UiEventRecorder
-from screenmind.capture.ui_events.text_buffer import TextBuffer
-from screenmind.config import settings
-from screenmind.storage.models import ScreenshotEntry
+from evolve_capture.capture.ui_events.recorder import PASSWORD_PLACEHOLDER, UiEventRecorder
+from evolve_capture.capture.ui_events.text_buffer import TextBuffer
+from evolve_capture.config import settings
+from evolve_capture.storage.models import ScreenshotEntry
 
 
 def key(c, ts=0.0):
@@ -568,7 +568,7 @@ class TestDatabase:
 
     def test_migration_unlinks_stale_links(self, db):
         """v13 undoes links older builds made: another app, or too long after."""
-        from screenmind.storage.database import _unlink_stale_ui_events
+        from evolve_capture.storage.database import _unlink_stale_ui_events
         t0 = datetime(2026, 10, 7, 18, 58, 0)
         frame = datetime(2026, 10, 8, 9, 49, 0)
         db.insert_ui_events([
@@ -600,7 +600,7 @@ class TestDatabase:
 
     def test_migration_runs_on_open(self, db):
         """A DB below v13 gets the cleanup when it is opened, and keeps v13."""
-        from screenmind.storage.database import Database
+        from evolve_capture.storage.database import Database
         t0 = datetime(2026, 10, 7, 18, 58, 0)
         db.insert_ui_events([_ev(t0, app_name="Terminal")])
         aid = db.insert_activity(ScreenshotEntry(
@@ -618,7 +618,7 @@ class TestDatabase:
         reopened.close()
 
     def test_migration_clears_user_actions_when_nothing_is_left(self, db):
-        from screenmind.storage.database import _unlink_stale_ui_events
+        from evolve_capture.storage.database import _unlink_stale_ui_events
         t0 = datetime(2026, 10, 7, 18, 58, 0)
         db.insert_ui_events([_ev(t0, app_name="Terminal", element_name="ls")])
         aid = db.insert_activity(ScreenshotEntry(
@@ -668,8 +668,8 @@ class TestDatabase:
 
 @pytest.fixture
 def worker(mock_settings):
-    with patch("screenmind.workers.capture_worker.ScreenCapture"):
-        from screenmind.workers.capture_worker import CaptureWorker
+    with patch("evolve_capture.workers.capture_worker.ScreenCapture"):
+        from evolve_capture.workers.capture_worker import CaptureWorker
         import asyncio
         w = CaptureWorker(queue=asyncio.Queue())
         w._paused = False

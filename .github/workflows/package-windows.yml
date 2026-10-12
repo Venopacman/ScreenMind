@@ -1,7 +1,7 @@
 name: Package (Windows)
 
 # Builds the unsigned Windows installer (NSIS, per-user):
-# ScreenMind-<version>-win-x64-setup.exe. See packaging/windows/ and
+# EvolveCapture-<version>-win-x64-setup.exe. See packaging/windows/ and
 # docs/plans/packaging-spikes.md ("Windows installer").
 #
 # Run by hand from the Actions tab (workflow_dispatch needs this file on the
@@ -44,8 +44,8 @@ jobs:
         run: ./packaging/windows/build.ps1
 
       # Signing (milestone M2), not set up yet. Azure Artifact Signing would go
-      # here: build with -SkipInstaller, sign ScreenMind.exe and the DLLs in
-      # packaging/dist/ScreenMind, run build.ps1 -SkipPyInstaller, then sign
+      # here: build with -SkipInstaller, sign EvolveCapture.exe and the DLLs in
+      # packaging/dist/EvolveCapture, run build.ps1 -SkipPyInstaller, then sign
       # the setup exe. Secrets: AZURE_TENANT_ID, AZURE_CLIENT_ID,
       # AZURE_CLIENT_SECRET (or OIDC), account and certificate profile names.
       # - name: Sign
@@ -66,7 +66,7 @@ jobs:
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: ScreenMind-win-x64-setup
-          path: packaging/dist/ScreenMind-*-win-x64-setup.exe
+          name: EvolveCapture-win-x64-setup
+          path: packaging/dist/EvolveCapture-*-win-x64-setup.exe
           if-no-files-found: error
           compression-level: 0  # already LZMA-compressed

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Run an isolated ScreenMind instance from a git worktree, next to the main one.
+# Run an isolated Evolve Capture instance from a git worktree, next to the main one.
 #
-# The main instance runs from the main checkout: port 7777, data in ~/.screenmind.
+# The main instance runs from the main checkout: port 7777, data in ~/.evolve-capture.
 # A worktree instance gets its own data dir and port, so it never touches the
 # main DB, screenshots or settings. It shares the downloaded OCR models
-# (~/.screenmind/models/ocr). It uses the worktree's own venv if it has one
+# (~/.evolve-capture/models/ocr). It uses the worktree's own venv if it has one
 # (`uv sync` in the worktree), else the main checkout's.
 #
 # Usage (from the worktree root):
@@ -27,7 +27,7 @@ if [ "$CODE_DIR" = "$MAIN_ROOT" ]; then
 fi
 
 NAME="$(basename "$CODE_DIR")"
-DATA="$HOME/.screenmind-dev/$NAME"
+DATA="$HOME/.evolve-capture-dev/$NAME"
 # Stable port per worktree in 7800-7899, so the dashboard URL survives restarts
 PORT=$((7800 + $(printf %s "$NAME" | cksum | cut -d' ' -f1) % 100))
 
@@ -36,7 +36,7 @@ case "${1:-run}" in
         echo "worktree:  $CODE_DIR"
         echo "data dir:  $DATA"
         echo "dashboard: http://127.0.0.1:$PORT"
-        echo "log:       $DATA/screenmind.log"
+        echo "log:       $DATA/evolve-capture.log"
         ;;
     reset)
         rm -rf "$DATA"
@@ -53,35 +53,35 @@ case "${1:-run}" in
 
         # Isolation. Env vars beat .env, and settings.json starts empty in the new data dir.
         export DATA_DIR="$DATA"
-        export SCREENMIND_DATA_DIR="$DATA"
+        export EVOLVE_CAPTURE_DATA_DIR="$DATA"
         export API_PORT="$PORT"
         export SETUP_COMPLETE=true
 
         mkdir -p "$DATA"
-        # A missing DB means "first run", which rewrites ~/Desktop/ScreenMind.command
+        # A missing DB means "first run", which rewrites ~/Desktop/Evolve Capture.command
         # to point at this worktree. An empty file is a valid new SQLite DB.
-        [ -e "$DATA/screenmind.db" ] || : > "$DATA/screenmind.db"
+        [ -e "$DATA/evolve-capture.db" ] || : > "$DATA/evolve-capture.db"
 
-        echo "ScreenMind dev instance: $NAME"
+        echo "Evolve Capture dev instance: $NAME"
         echo "  dashboard: http://127.0.0.1:$PORT"
         echo "  data dir:  $DATA"
         # Written on every start, also when the output here goes nowhere
-        echo "  log:       $DATA/screenmind.log"
+        echo "  log:       $DATA/evolve-capture.log"
         # Python from the worktree's .venv if it exists (a branch with changed
         # deps runs `uv sync` there), else the main checkout's .venv.
         # bin/ on macOS/Linux, Scripts/ on Windows Git Bash.
-        # SCREENMIND_PYTHON overrides both.
+        # EVOLVE_CAPTURE_PYTHON overrides both.
         PY=""
         for venv in "$CODE_DIR/.venv" "$MAIN_ROOT/.venv"; do
             for p in "$venv/bin/python" "$venv/Scripts/python.exe"; do
                 if [ -z "$PY" ] && [ -x "$p" ]; then PY="$p"; fi
             done
         done
-        PY="${SCREENMIND_PYTHON:-$PY}"
+        PY="${EVOLVE_CAPTURE_PYTHON:-$PY}"
         echo "  python:    $PY"
         cd "$CODE_DIR"
         # -m with cwd = worktree imports the worktree's code, not the main checkout's
-        exec "$PY" -m screenmind
+        exec "$PY" -m evolve_capture
         ;;
     *)
         echo "Unknown command: $1 (use run, info or reset)" >&2

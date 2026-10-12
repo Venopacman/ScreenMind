@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from screenmind.storage.models import ScreenshotEntry, ActivityRecord
+from evolve_capture.storage.models import ScreenshotEntry, ActivityRecord
 
 
 def test_insert_and_get_activity(db):

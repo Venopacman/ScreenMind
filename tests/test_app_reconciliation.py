@@ -9,7 +9,7 @@ See: https://github.com/ayushh0110/ScreenMind/issues/6
 
 import pytest
 
-from screenmind.engine.labels import (
+from evolve_capture.engine.labels import (
     _extract_app_from_title,
     _extract_simple_title,
     _is_browser_window,
@@ -269,7 +269,7 @@ class TestLabelFrame:
     def _os_name_not_trusted(self, monkeypatch):
         # These scenarios use Windows/Linux-style process names and titles.
         # macOS resolves the OS owner first; see TestLabelFrameMacOS.
-        monkeypatch.setattr("screenmind.engine.labels._os_app_name_is_trusted", lambda: False)
+        monkeypatch.setattr("evolve_capture.engine.labels._os_app_name_is_trusted", lambda: False)
 
     def test_scenario_1_alacritty(self):
         result = label_frame("Alacritty", "user@host: ~")
@@ -383,11 +383,11 @@ class TestLabelFrameMacOS:
 
     @pytest.fixture(autouse=True)
     def _os_name_trusted(self, monkeypatch):
-        monkeypatch.setattr("screenmind.engine.labels._os_app_name_is_trusted", lambda: True)
+        monkeypatch.setattr("evolve_capture.engine.labels._os_app_name_is_trusted", lambda: True)
 
     def test_terminal_title_suffix_ignored(self):
         """Terminal titles end in the window size, not the app name."""
-        result = label_frame("Terminal", "ScreenMind — python — 120×30")
+        result = label_frame("Terminal", "Evolve Capture — python — 120×30")
         assert result.app_name == "Terminal"
         assert result.activity_category == "terminal"
 
@@ -410,22 +410,22 @@ class TestTrustsOsAppName:
     """The platform layer decides whether the OS app name is trusted."""
 
     def test_base_default_false(self):
-        from screenmind.platform_support.base import PlatformAdapter
+        from evolve_capture.platform_support.base import PlatformAdapter
         assert PlatformAdapter.trusts_os_app_name.fget(object()) is False
 
     def test_macos_true(self):
-        from screenmind.platform_support.macos import MacOSAdapter
+        from evolve_capture.platform_support.macos import MacOSAdapter
         assert MacOSAdapter.trusts_os_app_name.fget(object()) is True
 
     def test_windows_and_linux_inherit_false(self):
-        from screenmind.platform_support.windows import WindowsAdapter
-        from screenmind.platform_support.linux import LinuxAdapter
-        from screenmind.platform_support.base import PlatformAdapter
+        from evolve_capture.platform_support.windows import WindowsAdapter
+        from evolve_capture.platform_support.linux import LinuxAdapter
+        from evolve_capture.platform_support.base import PlatformAdapter
         assert WindowsAdapter.trusts_os_app_name is PlatformAdapter.trusts_os_app_name
         assert LinuxAdapter.trusts_os_app_name is PlatformAdapter.trusts_os_app_name
 
     def test_labels_read_adapter(self, monkeypatch):
-        import screenmind.engine.labels as analyzer
+        import evolve_capture.engine.labels as analyzer
         fake = type("A", (), {"trusts_os_app_name": True})()
         monkeypatch.setattr(analyzer, "platform_adapter", lambda: fake)
         assert analyzer._os_app_name_is_trusted() is True
@@ -433,7 +433,7 @@ class TestTrustsOsAppName:
         assert analyzer._os_app_name_is_trusted() is False
 
     def test_labels_adapter_error_means_untrusted(self, monkeypatch):
-        import screenmind.engine.labels as analyzer
+        import evolve_capture.engine.labels as analyzer
         def boom():
             raise RuntimeError("no adapter")
         monkeypatch.setattr(analyzer, "platform_adapter", boom)

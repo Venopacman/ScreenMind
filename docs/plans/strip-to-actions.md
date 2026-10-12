@@ -1,4 +1,4 @@
-# Strip ScreenMind down to action collection
+# Strip Evolve Capture down to action collection
 
 Status: done on 2026-10-07. All slices are merged into `custom`. See [Progress](#progress) at the end. The tables below show the final decisions.
 
@@ -8,7 +8,7 @@ Update 2026-10-08: Gemma and llama-server were removed (branch `claude/practical
 
 The user's words: "strip all the extra features like rewind, ask, memos, Agents, bookmarks. We care only about actions collection plus minimalistic analysis for deduplication, unification and preliminary labeling purposes."
 
-ScreenMind becomes a data source for the workflows app. It records what the person did: apps, windows, URLs, a11y/OCR text, UI events and calls. A per-user feed maps that onto the personal workflow record. See [questionnaire-data-source.md](../backlog/questionnaire-data-source.md) and [capture.md](../architecture/capture.md).
+Evolve Capture becomes a data source for the workflows app. It records what the person did: apps, windows, URLs, a11y/OCR text, UI events and calls. A per-user feed maps that onto the personal workflow record. See [questionnaire-data-source.md](../backlog/questionnaire-data-source.md) and [capture.md](../architecture/capture.md).
 
 So a feature stays only if it does one of these:
 
@@ -22,14 +22,14 @@ Everything else goes: features that produce new content (chat, summaries, agents
 
 ## What other sessions need from this
 
-- **Export session** adds `screenmind/export/`, `api/routes/export.py` and one include line in `api/server.py`. It needs screenshots on disk, the `activities` text fields (app, title, URL, a11y/OCR text, summary, category, `user_actions`), `ui_events` and `meetings`. All of these stay. Keep its include line when editing `server.py`. It adds an export button after the nav changes land.
-- **macOS click collection** owns `screenmind/capture/ui_events/`. Not touched here.
+- **Export session** adds `evolve_capture/export/`, `api/routes/export.py` and one include line in `api/server.py`. It needs screenshots on disk, the `activities` text fields (app, title, URL, a11y/OCR text, summary, category, `user_actions`), `ui_events` and `meetings`. All of these stay. Keep its include line when editing `server.py`. It adds an export button after the nav changes land.
+- **macOS click collection** owns `evolve_capture/capture/ui_events/`. Not touched here.
 - **pip to uv** owns `pyproject.toml` and lock files. Dependency removal waits until its step 1 is merged.
 - **Windows laptop** pushes to `custom`. Windows code paths must keep working. Most removals here are cross-platform. The only Windows-only piece that goes is the `keyboard` hotkey listener.
 
 ## Facts that shaped the plan
 
-From the live DB (`~/.screenmind`, read-only, 2026-10-07):
+From the live DB (`~/.evolve-capture`, read-only, 2026-10-07):
 
 - 1313 activities. 299 of them (23%) are bookmarked. Almost all are auto-bookmarks: the keywords `merge`, `docker`, `deploy` match ordinary screen text. Bookmarked frames skip the analysis cache, so this also costs extra Gemma calls.
 - 577 `dev_contexts` rows, 2 `daily_summaries`, 6 `meetings` with no transcripts.
@@ -39,7 +39,7 @@ From the live DB (`~/.screenmind`, read-only, 2026-10-07):
 From the code:
 
 - Hotkeys, and so voice memos, never run on macOS (`capture/hotkey.py` skips the `keyboard` library there).
-- Default agents are copied into `~/.screenmind/agents` on every start, even when agents are off.
+- Default agents are copied into `~/.evolve-capture/agents` on every start, even when agents are off.
 - Two embedding model instances load at startup (API and analysis worker).
 - Webhook event `meeting_end` is configured by default but never fired.
 - Unknown keys in `settings.json` are ignored on load (`config.py` `load_runtime_overrides`). Removed settings keys are safe for existing installs.
@@ -50,7 +50,7 @@ Legend: **Keep**, **Remove**, **Slim** (keep the core, cut parts).
 
 ### Dashboard pages
 
-All pages render into `#content` from `screenmind/api/static/js/*.js`. Nav buttons are in `index.html` lines 62-97.
+All pages render into `#content` from `evolve_capture/api/static/js/*.js`. Nav buttons are in `index.html` lines 62-97.
 
 | Page | JS | Routes it calls | Proposal | Why |
 |---|---|---|---|---|
@@ -91,7 +91,7 @@ Global parts of the dashboard (`core.js`, `index.html`):
 | Automation | `agents_enabled`, `agents_auto_run_python`, `auto_bookmark`, `auto_bookmark_keywords` | **Remove** |
 | Privacy & Security | `sensitive_filter_*`, PIN, `dashboard_lock_timeout`, `encryption_enabled`, UI events (`ui_events_enabled`, `ui_events_types`, `event_triggered_capture`) | **Slim**: remove the PIN controls and `dashboard_lock_timeout`. Keep the rest. |
 
-### API routes (`screenmind/api/routes/`, all registered in `api/server.py`)
+### API routes (`evolve_capture/api/routes/`, all registered in `api/server.py`)
 
 | Route file | Proposal | Notes |
 |---|---|---|
@@ -128,14 +128,14 @@ Global parts of the dashboard (`core.js`, `index.html`):
 | `engine/model_manager.py`, `setup_llama.py` | **Keep** | Runs Gemma. | | model keys | huggingface_hub | test_model_manager, test_setup_llama |
 | `engine/embedder.py` | **Remove** | Not used for dedup. Only search, chat and MCP read embeddings. Saves two model loads at startup and a step per frame. | `activities.embedding` left NULL | | tokenizers (onnxruntime and huggingface_hub stay for OCR and Gemma) | test_embedder |
 | `engine/dev_context.py` (git) | **Remove** | Guesses a repo from the window title or the newest repo in `workspace_dirs`. It is a guess, not a collected action. | `dev_contexts` | `workspace_dirs` | gitpython | test_dev_context |
-| `engine/agent_runner.py`, `default_agents/`, `screenmind_sdk.py`, `docs/BUILD_YOUR_OWN_AGENT.md` | **Remove** | Named by the user. Stop copying default agents on start. Leave `~/.screenmind/agents` on disk; tell the user it can be deleted. | none (reads only) | `agents_enabled`, `agents_auto_run_python` | | test_agent_runner, test_sdk |
+| `engine/agent_runner.py`, `default_agents/`, `screenmind_sdk.py`, `docs/BUILD_YOUR_OWN_AGENT.md` | **Remove** | Named by the user. Stop copying default agents on start. Leave `~/.evolve-capture/agents` on disk; tell the user it can be deleted. | none (reads only) | `agents_enabled`, `agents_auto_run_python` | | test_agent_runner, test_sdk |
 | `mcp_server.py`, `MCP_SETUP.md` | **Remove** | A second way to read the data. The export replaces it for the workflows app. | reads only | | mcp | test_mcp |
 | `integrations/obsidian.py`, `notion.py`, `webhooks.py` | **Remove** | Push data elsewhere. `webhook_log.db` stays on disk; tell the user. | separate `webhook_log.db` | `obsidian_*`, `notion_*`, `webhook_*` | (notion_client, undeclared) | test_obsidian, test_notion, test_webhooks, test_webhooks_v3 |
 | Daily summary / standup (in `summary.py`) | **Remove** | Generates text. | `daily_summaries` | | | test_api_routes `test_summary_not_generated`, test_ui_events `test_summary_actions_line` |
 | Auto-bookmark (in `analysis_worker.py`) | **Remove** | Marks 23% of frames and costs extra Gemma calls. | `activities.bookmarked` | `auto_bookmark`, `auto_bookmark_keywords` | | none |
 | Manual bookmarks | **Remove** | Named by the user. | `activities.bookmarked` | | | test_api_routes bookmark tests |
 | `capture/hotkey.py` | **Remove** | Bookmark, pause and voice hotkeys. Dead on macOS. Pause stays in the dashboard. | | `*_hotkey` | keyboard | none |
-| `capture/voice_recorder.py` + memo thread in `main.py` | **Remove** | Voice memos, named by the user. Leave `~/.screenmind/memos` on disk. | `activities` rows with app "Voice Memo" | | (sounddevice stays for call transcription) | none |
+| `capture/voice_recorder.py` + memo thread in `main.py` | **Remove** | Voice memos, named by the user. Leave `~/.evolve-capture/memos` on disk. | `activities` rows with app "Voice Memo" | | (sounddevice stays for call transcription) | none |
 | `ui/overlay.py` | **Remove** | Toasts for hotkeys, memos and call start/end. No data. | | | tkinter (stdlib) | none |
 | `workers/audio_worker.py`, `call_detection.py`, `platform_support/macos_audio.py` | **Keep** | Tracking, transcription and the per-call summary all stay. Only the overlay toasts go. | `meetings` | `meeting_transcription`, `meeting_apps` | numpy, sounddevice | test_call_detection |
 | `privacy/data_filter.py`, `url_filter.py` | **Keep** | Unification and redaction. | | `sensitive_filter_*` | | test_privacy, test_url_filter, test_ui_events_redaction |
@@ -168,7 +168,7 @@ Migration notes:
 - `DROP COLUMN` needs SQLite 3.35+. The main venv has 3.53. Python 3.10+ on Windows ships a newer one too. If the runtime is older, v11 skips the column drops and logs it; the tables still go.
 - `CREATE TABLE` for `dev_contexts` and `daily_summaries` is removed from `_init_db`, so a fresh DB never gets them. `activities.embedding` and `bookmarked` leave the base `CREATE TABLE` too, and v11 tolerates "no such column".
 - `delete_by_date` and `cleanup_old_data` stop touching `daily_summaries`.
-- This can't be undone on an existing DB. The user said yes on 2026-10-07. Before the main instance first runs it, copy `~/.screenmind/screenmind.db` aside.
+- This can't be undone on an existing DB. The user said yes on 2026-10-07. Before the main instance first runs it, copy `~/.evolve-capture/evolve-capture.db` aside.
 - Old branches that still write `embedding` or `bookmarked` will fail against a v11 DB. That matters for the Windows laptop: it must pull `custom` before running on a migrated DB. Each machine has its own DB, so a laptop on old code only breaks if it runs on a DB that newer code migrated.
 
 ### Dependencies (after the uv step 1 is merged)
@@ -189,7 +189,7 @@ Stay: `cryptography` and `keyring` (encryption stays), `sounddevice` and `numpy`
 - Rewrite: `README.md` (feature list, MCP and agents sections), `architecture.md`, `CONTRIBUTING.md` (MCP lines).
 - Update `docs/architecture/capture.md` and `capture.html` (republish to the same Artifact URL): drop the embedding and voice memo rows in the matrix, the auto-bookmark, embedding and git text in 4.9, the bookmark notes in 4.1/4.2, `daily_summaries`, `dev_contexts` and `webhook_log.db` in section 5, gap G19. Add v11.
 - Backlog: delete G19 (hotkeys) from `capture-architecture.md`. In `setup-ocr-and-upstream-prs.md` "Workflows app integration", replace the `/api/agents/sdk/activities` and webhook notes with a pointer to the export. Keep "Encrypt the whole DB" in `ui-events.md` (encryption stays).
-- Tell the user these stay on disk and can be deleted by hand: `~/.screenmind/agents/`, `~/.screenmind/memos/`, `~/.screenmind/webhook_log.db`, `~/.screenmind/models/embedder/`.
+- Tell the user these stay on disk and can be deleted by hand: `~/.evolve-capture/agents/`, `~/.evolve-capture/memos/`, `~/.evolve-capture/webhook_log.db`, `~/.evolve-capture/models/embedder/`.
 
 ## Slices (step 2)
 
@@ -238,7 +238,7 @@ All on `custom`, 2026-10-07:
 
 Left for the user:
 
-- Back up the DB before the main instance first runs v11: `cp ~/.screenmind/screenmind.db ~/.screenmind/screenmind.db.pre-v11`.
+- Back up the DB before the main instance first runs v11: `cp ~/.evolve-capture/evolve-capture.db ~/.evolve-capture/evolve-capture.db.pre-v11`.
 - Run `uv sync` for the main `.venv` before the next start.
-- These folders and files are no longer used and can be deleted by hand: `~/.screenmind/agents/`, `~/.screenmind/memos/`, `~/.screenmind/webhook_log.db`, `~/.screenmind/models/embedder/`.
+- These folders and files are no longer used and can be deleted by hand: `~/.evolve-capture/agents/`, `~/.evolve-capture/memos/`, `~/.evolve-capture/webhook_log.db`, `~/.evolve-capture/models/embedder/`.
 

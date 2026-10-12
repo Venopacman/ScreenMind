@@ -1,9 +1,9 @@
 """Sensitive-data filter on recorded UI events, before they reach the DB.
 All values here are made up."""
 
-from screenmind.capture.ui_events.base import FrontWindow
-from screenmind.capture.ui_events.models import ElementInfo, EventType, KEY_ENTER, RawEvent
-from screenmind.config import settings
+from evolve_capture.capture.ui_events.base import FrontWindow
+from evolve_capture.capture.ui_events.models import ElementInfo, EventType, KEY_ENTER, RawEvent
+from evolve_capture.config import settings
 
 from test_ui_events import OTHER_FIELD, ctrl, rec, stored, type_text, ui_settings  # noqa: F401
 
@@ -119,8 +119,8 @@ def test_contact_details_never_reach_the_db(ui_settings, monkeypatch, db):
     import sqlite3
     from unittest.mock import MagicMock
 
-    from screenmind.capture.ui_events.recorder import UiEventRecorder
-    from screenmind.config import Settings
+    from evolve_capture.capture.ui_events.recorder import UiEventRecorder
+    from evolve_capture.config import Settings
     from test_ui_events import FakeBackend
 
     monkeypatch.setattr(settings, "sensitive_filter_types",
