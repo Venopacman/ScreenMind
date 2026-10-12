@@ -8,13 +8,17 @@ our tests. Only the PER label is used.
 
 Resources (Mac, 1 thread, 400 snapshot frames, measured 2026-10-08):
 - 138 MB on disk. The app ships it (see "Where the model comes from").
-- About +120 MB memory footprint. The weights are saved once as external
-  data, which onnxruntime maps from disk. Loaded from the single .onnx file,
-  the same model costs about +400 MB.
-- CPU mean 35 ms per frame (p90 65 ms). Results are cached per line, and
+- About +120 MB memory footprint at load, +165-200 MB in use (it levels
+  off; measured over all 1,593 snapshot frames). The weights are saved once
+  as external data, which onnxruntime maps from disk. Loaded from the single
+  .onnx file, the same model costs about +400 MB.
+- CPU 27-46 ms per frame (median 26-30 ms, p90 50-115 ms). Results are cached per line, and
   most lines repeat from frame to frame. One call runs the model for about
   1 s at most; lines over that get the names found so far, and the model on
   a later call.
+
+The tokenizer is privacy/wordpiece.py (plain Python, same output as the
+`tokenizers` package), so no extra dependency is needed.
 
 Text is checked line by line. A line without a capital letter is skipped.
 The model runs on one thread, under a lock, in batches of 8 windows of up to
@@ -221,13 +225,11 @@ class PersonNer:
         import json
 
         import onnxruntime as ort
-        from tokenizers import Tokenizer
+        from screenmind.privacy.wordpiece import WordPiece
 
         cfg = json.loads((model_dir / "config.json").read_text())
         self._per = sorted(int(i) for i, label in cfg["id2label"].items() if label.endswith("PER"))
-        self._tok = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
-        self._tok.no_padding()
-        self._tok.no_truncation()
+        self._tok = WordPiece.from_file(model_dir / "tokenizer.json")
         self._cls = self._tok.token_to_id("[CLS]")
         self._sep = self._tok.token_to_id("[SEP]")
         self._session = ort.InferenceSession(
@@ -310,10 +312,11 @@ class PersonNer:
         # One row per window; a long line has several, overlapping by _STRIDE.
         rows = []  # (line index, ids, offsets)
         size = _MAX_TOKENS - 2
-        for i, enc in enumerate(self._tok.encode_batch(lines, add_special_tokens=False)):
-            for start in range(0, max(1, len(enc.ids) - _STRIDE), size - _STRIDE):
-                rows.append((i, [self._cls] + enc.ids[start:start + size] + [self._sep],
-                             [(0, 0)] + enc.offsets[start:start + size] + [(0, 0)]))
+        for i, line in enumerate(lines):
+            ids, offsets = self._tok.encode(line)
+            for start in range(0, max(1, len(ids) - _STRIDE), size - _STRIDE):
+                rows.append((i, [self._cls] + ids[start:start + size] + [self._sep],
+                             [(0, 0)] + offsets[start:start + size] + [(0, 0)]))
         rows.sort(key=lambda r: len(r[1]))
 
         hits: List[List[Tuple[int, int]]] = [[] for _ in lines]

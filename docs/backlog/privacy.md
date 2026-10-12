@@ -8,23 +8,9 @@ Person names were added to the sensitive-data filter on 2026-10-08 (`privacy/per
 
 The model ships inside the app (user, 2026-10-12). A dev checkout downloads it once.
 
-Measured on the EDA snapshot (400 frames, Mac, 1 thread): about +120 MB footprint, CPU mean 33 ms per frame, median 32 ms, p90 65 ms, max 0.8 s per call (capped at about 1 s). On a dev instance with real screens (Chrome meeting notes, Slack), names were replaced and the lines kept their meaning. On a synthetic set of 20 name lines and 21 non-name lines (`tests/test_person_ner.py`): recall 1.00, precision 1.00.
+Measured on the EDA snapshot (all 1,593 frames, Mac, 1 thread, 2026-10-12): about +120 MB footprint at load, +165-200 MB in use (levels off), CPU 27-46 ms per frame, p90 50-115 ms, max 0.65 s per call (capped at about 1 s). The tokenizer is plain Python (`privacy/wordpiece.py`), so there is no new dependency. On a dev instance with real screens (Chrome meeting notes, Slack), names were replaced and the lines kept their meaning. On a synthetic set of 20 name lines and 21 non-name lines (`tests/test_person_ner.py`): recall 1.00, precision 1.00.
 
 ## Items
-
-### Gemma output is stored without the filter
-Status: open, closed by the Gemma removal
-
-Gemma reads the raw screenshot, so `summary`, `details`, `scene_description` and `visible_text` can repeat what the filter removed from the text. Of 1,593 snapshot frames, 14 had an email there. The branch "Prepare removal of Gemma processing" drops these fields. If any LLM output is still stored, run `filter_sensitive()` on it.
-
-Refs: `analysis_worker._process()`, `Database.update_activity_analysis()`.
-
-### The filter blocks the analysis event loop
-Status: fixed on branch `claude/practical-dijkstra-f83cbe` (`b5a8da5`, `analysis_worker._redact()`), not merged yet
-
-`analysis_worker._process()` calls `filter_sensitive()` and `filter_ocr_boxes()` directly in the coroutine. With names on, a call takes up to about 1 s on a screen full of new text, and the loop waits. Run both in the executor, like OCR. Wait for the Gemma removal rewrite of `analysis_worker.py`, so the two changes don't conflict.
-
-Refs: `analysis_worker._process()` step 3c, `person_ner._MAX_WINDOWS_PER_CALL`.
 
 ### Terminal a11y text is the whole scrollback
 Status: open
