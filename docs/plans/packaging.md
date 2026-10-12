@@ -32,6 +32,7 @@ Measured on the user's Mac (2026-10-07, branch `custom` after the strip, `cd9556
 | `llama-server` (llama.cpp) | 10-31 MB per OS (CPU, Metal, Vulkan builds). CUDA builds are 150-400 MB plus runtime | No longer used: removed with Gemma (2026-10-08). Before: Homebrew or PATH, or `setup_llama.py` |
 | Gemma 4 E2B GGUF + mmproj | Q4_0 2.8 GB + mmproj 0.56 GB = 3.2 GB on this Mac; Q8_0 5 GB | No longer used: removed with Gemma (2026-10-08). Old files stay in `~/.screenmind/models/gemma-4-e2b` until the user deletes them |
 | RapidOCR models | 25 MB | downloaded on first use into `~/.screenmind/models/ocr` |
+| Person-name model (`privacy/person_ner.py`) | 138 MB (`model.onnx.data` 135 MB, `tokenizer.json` 2.9 MB, `model.onnx` 0.2 MB, `config.json`) | shipped inside the app at `models/ner/distilbert-multilingual-ner-hrl` (decided 2026-10-12). A dev checkout downloads it once into `~/.screenmind/models/ner` |
 | Embedder | 87 MB in `~/.screenmind/models/embedder` | removed by the strip ([strip-to-actions.md](strip-to-actions.md)); the folder can be deleted |
 
 The biggest parts of the frozen app are onnxruntime (70 MB), `cv2` (40 MB plus the ffmpeg/X11 libraries it bundles, from `opencv-python`, pulled in by `rapidocr`) and scipy (32 MB, pulled in by `imagehash`). Ways to make it smaller are in [Size](#size).
@@ -308,7 +309,7 @@ Obsolete: removed (2026-10-08). Kept as a record. It was only for the opt-in loc
 
 ### Person-name model
 
-135 MB from Hugging Face on first use (`privacy/person_ner.install()`), converted once to external-data weights in a child Python. A frozen app has no plain Python, so it converts in-process and keeps about 400 MB until restart. Fix before shipping: ship the converted model (135 MB) or run the conversion in the hidden worker mode of the executable.
+Shipped inside the app (decided 2026-10-12): no download, and no conversion on the user's machine. The build runs `python -m screenmind.privacy.person_ner <dir>`. It downloads the pinned files from Hugging Face, checks their sha256, and saves the weights as external data (onnxruntime maps them from disk, about +120 MB footprint instead of +400 MB). The spec adds `<dir>` to `datas` at `models/ner/distilbert-multilingual-ner-hrl` (`person_ner.BUNDLE_SUBDIR`). At run time the app looks in `sys._MEIPASS/models/ner/...` first, then in `~/.screenmind/models/ner/`. A frozen app never downloads; without the files it logs a warning and leaves names in. Tested 2026-10-12 with a frozen onedir probe (PyInstaller, `HOME` set to an empty folder): the model loaded from `_internal/models/ner/...`, and names were redacted.
 
 ### OCR models
 

@@ -296,3 +296,59 @@ def test_model_on_real_looking_text(model):
         assert "#general" in clean
     finally:
         person_ner.set_detector(None, enabled=False)
+
+
+# ── Where the model comes from ───────────────────────────────────────
+
+@pytest.fixture
+def lookup(tmp_path, monkeypatch):
+    """Fresh loader state, a fake home models dir, and a stub model class."""
+    monkeypatch.setattr(person_ner, "_detector", None)
+    monkeypatch.setattr(person_ner, "_enabled", True)
+    monkeypatch.setattr(person_ner, "_failed", False)
+    monkeypatch.setattr(person_ner, "_installing", False)
+    monkeypatch.setattr(person_ner, "models_dir", lambda: tmp_path / "home-models")
+    monkeypatch.setattr(person_ner, "PersonNer", lambda d: ("loaded", d))
+    installs = []
+    monkeypatch.setattr(person_ner, "install", lambda d=None: installs.append(d))
+    monkeypatch.setattr(person_ner.threading, "Thread",
+                        lambda target, **kw: type("T", (), {"start": lambda self: target()})())
+    yield tmp_path, installs
+    person_ner.set_detector(None, enabled=False)
+
+
+def _fake_model(d):
+    d.mkdir(parents=True)
+    for f in person_ner.FILES:
+        (d / f).write_text("x")
+
+
+def test_frozen_app_loads_the_bundled_model(lookup, monkeypatch):
+    tmp, installs = lookup
+    monkeypatch.setattr(person_ner.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(person_ner.sys, "_MEIPASS", str(tmp / "app"), raising=False)
+    _fake_model(tmp / "app" / person_ner.BUNDLE_SUBDIR)
+    _fake_model(tmp / "home-models")
+    assert person_ner.get_detector() == ("loaded", tmp / "app" / person_ner.BUNDLE_SUBDIR)
+    assert installs == []
+
+
+def test_frozen_app_without_its_model_never_downloads(lookup, monkeypatch):
+    tmp, installs = lookup
+    monkeypatch.setattr(person_ner.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(person_ner.sys, "_MEIPASS", str(tmp / "app"), raising=False)
+    assert person_ner.get_detector() is None
+    assert person_ner.get_detector() is None
+    assert installs == []
+
+
+def test_dev_checkout_uses_home_models_then_downloads(lookup, monkeypatch):
+    tmp, installs = lookup
+    monkeypatch.delattr(person_ner.sys, "_MEIPASS", raising=False)
+    monkeypatch.delattr(person_ner.sys, "frozen", raising=False)
+    assert person_ner.get_detector() is None
+    assert installs == [None]  # into models_dir()
+
+    monkeypatch.setattr(person_ner, "_installing", False)
+    _fake_model(tmp / "home-models")
+    assert person_ner.get_detector() == ("loaded", tmp / "home-models")

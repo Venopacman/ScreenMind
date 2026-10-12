@@ -6,6 +6,8 @@ Person names were added to the sensitive-data filter on 2026-10-08 (`privacy/per
 - Marker: `[REDACTED:person]`, like the other types.
 - Postal addresses: skipped. Only 7 of 1,593 snapshot frames had street-like text.
 
+The model ships inside the app (user, 2026-10-12). A dev checkout downloads it once.
+
 Measured on the EDA snapshot (400 frames, Mac, 1 thread): about +120 MB footprint, CPU mean 33 ms per frame, median 32 ms, p90 65 ms, max 0.8 s per call (capped at about 1 s). On a dev instance with real screens (Chrome meeting notes, Slack), names were replaced and the lines kept their meaning. On a synthetic set of 20 name lines and 21 non-name lines (`tests/test_person_ner.py`): recall 1.00, precision 1.00.
 
 ## Items

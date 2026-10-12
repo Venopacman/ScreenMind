@@ -58,7 +58,7 @@ async function renderSettings(el) {
   // Same order as the default in config.py, so saving the defaults stores nothing.
   + ['credit_card','ssn','api_key','jwt','password','email','phone','iban','person'].map(function(t) {
       var checked = (cfg.sensitive_filter_types || '').split(',').indexOf(t) >= 0 ? 'checked' : '';
-      var labels = {credit_card:'Credit Cards', ssn:'SSN/ID Numbers', api_key:'API Keys', jwt:'JWT Tokens', password:'Passwords', email:'Email Addresses (domain kept)', phone:'Phone Numbers', iban:'IBANs', person:'Person Names (local model, 135 MB download)'};
+      var labels = {credit_card:'Credit Cards', ssn:'SSN/ID Numbers', api_key:'API Keys', jwt:'JWT Tokens', password:'Passwords', email:'Email Addresses (domain kept)', phone:'Phone Numbers', iban:'IBANs', person:'Person Names (local model)'};
       return '<label style="display:flex;align-items:center;gap:8px;font-size:0.82rem;color:var(--text-secondary);cursor:pointer"><input type="checkbox" class="filter-type-cb" value="' + t + '" ' + checked + ' style="accent-color:var(--accent)"> ' + labels[t] + '</label>';
     }).join('') + '</div></div>'
 

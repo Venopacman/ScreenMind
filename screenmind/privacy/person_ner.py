@@ -7,7 +7,7 @@ on Russian, but its vocabulary covers Cyrillic, and it finds Russian names in
 our tests. Only the PER label is used.
 
 Resources (Mac, 1 thread, 400 snapshot frames, measured 2026-10-08):
-- 135 MB download on first use, into ~/.screenmind/models/ner.
+- 138 MB on disk. The app ships it (see "Where the model comes from").
 - About +120 MB memory footprint. The weights are saved once as external
   data, which onnxruntime maps from disk. Loaded from the single .onnx file,
   the same model costs about +400 MB.
@@ -31,8 +31,15 @@ products ("Truto") are still taken for names.
 Names found once are then matched as plain text on every line, with the
 parts of full names: "Mangin" alone is caught after "Aleksandr Mangin".
 
-The model is downloaded in a background thread the first time it is needed.
-Until it is ready, names are not detected (the other filters still run).
+Where the model comes from, in this order:
+1. The app bundle: sys._MEIPASS / BUNDLE_SUBDIR. The PyInstaller build puts
+   it there: `python -m screenmind.privacy.person_ner <dir>` installs the
+   pinned files into <dir>, and the spec adds <dir> as data at BUNDLE_SUBDIR.
+2. ~/.screenmind/models/ner/<MODEL_NAME>.
+3. Dev checkouts only: a background download into (2) on first use. Until
+   it is ready, names are not detected (the other filters still run). A
+   frozen app never downloads; without its bundled model it logs a warning
+   and leaves names in.
 """
 
 import hashlib
@@ -106,14 +113,34 @@ def _one_letter_off(word: str, targets) -> bool:
 _enabled = True  # tests turn it off; see tests/conftest.py
 
 
+MODEL_NAME = "distilbert-multilingual-ner-hrl"
+BUNDLE_SUBDIR = Path("models") / "ner" / MODEL_NAME
+# The files in a model dir. All of them go into the app bundle (138 MB).
+FILES = ("config.json", "tokenizer.json", _MODEL, _WEIGHTS)
+
+
 def models_dir() -> Path:
     from screenmind.engine.model_manager import _models_dir
-    return _models_dir() / "ner" / "distilbert-multilingual-ner-hrl"
+    return _models_dir() / "ner" / MODEL_NAME
+
+
+def bundled_dir() -> Optional[Path]:
+    """The model inside a frozen app, or None when running from source."""
+    base = getattr(sys, "_MEIPASS", None)
+    return Path(base) / BUNDLE_SUBDIR if base else None
+
+
+def find_model_dir() -> Optional[Path]:
+    """The bundled model, else the one in ~/.screenmind/models; None if neither."""
+    for d in (bundled_dir(), models_dir()):
+        if d is not None and is_installed(d):
+            return d
+    return None
 
 
 def is_installed(model_dir: Optional[Path] = None) -> bool:
     d = model_dir or models_dir()
-    return all((d / f).exists() for f in (_MODEL, _WEIGHTS, "tokenizer.json", "config.json"))
+    return all((d / f).exists() for f in FILES)
 
 
 def _session_options():
@@ -171,15 +198,12 @@ def install(model_dir: Optional[Path] = None) -> Path:
                 raise ValueError(f"{name}: sha256 mismatch")
 
         # Converting holds about 400 MB, and this process would keep that
-        # memory. So it runs in a child Python, as model_manager's downloads.
-        # A frozen app has no plain Python to start, so it converts in-process.
-        if getattr(sys, "frozen", False):
-            _convert(str(tmp / "model_int8.onnx"), str(tmp / _MODEL))
-        else:
-            subprocess.run(
-                [sys.executable, "-c", _CONVERT_CODE, str(tmp / "model_int8.onnx"), str(tmp / _MODEL)],
-                check=True, stdin=subprocess.DEVNULL, capture_output=True, timeout=600,
-            )
+        # memory. So it runs in a child Python. Only dev checkouts and the
+        # app build install; a frozen app ships the converted files.
+        subprocess.run(
+            [sys.executable, "-c", _CONVERT_CODE, str(tmp / "model_int8.onnx"), str(tmp / _MODEL)],
+            check=True, stdin=subprocess.DEVNULL, capture_output=True, timeout=600,
+        )
         (tmp / "model_int8.onnx").unlink()
 
         shutil.rmtree(d, ignore_errors=True)
@@ -372,23 +396,26 @@ def _install_in_background():
 
 
 def get_detector() -> Optional[PersonNer]:
-    """The loaded detector, or None while it is not available. The first call
-    starts the download if the model is not on disk yet."""
+    """The loaded detector, or None while it is not available. In a dev
+    checkout, the first call starts the download if the model is missing."""
     global _detector, _installing, _failed
-    if _detector is not None or not _enabled:
+    if _detector is not None or not _enabled or _failed:
         return _detector
     with _state_lock:
-        if _detector is not None:
+        if _detector is not None or _failed:
             return _detector
-        if is_installed():
+        d = find_model_dir()
+        if d is not None:
             try:
-                _detector = PersonNer(models_dir())
-                logger.info("Person-name filter loaded")
+                _detector = PersonNer(d)
+                logger.info(f"Person-name filter loaded from {d}")
             except Exception as e:
-                if not _failed:
-                    logger.warning(f"Person-name model failed to load; names are not filtered: {e}")
                 _failed = True
-        elif not _installing and not _failed:
+                logger.warning(f"Person-name model failed to load; names are not filtered: {e}")
+        elif getattr(sys, "frozen", False):
+            _failed = True
+            logger.warning(f"Person-name model missing from the app ({bundled_dir()}); names are not filtered")
+        elif not _installing:
             _installing = True
             threading.Thread(target=_install_in_background, name="ner-install", daemon=True).start()
     return _detector
@@ -418,3 +445,13 @@ def redact_persons(text: str, replacement: str) -> Tuple[str, int]:
         lines[i] = line
         count += len(spans)
     return "\n".join(lines), count
+
+
+if __name__ == "__main__":
+    # For the app build: python -m screenmind.privacy.person_ner <dir>
+    # Downloads the pinned files (sha256 checked) and converts them into <dir>.
+    target = Path(sys.argv[1]) if len(sys.argv) > 1 else models_dir()
+    if is_installed(target):
+        print(f"already installed: {target}")
+    else:
+        print(f"installed: {install(target)}")
