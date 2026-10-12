@@ -39,7 +39,7 @@ Unsigned, for internal testers (milestone M0). Files in [`packaging/macos/`](../
 - `ocr_self_test.png`: two lines of text, 11 KB.
 - `make_tester_cert.sh <dir>` and `sign_app.sh [app]`: the self-signed tester certificate and signing with it, from a temporary keychain. `build.sh` signs when `MACOS_TESTER_P12` and `MACOS_TESTER_P12_PASSWORD` are set. Why and what was checked: [packaging.md, Tester builds](packaging.md#tester-builds-one-self-signed-certificate).
 - Phase 1 tester packages are built by hand on the user's Mac, not in CI (user decision, 2026-10-12): [packaging.md, Manual tester releases](packaging.md#9-manual-tester-releases-phase-1). The GitHub workflow below is a stopgap until the move to GitLab.
-- CI: [`.github/workflows/package-macos.yml`](../../.github/workflows/package-macos.yml) on `macos-15`. It runs on pushes to `custom` that change `screenmind/`, `packaging/`, `pyproject.toml` or `uv.lock`, by hand from the Actions tab (only once the file is on the default branch, `main`), and on `v*` tags (which also attach the DMG to the release). The DMG is the artifact `ScreenMind-macos-arm64-dmg`, kept 30 days. The OCR models and the person-name model are cached between runs. With the secrets `MACOS_TESTER_P12_BASE64` and `MACOS_TESTER_P12_PASSWORD` the app is signed with the tester certificate; without them it stays ad-hoc.
+- CI: [`.github/workflows/package-macos.yml`](../../.github/workflows/package-macos.yml) on `macos-15`. It runs on pushes to `custom` that change `screenmind/`, `packaging/`, `pyproject.toml` or `uv.lock`, and by hand from the Actions tab (only once the file is on the default branch, `main`). The DMG is the artifact `ScreenMind-macos-arm64-dmg`, kept 30 days. The OCR models and the person-name model are cached between runs. With the secrets `MACOS_TESTER_P12_BASE64` and `MACOS_TESTER_P12_PASSWORD` the app is signed with the tester certificate; without them it stays ad-hoc.
 
 Local result on the user's Mac (macOS 27.0.1): build with the DMG 1 min 33 s, app 330 MB, DMG 116 MB, smoke test passed (OCR 0.55 s, 78 MB footprint after start, clean stop). With the person-name model and the tester signature (0033021): 1 min 56 s, app 466 MB, DMG 196 MB, smoke test passed (OCR 0.6 s, the name found, 78 MB footprint after start: the model loads on first use).
 
@@ -116,7 +116,7 @@ Files, all in [`packaging/windows/`](../../packaging/windows/):
 - `screenmind.nsi`: the NSIS 3 script (Modern UI 2, nsDialogs).
 - `build.ps1`: `uv sync --frozen` > PyInstaller 6.22.3 with `packaging/screenmind.spec` > checks the bundled `msvcp140.dll` is 14.40 or newer (F8) > `makensis`. Output: `packaging/dist/ScreenMind-<version>-win-x64-setup.exe`. The version comes from `screenmind/__init__.py`.
 - `stop-screenmind.ps1`: stops a running copy before install and uninstall (below).
-- CI: [`.github/workflows/package-windows.yml`](../../.github/workflows/package-windows.yml). `windows-2025` has Inno Setup but no NSIS, so the job installs NSIS with Chocolatey. It runs on a `v*` tag (and attaches the installer to the GitHub Release) or by hand from the Actions tab. The manual run needs the workflow on the default branch (`main`).
+- CI: [`.github/workflows/package-windows.yml`](../../.github/workflows/package-windows.yml). `windows-2025` has Inno Setup but no NSIS, so the job installs NSIS with Chocolatey. It runs by hand from the Actions tab, which needs the workflow on the default branch (`main`).
 
 What the installer does:
 

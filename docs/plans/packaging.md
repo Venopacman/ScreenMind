@@ -364,9 +364,8 @@ Plan: the version check in milestone 1. Then pick Sparkle + WinSparkle (keeps th
 - **Runners.** PyInstaller cannot cross-compile, so GitLab needs a macOS (Apple Silicon) runner and a Windows x64 runner. A migration session decides which: GitLab's hosted ones or our own.
 - **What moves as it is.** `packaging/macos/build.sh`, `sign_app.sh`, `smoke_test.sh` and `make_tester_cert.sh` are plain scripts. They take environment variables (`MACOS_TESTER_P12`, `MACOS_TESTER_P12_PASSWORD`, `SMOKE_PORT`) and use no GitHub feature. The same goes for `packaging/windows/build.ps1`. A `.gitlab-ci.yml` job can call them unchanged.
 - **Migration items, GitHub-specific today:**
-  - The workflow files themselves: `actions/checkout`, `astral-sh/setup-uv`, the `actions/cache` steps for `packaging/build/ocr_models` and `packaging/build/ner-model`, `actions/upload-artifact`, `softprops/action-gh-release`, and the `paths:` trigger. In GitLab these become `cache:`, `artifacts:` (with `expire_in`), `rules: changes:` and a place for releases (not GitHub Releases).
+  - The workflow files themselves: `actions/checkout`, `astral-sh/setup-uv`, the `actions/cache` steps for `packaging/build/ocr_models` and `packaging/build/ner-model`, `actions/upload-artifact`, and the `paths:` trigger. In GitLab these become `cache:`, `artifacts:` (with `expire_in`) and `rules: changes:`.
   - `package-macos.yml` "Tester certificate" step: it decodes `secrets.MACOS_TESTER_P12_BASE64` into `$RUNNER_TEMP/tester.p12`, exports `MACOS_TESTER_P12` through `$GITHUB_ENV`, and prints a `::notice::` when the secret is missing. In GitLab: a masked file variable gives the `.p12` path directly, and a plain `echo` replaces the notice.
-  - The tag check uses `GITHUB_REF_NAME`; in GitLab it is `CI_COMMIT_TAG`.
   - Comments only: `make_tester_cert.sh` tells you to store the certificate with `gh secret set`, and `build.sh` and `build.ps1` name the GitHub workflow files.
   - The macOS DMG step retries `hdiutil create`, which sometimes fails on GitHub's runners. Keep the retry on any hosted runner.
 
